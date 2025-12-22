@@ -796,6 +796,130 @@ keys: 001 010 011 011 011 100 101 110 110
 对 data[2], data[3], data[4] 进行 Fisher-Yates shuffle
 ```
 
+### 4.7 random_full_64_bits_range_kernel（完整 64 位范围）
+
+文件位置: `aten/src/ATen/native/cuda/DistributionTemplates.h:349-376`
+
+#### 4.7.1 触发条件
+
+这是一个**特殊 kernel**，专门处理一种极端情况：当需要生成**完整 int64 范围**的随机数时。
+
+**range == 0 的触发逻辑**：
+
+```cpp
+// 在 random_from_to_impl 中（第 3.1 节）
+int64_t from = std::numeric_limits<int64_t>::lowest();  // -2^63
+int64_t to = std::numeric_limits<int64_t>::max() + 1;   // 2^63（理论值）
+
+// 计算 range
+uint64_t range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
+// range = uint64_t(2^63) - uint64_t(-2^63)
+//       = 2^63 - (2^64 - 2^63)  // 有符号转无符号时的补码
+//       = 2^64
+
+// 但 uint64_t 最大值是 2^64 - 1，所以会溢出：
+// range = 0  ← 这就是为什么 range == 0 表示完整范围
+```
+
+**分派逻辑**（回顾第 3.1 节）：
+
+```cpp
+if (range == 0) {
+  // 特殊情况：完整 64 位范围
+  Stub()(iter, gen);  // 调用 random_full_64_bits_range_kernel
+} else {
+  Stub()(iter, range, from, gen);  // 调用 random_from_to_kernel
+}
+```
+
+#### 4.7.2 核心变换函数
+
+文件位置: `aten/src/ATen/core/TransformationHelper.h:45-51`
+
+```cpp
+/**
+ * A transformation function for `torch.Tensor.random_()`,
+ * when from=min_value(int64_t) and to=None
+ */
+template <typename T, typename V>
+C10_HOST_DEVICE inline T uniform_int_full_range(V val) {
+  return static_cast<T>(static_cast<int64_t>(val));
+}
+```
+
+**关键特点**：
+- **极其简单**：直接将 64 位无符号随机数转换为有符号类型
+- **完全无偏**：`uint64_t [0, 2^64)` → `int64_t [-2^63, 2^63)`，一一映射
+- **不需要 modulo**：避免了 modulo bias 问题
+- **位模式保持**：随机数的位模式直接重新解释为有符号数
+
+**映射示例**：
+```
+uint64_t                         int64_t
+0x0000000000000000 (0)       →   0
+0x7FFFFFFFFFFFFFFF (2^63-1)  →   9223372036854775807 (max)
+0x8000000000000000 (2^63)    →  -9223372036854775808 (min)
+0xFFFFFFFFFFFFFFFF (2^64-1)  →  -1
+```
+
+#### 4.7.3 CUDA 实现
+
+```cpp
+template<typename RNG>
+void random_full_64_bits_range_kernel(TensorIteratorBase& iter, RNG gen) {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, iter.dtype(),
+    "random_full_64_bits_range_kernel_cuda", [&] {
+
+    // 1. 类型检查：只支持需要完整 64 位范围的类型
+    if (std::is_same_v<scalar_t, int64_t> ||
+        std::is_same_v<scalar_t, double> ||
+        std::is_same_v<scalar_t, float> ||
+        std::is_same_v<scalar_t, at::BFloat16>) {
+
+      // 2. 定义变换函数：直接转换，无 modulo
+      auto random_func = [] __device__ (uint64_t rand) {
+        return transformation::uniform_int_full_range<scalar_t>(rand);
+      };
+
+      // 3. 使用 64 位随机数路径（强制）
+      distribution_nullary_kernel<scalar_t, uint64_t, ulonglong2>(iter,
+        gen,
+        // dist_func: 生成两个 64 位随机数
+        [] __device__ (curandStatePhilox4_32_10_t* state) -> ulonglong2 {
+          ulonglong2 ret;
+          uint4 rand_val = curand4(state);  // 生成 4 个 32 位
+          // 组合成两个 64 位
+          ret.x = (static_cast<uint64_t>(rand_val.x) << 32) | rand_val.y;
+          ret.y = (static_cast<uint64_t>(rand_val.z) << 32) | rand_val.w;
+          return ret;
+        },
+        random_func);
+    } else {
+      // 4. 其他类型不支持（例如 int32 不需要完整 64 位范围）
+      TORCH_CHECK(false, "random_full_64_bits_range_kernel_cuda handles "
+                         "only int64, double, float and bfloat16");
+    }
+  });
+}
+```
+
+**关键设计点**：
+1. **始终使用 64 位随机数**：不像 `random_from_to_kernel` 会根据 range 选择 32/64 位
+2. **向量化**：一次生成 2 个 64 位随机数（从 4 个 32 位组合而来）
+3. **类型限制**：只支持 `int64_t`, `double`, `float`, `bfloat16`
+
+#### 4.7.4 与 random_from_to_kernel 的对比
+
+| 特性 | random_from_to_kernel | random_full_64_bits_range_kernel |
+|------|----------------------|----------------------------------|
+| **触发条件** | range != 0 | range == 0（完整 int64 范围） |
+| **变换方法** | `(rand % range) + base` | `static_cast<int64_t>(rand)` |
+| **偏差** | 有轻微 modulo bias（< 0.01%） | **完全无偏** |
+| **支持类型** | 所有整数类型 | 仅 int64/double/float/bfloat16 |
+| **随机数位数** | 32 位或 64 位（根据 range） | **始终 64 位** |
+| **性能** | modulo 运算 | 更快（无 modulo） |
+| **使用频率** | 常见 | 罕见（仅 `random_()` 无参数） |
+
 ---
 
 ## 5. CPU 实现（简介）

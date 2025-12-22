@@ -30,13 +30,13 @@
 | `uniform_call_flow.md` | ✅ 已完成 | torch.rand/uniform 详解（CUDA 重点） | ~800 行 | 100% |
 | `normal_call_flow.md` | ✅ 已完成 | torch.randn/normal 详解（CUDA 重点） | ~1050 行 | 100% |
 | `discrete_call_flow.md` | ✅ 已完成 | torch.randint/random 详解 | ~1600 行 | 100% |
+| `sampling.md` | ✅ 已完成 | multinomial, poisson, binomial, gamma 等复杂采样函数详解 | ~1100 行 | 100% |
 
 ### 待编写文档 📝
 
 | 文件名 | 优先级 | 预估行数 | 目标读者 | 主要内容 |
 |--------|--------|----------|----------|----------|
 | `special_distributions.md` | ⭐ 低 | ~800 行 | 高级用户 | exponential, cauchy 等特殊分布 |
-| `sampling.md` | ⭐ 低 | ~900 行 | 高级用户 | multinomial, poisson 等采样函数 |
 
 ---
 
@@ -450,17 +450,17 @@ architecture.md (总览)
     ├─→ uniform_call_flow.md (已完成)
     │     └─→ Philox 算法详解
     │
-    ├─→ normal_call_flow.md (待写)
+    ├─→ normal_call_flow.md (已完成)
     │     └─→ Box-Muller 变换详解
     │
-    ├─→ discrete_call_flow.md (待写)
+    ├─→ discrete_call_flow.md (已完成)
     │     └─→ Fisher-Yates Shuffle
     │
-    ├─→ special_distributions.md (待写)
-    │     └─→ 逆变换采样原理
+    ├─→ sampling.md (已完成)
+    │     └─→ Alias Method, BTRS, Marsaglia-Tsang 算法
     │
-    └─→ sampling.md (待写)
-          └─→ Alias Method, BTRS 算法
+    └─→ special_distributions.md (待写)
+          └─→ 逆变换采样原理
 ```
 
 **复用内容**：
@@ -477,12 +477,14 @@ architecture.md (总览)
 2. ✅ `uniform_call_flow.md` - 已完成
 3. ✅ `normal_call_flow.md` - 已完成
 
-### Phase 2: 扩展文档
-4. 📝 `discrete_call_flow.md`
-5. 📝 `special_distributions.md`
-6. 📝 `sampling.md`
+### Phase 2: 扩展文档（已完成）
+4. ✅ `discrete_call_flow.md` - 已完成
+5. ✅ `sampling.md` - 已完成
 
-### Phase 3: 维护和更新
+### Phase 3: 可选文档
+6. 📝 `special_distributions.md`
+
+### Phase 4: 维护和更新
 - 根据用户反馈更新
 - 添加更多示例
 - 补充性能测试数据

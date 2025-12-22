@@ -7,11 +7,11 @@
 ### 已有文档
 - **[torch.rand/uniform 详解](uniform_call_flow.md)** - 均匀分布随机数生成的完整调用流程（CUDA 重点）
 - **[torch.randn/normal 详解](normal_call_flow.md)** - 正态分布随机数生成的完整调用流程（CUDA 重点）
+- **[torch.randint/random 详解](discrete_call_flow.md)** - 离散整数随机数生成的完整调用流程（CUDA 重点）
+- **[复杂采样函数详解](sampling.md)** - multinomial, poisson, binomial, gamma, dirichlet 采样算法
 
 ### 计划文档
-- **torch.randint/random 详解** (待编写) - 离散整数随机数生成的完整调用流程
 - **特殊分布详解** (待编写) - exponential, cauchy, geometric, log_normal 等
-- **采样函数详解** (待编写) - multinomial, poisson, binomial, gamma 等
 
 ---
 
@@ -79,9 +79,9 @@ x = torch.normal(means, stds)
 #### 1.3 整数随机数
 | API | 说明 | 输出范围 | 详细文档 |
 |-----|------|----------|----------|
-| `torch.randint(low, high, size, ...)` | 生成随机整数 | [low, high) | 待编写 |
-| `torch.randint_like(input, low, high, ...)` | 按输入形状生成 | [low, high) | 待编写 |
-| `torch.randperm(n, ...)` | 生成随机排列 | [0, n) 的排列 | 待编写 |
+| `torch.randint(low, high, size, ...)` | 生成随机整数 | [low, high) | [详见](discrete_call_flow.md) |
+| `torch.randint_like(input, low, high, ...)` | 按输入形状生成 | [low, high) | [详见](discrete_call_flow.md) |
+| `torch.randperm(n, ...)` | 生成随机排列 | [0, n) 的排列 | [详见](discrete_call_flow.md) |
 
 **使用示例**：
 ```python
@@ -148,10 +148,10 @@ for epoch in range(100):
 
 | API | 说明 | 应用场景 | 详细文档 |
 |-----|------|----------|----------|
-| `torch.multinomial(weights, num_samples)` | 多项式采样 | 分类模型、强化学习动作选择 | 待编写 |
-| `torch.poisson(rates)` | 泊松分布 | 计数事件、排队论 | 待编写 |
-| `torch.binomial(count, prob)` | 二项分布 | 伯努利试验次数 | 待编写 |
-| `torch._standard_gamma(alpha)` | Gamma 分布 | 贝叶斯统计、等待时间 | 待编写 |
+| `torch.multinomial(weights, num_samples)` | 多项式采样 | 分类模型、强化学习动作选择 | [详见](sampling.md#1-multinomial-采样) |
+| `torch.poisson(rates)` | 泊松分布 | 计数事件、排队论 | [详见](sampling.md#2-poisson-分布) |
+| `torch.binomial(count, prob)` | 二项分布 | 伯努利试验次数 | [详见](sampling.md#3-binomial-分布) |
+| `torch._standard_gamma(alpha)` | Gamma 分布 | 贝叶斯统计、等待时间 | [详见](sampling.md#4-gamma-分布) |
 
 **使用示例**：
 ```python
@@ -361,7 +361,9 @@ Generator 封装了 RNG 引擎的状态，提供了三个核心功能：
 3. **复合分布**: log_normal → 组合已有分布
 4. **复杂算法**: multinomial, gamma → 专门的采样算法
 
-详细对比参见：[torch.rand 调用流程 - 第 9 节常见分布实现对比](uniform_call_flow.md#9-常见分布实现对比)
+详细对比参见：
+- [torch.rand 调用流程 - 第 9 节常见分布实现对比](uniform_call_flow.md#9-常见分布实现对比)
+- [复杂采样函数详解 - 第 6 节实现对比总结](sampling.md#6-实现对比总结)
 
 ---
 
