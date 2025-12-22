@@ -702,10 +702,16 @@ Philox 是一种 **Counter-Based Random Number Generator (CBRNG)**，基于密�
 
 #### 核心思想
 
-```
-输入: counter (128-bit), key (128-bit)
-输出: 128-bit 伪随机数
+Philox4x32 意味着它一次处理 4 个 32 位整数（共 128 位）。每次生成时，它需要两个核心输入：
+- Counter (明文): $C = [L_0, R_0, L_1, R_1]$
+  - 这是 4 个 32 位无符号整数。
+  - 在 PyTorch CUDA 中，这就是你的线程索引（Thread ID）加上当前的全局偏移量（Offset）。
+- Key (密钥): $K = [k_0, k_1]$
+  - 这是 2 个 32 位无符号整数（共 64 位）。
+  - 这就是你用 torch.manual_seed() 设置的种子。
 
+Philox4x32-10 会运行 10 轮 相同的逻辑。每一轮都在疯狂地搅拌这些比特。 每一轮包含三个步骤：乘法 (S-Box)、异或 (XOR)、置换 (Permutation)。
+```
 random = Philox_Round( ... Philox_Round(counter, key) ...)
                         \_____ 10 rounds _____/
 ```
@@ -738,6 +744,7 @@ __device__ void philox_single_round(uint32_t counter[4], uint32_t key[2]) {
   uint32_t lo1 = prod1 & 0xFFFFFFFF;
 
   // P-box 层：排列变换
+  // 注意：这里发生了交叉混合（Lane Mixing），第 0 组的结果混入了第 1 组，第 1 组的结果混入了第 0 组。
   counter[0] = hi1 ^ counter[1] ^ key[0];
   counter[1] = lo1;
   counter[2] = hi0 ^ counter[3] ^ key[1];
@@ -745,12 +752,15 @@ __device__ void philox_single_round(uint32_t counter[4], uint32_t key[2]) {
 }
 
 // 密钥更新
+// 这种简单的加法能保证密钥序列在 $2^{64}$ 轮内不会重复，且分布均匀。
 __device__ void bump_key(uint32_t key[2]) {
   key[0] += 0x9E3779B9;  // 黄金比例常数
-  key[1] += 0xBB67AE85;  // 另一个常数
+  key[1] += 0xBB67AE85;  // sqrt(3)相关的常数
 }
 
 // 完整 Philox 生成（10 轮）
+// uint4:4 个 32 位无符号整数
+// uint2:2 个 32 位无符号整数
 __device__ uint4 philox4x32_10(uint4 counter, uint2 key) {
   uint32_t cnt[4] = {counter.x, counter.y, counter.z, counter.w};
   uint32_t k[2] = {key.x, key.y};
@@ -772,9 +782,9 @@ __device__ uint4 philox4x32_10(uint4 counter, uint2 key) {
 __global__ void random_kernel(PhiloxCudaState philox_args) {
   auto [seed, offset] = at::cuda::philox::unpack(philox_args);
 
-  // 每个线程的 counter 和 key
-  uint64_t counter = offset + threadIdx.x;  // 线程独立
-  uint64_t key = seed;                      // 全局种子
+  // 概念上，每个线程有独立的 counter 和 key，实际上由 curand_init 自动管理
+  // uint64_t counter = offset + threadIdx.x;  // 线程独立
+  // uint64_t key = seed;                      // 全局种子
 
   curandStatePhilox4_32_10_t state;
   curand_init(seed, threadIdx.x, offset, &state);
@@ -783,151 +793,7 @@ __global__ void random_kernel(PhiloxCudaState philox_args) {
   float4 rand = curand_uniform4(&state);
   // curand_uniform4 内部调用 philox4x32_10
   // 并将 uint4 转换为 float4 ∈ (0, 1]
+
+  // 在这个 kernel 之前或之后需要对全局 offset 增加 4（atomic）
 }
 ```
-
-### A.3 Philox 的数学保证
-
-#### 周期
-
-- **理论周期**: 2^128 (counter 空间)
-- **实际周期**: 2^64 per key (足够所有应用)
-- **多流并行**: 可以有 2^64 个独立的随机数流
-
-#### 统计质量
-
-Philox 通过了 **TestU01 BigCrush** 测试套件：
-- 106 个严格的统计测试
-- 包括频率测试、序列相关性、间隙测试等
-- 与密码学级 RNG（如 AES-CTR）质量相当
-
-#### 性能
-
-在 NVIDIA GPU 上：
-- **吞吐量**: ~10 G samples/s (单 GPU)
-- **延迟**: ~100 cycles per random number
-- **寄存器使用**: ~20 registers per thread
-- **无内存访问**: 全部在寄存器中计算
-
-### A.4 Philox vs 其他 CBRNG
-
-| 算法 | 状态大小 | 轮数 | 性能 | 统计质量 |
-|------|---------|------|------|---------|
-| **Philox** | 128-bit | 10 | 快 | 优秀 |
-| **Threefry** | 256-bit | 20 | 中等 | 优秀 |
-| **ARS** | 128-bit | 7 | 最快 | 良好 |
-| **AES-CTR** | 128-bit | 10 | 慢（需硬件支持）| 卓越 |
-
-PyTorch 选择 Philox 的原因：
-1. **平衡性能和质量**: 比 Threefry 快，比 ARS 质量高
-2. **CUDA 原生支持**: cuRAND 库内置 Philox
-3. **广泛验证**: NVIDIA, Salmon 等大量使用
-
-### A.5 CUDA Graph 兼容性
-
-Philox 的 counter-based 设计使其完美支持 CUDA Graph：
-
-```cpp
-// 捕获阶段
-{
-  cudaStreamBeginCapture(stream);
-
-  // 记录初始 offset
-  uint64_t offset_start = generator->get_offset();
-
-  // 执行随机数操作
-  torch::rand({1000}, device='cuda');  // offset += 1000
-
-  // 记录总 offset 增量
-  uint64_t offset_delta = generator->get_offset() - offset_start;
-
-  cudaStreamEndCapture(stream, &graph);
-  graph_metadata->offset_increment = offset_delta;
-}
-
-// 重放阶段
-{
-  // 每次重放前，设置正确的 offset
-  uint64_t current_offset = generator->get_offset();
-  generator->set_offset(current_offset);
-
-  cudaGraphLaunch(graph, stream);
-
-  // 重放后增加 offset
-  generator->set_offset(current_offset + graph_metadata->offset_increment);
-}
-```
-
-**关键优势**:
-- 无需在 Graph 中存储 RNG 状态
-- 只需记录 offset 增量
-- 每次重放产生不同的随机数（counter 不同）
-- 保持可复现性（seed 相同）
-
-## Appendix B: 常见性能陷阱
-
-### B.1 频繁的小张量随机数生成
-
-```python
-# ❌ 差：每次循环都启动 CUDA kernel
-for _ in range(1000):
-    x = torch.rand(10, device='cuda')  # 1000 次 kernel 启动
-
-# ✅ 好：批量生成
-x = torch.rand(1000, 10, device='cuda')  # 1 次 kernel 启动
-```
-
-### B.2 CPU-GPU 同步
-
-```python
-# ❌ 差：同步等待
-x = torch.rand(1000, device='cuda')
-print(x.sum())  # 触发同步
-
-# ✅ 好：使用 CUDA 流
-stream = torch.cuda.Stream()
-with torch.cuda.stream(stream):
-    x = torch.rand(1000, device='cuda')
-    y = x.sum()
-# 继续其他工作，无需等待
-```
-
-### B.3 不必要的数据类型转换
-
-```python
-# ❌ 差：生成 float32 后转换
-x = torch.rand(1000, device='cuda').to(torch.float16)
-
-# ✅ 好：直接生成 float16
-x = torch.rand(1000, dtype=torch.float16, device='cuda')
-```
-
-## 总结
-
-PyTorch 的 CUDA 随机数生成系统是一个高度优化的工程杰作：
-
-**核心技术**:
-- **Philox 算法**: Counter-based RNG，完美适配 GPU 并行
-- **Grid-Stride Loop**: 最大化 GPU 利用率和灵活性
-- **向量化生成**: `curand_uniform4` 一次生成 4 个随机数
-- **分离关注点**: RNG 层、分布层、变换层清晰分离
-
-**性能优化**:
-- 极小的状态空间（128-bit per 线程）
-- 零全局内存访问（全部寄存器计算）
-- 自适应的 grid/block 配置
-- 完美的线程独立性（无同步）
-
-**可扩展性**:
-- 统一的 `distribution_nullary_kernel` 框架
-- 易于添加新分布（只需提供 transform 函数）
-- CUDA Graph 原生支持
-- 多 GPU 和分布式友好
-
-理解这个系统有助于：
-- **高效使用**: 避免性能陷阱，充分利用 GPU
-- **调试问题**: 理解随机性来源和状态管理
-- **扩展功能**: 为自定义操作添加随机数支持
-- **可复现性**: 正确设置种子和管理生成器
-
-CUDA 随机数生成是深度学习训练和推理的基石，PyTorch 的实现代表了工业界的最佳实践。
