@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "units": {
+    "MagmaUtils.h": {
+      "type": "file",
+      "hashes": {
+        "MagmaUtils.h": "3510dcf79ed07ff1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDASolver": {
+      "type": "group",
+      "hashes": {
+        "CUDASolver.cpp": "050138d7b8c13725",
+        "CUDASolver.h": "a3b504a3a331870d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BatchLinearAlgebraLib": {
+      "type": "group",
+      "hashes": {
+        "BatchLinearAlgebraLib.cpp": "506da9bf847b23d5",
+        "BatchLinearAlgebraLib.h": "330ccf8c95dbc240"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CudssHandlePool.cpp": {
+      "type": "file",
+      "hashes": {
+        "CudssHandlePool.cpp": "22117c1dcaebfd15"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CusolverDnHandlePool.cpp": {
+      "type": "file",
+      "hashes": {
+        "CusolverDnHandlePool.cpp": "81ef9e5bf822b7bf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BatchLinearAlgebraLibBlas.cpp": {
+      "type": "file",
+      "hashes": {
+        "BatchLinearAlgebraLibBlas.cpp": "cc4e6bae959e1de5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BatchLinearAlgebra.cpp": {
+      "type": "file",
+      "hashes": {
+        "BatchLinearAlgebra.cpp": "a2ce432076f6bc55"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    }
+  }
+}

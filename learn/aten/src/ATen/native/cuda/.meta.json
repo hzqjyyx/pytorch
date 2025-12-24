@@ -1,0 +1,284 @@
+{
+  "version": 1,
+  "units": {
+    "ReduceOps": {
+      "type": "group",
+      "hashes": {
+        "ReduceOps.cpp": "068d74ca733849f2",
+        "ReduceOps.h": "4174e71f63cce4b8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorModeKernel": {
+      "type": "group",
+      "hashes": {
+        "TensorModeKernel.cpp": "7e6e16c3e0ea4523",
+        "TensorModeKernel.cu": "7d9781a7b99d4199",
+        "TensorModeKernel.h": "6ec084f249b3b4fc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Resize": {
+      "type": "group",
+      "hashes": {
+        "Resize.cpp": "1c59b5f86e559252",
+        "Resize.h": "130fae57ea003b0d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "GridSampler": {
+      "type": "group",
+      "hashes": {
+        "GridSampler.cpp": "b07f21e3b8669de2",
+        "GridSampler.cu": "82b2a9fc2ae8f2d7",
+        "GridSampler.h": "c4ca9e63d99a4f6a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ScaledGroupMM": {
+      "type": "group",
+      "hashes": {
+        "ScaledGroupMM.cu": "8ad9e4bbb29c701a",
+        "ScaledGroupMM.h": "f3c5472a6f5be7e6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Sort": {
+      "type": "group",
+      "hashes": {
+        "Sort.cpp": "2fda4881bf8a2ef3",
+        "Sort.cu": "a13761fe73279df1",
+        "Sort.h": "4b6470ad091654aa"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ScanKernels": {
+      "type": "group",
+      "hashes": {
+        "ScanKernels.cpp": "f379c7a333fdfb20",
+        "ScanKernels.h": "630173077e826c71"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Sorting": {
+      "type": "group",
+      "hashes": {
+        "Sorting.cpp": "96fed6148c1c4c50",
+        "Sorting.cu": "bd65c1919fb54ffa",
+        "Sorting.h": "def800ab2d43e721"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "RowwiseScaledMM": {
+      "type": "group",
+      "hashes": {
+        "RowwiseScaledMM.cu": "e708e546383c0973",
+        "RowwiseScaledMM.h": "556e88d41cfde031"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "IndexKernel": {
+      "type": "group",
+      "hashes": {
+        "IndexKernel.cpp": "94485adafb36b7b7",
+        "IndexKernel.cu": "96fb6c471ed6c0e5",
+        "IndexKernel.h": "1dd32b772442596b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Distributions": {
+      "type": "group",
+      "hashes": {
+        "Distributions.cpp": "5b4c9e940025e7a3",
+        "Distributions.cu": "187f9cc58d36ffcc",
+        "Distributions.h": "d76ab352568f5e33"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorCompare": {
+      "type": "group",
+      "hashes": {
+        "TensorCompare.cpp": "b05cf337bb6bd26d",
+        "TensorCompare.cu": "4a8f272b8c73939d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Copy": {
+      "type": "group",
+      "hashes": {
+        "Copy.cu": "839e9cf7e9d98945",
+        "Copy.h": "b9df5a102face3e3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Activation": {
+      "type": "group",
+      "hashes": {
+        "Activation.cpp": "921f45991e57315e",
+        "Activation.h": "a82a4a44d9dbc87c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorTopK": {
+      "type": "group",
+      "hashes": {
+        "TensorTopK.cpp": "bc0c74a9eb831ced",
+        "TensorTopK.cu": "131484bd81787dc7",
+        "TensorTopK.h": "9c45d21a30d63820"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SpectralOps": {
+      "type": "group",
+      "hashes": {
+        "SpectralOps.cpp": "a647acc48074b237",
+        "SpectralOps.cu": "3d90105d6930ddf2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SortStable": {
+      "type": "group",
+      "hashes": {
+        "SortStable.cu": "dc0b8d6cbcf36c9d",
+        "SortStable.h": "5ab26c806742ab8b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "linalg/linalg/CUDASolver": {
+      "type": "group",
+      "hashes": {
+        "linalg/CUDASolver.cpp": "050138d7b8c13725",
+        "linalg/CUDASolver.h": "a3b504a3a331870d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "jit_utils": {
+      "type": "group",
+      "hashes": {
+        "jit_utils.cpp": "6efe9a094c4c2acb",
+        "jit_utils.h": "e4d0aabac7c00259"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "linalg/linalg/BatchLinearAlgebraLib": {
+      "type": "group",
+      "hashes": {
+        "linalg/BatchLinearAlgebraLib.cpp": "506da9bf847b23d5",
+        "linalg/BatchLinearAlgebraLib.h": "330ccf8c95dbc240"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "block_reduce.cuh": {
+      "type": "file",
+      "hashes": {
+        "block_reduce.cuh": "78da5a54f340e20a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SortingRadixSelect.cuh": {
+      "type": "file",
+      "hashes": {
+        "SortingRadixSelect.cuh": "e41c5cb1da656e89"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Normalization.cuh": {
+      "type": "file",
+      "hashes": {
+        "Normalization.cuh": "ca12c2e2e6adb5e6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorModeKernel.cuh": {
+      "type": "file",
+      "hashes": {
+        "TensorModeKernel.cuh": "f799a87c6589c23b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "im2col.cuh": {
+      "type": "file",
+      "hashes": {
+        "im2col.cuh": "42d04bc7d17c092f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDAJitLoops.cuh": {
+      "type": "file",
+      "hashes": {
+        "CUDAJitLoops.cuh": "675a0cd05e430685"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DeviceSqrt.cuh": {
+      "type": "file",
+      "hashes": {
+        "DeviceSqrt.cuh": "28cab08ea3dbb82a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SortUtils.cuh": {
+      "type": "file",
+      "hashes": {
+        "SortUtils.cuh": "9e711fbaa58fca75"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    }
+  }
+}
