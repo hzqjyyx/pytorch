@@ -279,6 +279,69 @@
       "tasks": {
         "purpose": "done"
       }
+    },
+    "Indexing.cu": {
+      "type": "file",
+      "hashes": {
+        "Indexing.cu": "225b6c38f83925e4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationSiluKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationSiluKernel.cu": "c34b18c7a72368a1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Randperm.cuh": {
+      "type": "file",
+      "hashes": {
+        "Randperm.cuh": "4abbbe06eb828e52"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "vol2col.cuh": {
+      "type": "file",
+      "hashes": {
+        "vol2col.cuh": "4ed08bd8bc460b12"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSample.cuh": {
+      "type": "file",
+      "hashes": {
+        "UpSample.cuh": "b1642602d566d6ad"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Pow.cuh": {
+      "type": "file",
+      "hashes": {
+        "Pow.cuh": "67c15acc63c3cacd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MemoryAccess.cuh": {
+      "type": "file",
+      "hashes": {
+        "MemoryAccess.cuh": "78fe49f834c5ed24"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
     }
   }
 }
