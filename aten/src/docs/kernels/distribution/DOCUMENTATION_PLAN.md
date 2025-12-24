@@ -31,12 +31,11 @@
 | `normal_call_flow.md` | ✅ 已完成 | torch.randn/normal 详解（CUDA 重点） | ~1050 行 | 100% |
 | `discrete_call_flow.md` | ✅ 已完成 | torch.randint/random 详解 | ~1600 行 | 100% |
 | `sampling.md` | ✅ 已完成 | multinomial, poisson, binomial, gamma 等复杂采样函数详解 | ~1100 行 | 100% |
+| `special_distributions.md` | ✅ 已完成 | exponential, cauchy, geometric, log_normal, bernoulli 等特殊分布详解 | ~1150 行 | 100% |
 
 ### 待编写文档 📝
 
-| 文件名 | 优先级 | 预估行数 | 目标读者 | 主要内容 |
-|--------|--------|----------|----------|----------|
-| `special_distributions.md` | ⭐ 低 | ~800 行 | 高级用户 | exponential, cauchy 等特殊分布 |
+**所有计划文档已完成！** 🎉
 
 ---
 
@@ -459,7 +458,7 @@ architecture.md (总览)
     ├─→ sampling.md (已完成)
     │     └─→ Alias Method, BTRS, Marsaglia-Tsang 算法
     │
-    └─→ special_distributions.md (待写)
+    └─→ special_distributions.md (已完成)
           └─→ 逆变换采样原理
 ```
 
@@ -481,8 +480,10 @@ architecture.md (总览)
 4. ✅ `discrete_call_flow.md` - 已完成
 5. ✅ `sampling.md` - 已完成
 
-### Phase 3: 可选文档
-6. 📝 `special_distributions.md`
+### Phase 3: 特殊分布文档（已完成）
+6. ✅ `special_distributions.md` - 已完成
+
+**所有计划文档已完成！** 🎉
 
 ### Phase 4: 维护和更新
 - 根据用户反馈更新

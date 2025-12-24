@@ -9,9 +9,7 @@
 - **[torch.randn/normal 详解](normal_call_flow.md)** - 正态分布随机数生成的完整调用流程（CUDA 重点）
 - **[torch.randint/random 详解](discrete_call_flow.md)** - 离散整数随机数生成的完整调用流程（CUDA 重点）
 - **[复杂采样函数详解](sampling.md)** - multinomial, poisson, binomial, gamma, dirichlet 采样算法
-
-### 计划文档
-- **特殊分布详解** (待编写) - exponential, cauchy, geometric, log_normal 等
+- **[特殊分布详解](special_distributions.md)** - exponential, cauchy, geometric, log_normal, bernoulli 等基于变换的分布
 
 ---
 

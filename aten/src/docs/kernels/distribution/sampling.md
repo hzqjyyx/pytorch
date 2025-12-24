@@ -202,169 +202,139 @@ cum_weights: [1.0,  3.0,  6.0,  10.0]
 
 ### 1.5 CUDA 实现
 
-#### 1.5.1 CUDA Kernel 入口
+#### 1.5.1 有放回采样的优化实现
 
-**文件**: `aten/src/ATen/native/cuda/MultinomialKernel.cu:120`
+PyTorch 对有放回采样提供了两种实现：
+
+**1. 单样本优化版本**（`n_sample == 1`）：
+
+**文件**: `aten/src/ATen/native/cuda/MultinomialKernel.cu:188-325`
 
 ```cpp
-void multinomial_kernel_cuda(
-    Tensor& result,
-    const Tensor& self,
-    int64_t num_samples,
-    bool replacement,
-    Generator gen) {
+// 使用 shared memory 和并行前缀和的高效单样本采样
+__global__ void sampleMultinomialOnce(
+    int64_t* dest,
+    int64_t distributions,
+    int categories,
+    const scalar_t* sampled,        // 预生成的 uniform 随机数
+    const scalar_t* dist,
+    int stride_dist,
+    int stride_categories) {
 
-  auto n_categories = self.size(-1);
-  auto n_dist = self.dim() == 1 ? 1 : self.size(0);
+  // 每个 block 处理一个分布
+  for (int64_t curDist = blockIdx.x; curDist < distributions; curDist += gridDim.x) {
+    // 1. 计算分布的总和（归一化）
+    accscalar_t sum = 0;
+    for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
+      sum += dist[curDist * stride_dist + cat * stride_categories];
+    }
+    sum = cuda_utils::BlockReduceSum(sum, smem);  // block reduce
 
-  // 归一化权重（确保非负且和为 1）
-  Tensor norm_weights = self / self.sum(-1, true);
-
-  // 获取或创建生成器
-  auto gen_impl = get_generator_or_default<CUDAGeneratorImpl>(
-      gen, cuda::detail::getDefaultCUDAGenerator());
-
-  // 计算 Grid/Block 配置
-  int64_t numel = n_dist * num_samples;
-  auto counter_offset = calc_execution_policy(numel);
-  auto rng_state = gen_impl->philox_cuda_state(counter_offset);
-
-  // 有放回采样：并行采样
-  if (replacement) {
-    multinomial_with_replacement_kernel<<<grid, block>>>(
-        result.data_ptr<int64_t>(),
-        norm_weights.data_ptr<float>(),
-        n_dist,
-        n_categories,
-        num_samples,
-        rng_state
-    );
-  }
-  // 无放回采样：Gumbel-Max Trick
-  else {
-    multinomial_without_replacement_kernel<<<grid, block>>>(
-        result.data_ptr<int64_t>(),
-        norm_weights.data_ptr<float>(),
-        n_dist,
-        n_categories,
-        num_samples,
-        rng_state
-    );
+    // 2. 使用并行前缀和查找采样类别
+    // 将概率分布分块到 shared memory
+    // 计算 inclusive prefix sum
+    // 每个线程检查 sample 是否落在其负责的桶中
+    // ...（详见源码）
   }
 }
 ```
 
-#### 1.5.2 有放回采样 Kernel
+**2. 多样本通用版本**（`n_sample > 1`）：
 
-**文件**: `aten/src/ATen/native/cuda/MultinomialKernel.cu:45`
+**文件**: `aten/src/ATen/native/cuda/MultinomialKernel.cu:140-186`
 
 ```cpp
-__global__ void multinomial_with_replacement_kernel(
-    int64_t* result,          // 输出: [n_dist, num_samples]
-    const float* weights,     // 输入: [n_dist, n_categories]
-    int64_t n_dist,
-    int64_t n_categories,
-    int64_t num_samples,
-    PhiloxCudaState rng_state) {
-
-  // 每个线程负责一个分布的一个样本
-  int64_t dist_idx = blockIdx.x;
-  int64_t sample_idx = threadIdx.x;
-
-  if (dist_idx >= n_dist || sample_idx >= num_samples) return;
+__global__ void sampleMultinomialWithReplacement(
+    PhiloxCudaState philox_args,
+    int totalSamples,
+    int64_t* dest,
+    int64_t distributions,
+    int categories,
+    const scalar_t* normDistPrefixSum,  // 累积概率（预计算）
+    const scalar_t* normDist) {
 
   // 初始化 Philox RNG
   curandStatePhilox4_32_10_t state;
-  curand_init(rng_state.seed, dist_idx * num_samples + sample_idx,
-              rng_state.offset, &state);
+  curand_init(seed, idx, offset, &state);
 
-  // 1. 生成 uniform(0, 1)
-  float u = curand_uniform(&state);
+  for (int64_t curDist = blockIdx.y; curDist < distributions; curDist += gridDim.y) {
+    for (int sample = blockIdx.x*blockDim.x + threadIdx.x;
+         sample < totalSamples; sample += blockDim.x*gridDim.x) {
 
-  // 2. 计算累积概率并搜索
-  const float* dist_weights = weights + dist_idx * n_categories;
-  float cumulative = 0.0f;
-  int64_t category = n_categories - 1;  // 默认最后一个
+      // 生成 uniform(0, 1)
+      auto rand = curand_uniform4(&state);
+      scalar_t r = static_cast<scalar_t>(rand.x);
 
-  for (int64_t i = 0; i < n_categories; i++) {
-    cumulative += dist_weights[i];
-    if (u <= cumulative) {
-      category = i;
-      break;
+      // 二分搜索找到对应的类别
+      int choice = binarySearchForMultinomial(
+          normDistPrefixSum + curDist * categories,
+          normDist + curDist * categories,
+          categories,
+          r);
+
+      dest[curDist * totalSamples + sample] = choice;
     }
   }
-
-  // 3. 写入结果
-  result[dist_idx * num_samples + sample_idx] = category;
 }
 ```
 
-#### 1.5.3 无放回采样：Gumbel-Max Trick
+#### 1.5.2 无放回采样：指数分布方法
 
-**原理**：要从分布 $P$ 中无放回采样 $k$ 个样本，等价于：
-1. 对每个类别 $i$，计算 $g_i = \log(p_i) + \text{Gumbel}(0, 1)$
-2. 选择 $g_i$ 最大的 $k$ 个类别
+**原理**：要从分布 $P$ 中无放回采样 $k$ 个样本，PyTorch 使用了一个优雅的数学技巧：
 
-其中 Gumbel 分布：$G \sim -\log(-\log(U))$，$U \sim \text{Uniform}(0,1)$
+$$\text{argmax}_i \left( \frac{p_i}{q_i} \right) \quad \text{where} \quad q_i \sim \text{Exp}(1)$$
 
-**文件**: `aten/src/ATen/native/cuda/MultinomialKernel.cu:75`
+这等价于 Gumbel-Max Trick，但计算更简单（不需要对数运算）。
+
+**文件**: `aten/src/ATen/native/Distributions.cpp:587-620`
 
 ```cpp
-__global__ void multinomial_without_replacement_kernel(
-    int64_t* result,
-    const float* weights,
-    int64_t n_dist,
-    int64_t n_categories,
-    int64_t num_samples,
-    PhiloxCudaState rng_state) {
+Tensor& multinomial_out(const Tensor& self, int64_t n_sample,
+    bool with_replacement, std::optional<Generator> gen, Tensor& result) {
 
-  int64_t dist_idx = blockIdx.x;
-  if (dist_idx >= n_dist) return;
+  // 无放回采样或单样本的快速路径
+  if (!with_replacement || n_sample == 1) {
+    // 算法来自 Gumbel Softmax
+    // s = argmax( logp - log(-log(eps)) ) where eps ~ U(0, 1)
+    // 通过 exp 简化为:
+    // s = argmax( p / (-log(eps)) ) where eps ~ U(0, 1)
+    // 进一步简化为:
+    // s = argmax( p / q ) where q ~ Exp(1)
 
-  // 初始化 RNG
-  curandStatePhilox4_32_10_t state;
-  curand_init(rng_state.seed, dist_idx, rng_state.offset, &state);
+    // 生成指数分布随机数
+    Tensor q = at::empty_like(self).exponential_(1, std::move(gen));
 
-  // 1. 为每个类别生成 Gumbel 噪声
-  extern __shared__ float gumbel_values[];  // [n_categories]
-  const float* dist_weights = weights + dist_idx * n_categories;
+    // 计算 p / q
+    at::div_out(q, self, q);
 
-  for (int64_t i = threadIdx.x; i < n_categories; i += blockDim.x) {
-    float u = curand_uniform(&state);
-    u = fmaxf(u, 1e-10f);  // 避免 log(0)
-
-    // Gumbel(0,1) = -log(-log(U))
-    float gumbel = -logf(-logf(u));
-
-    // log(p_i) + Gumbel
-    gumbel_values[i] = logf(dist_weights[i] + 1e-10f) + gumbel;
-  }
-  __syncthreads();
-
-  // 2. 选择最大的 num_samples 个（部分排序）
-  // 使用 shared memory 的 selection algorithm
-  for (int64_t k = 0; k < num_samples; k++) {
-    if (threadIdx.x == 0) {
-      // 找到当前最大值的索引
-      int64_t max_idx = 0;
-      float max_val = gumbel_values[0];
-      for (int64_t i = 1; i < n_categories; i++) {
-        if (gumbel_values[i] > max_val) {
-          max_val = gumbel_values[i];
-          max_idx = i;
-        }
-      }
-
-      // 记录结果
-      result[dist_idx * num_samples + k] = max_idx;
-
-      // 标记为已选择（设为负无穷）
-      gumbel_values[max_idx] = -INFINITY;
+    // 找到最大的 k 个
+    if (n_sample == 1) {
+      at::argmax_out(result, q, /*dim=*/-1, /*keepdim=*/true);
+    } else {
+      Tensor vals = at::empty(result.sizes(), self.options());
+      at::topk_out(vals, result, q, n_sample);  // 前 k 大
     }
-    __syncthreads();
+
+    return result;
   }
+
+  // 有放回采样：调用 CUDA kernel
+  multinomial_with_replacement_stub(
+      result.device().type(), result, self, n_sample, gen);
+  return result;
 }
 ```
+
+**为什么这样有效**：
+
+数学上可以证明，对于独立的指数随机变量 $q_i \sim \text{Exp}(1)$：
+
+$$P\left(\text{argmax}_i \frac{p_i}{q_i} = j\right) = p_j$$
+
+这个方法的优点：
+- ✅ 不需要对数运算（`exp(log(p) + gumbel)` 变成了 `p / exp(1)`）
+- ✅ 数值稳定性更好
+- ✅ 可以直接使用 PyTorch 的 `exponential_` 和 `topk` 算子
 
 ### 1.6 完整调用流程图
 
@@ -548,35 +518,52 @@ __device__ float poisson_ptrs(float lambda, curandStatePhilox4_32_10_t* state) {
 
 ### 2.4 CUDA Kernel 实现
 
-**文件**: `aten/src/ATen/native/cuda/DistributionPoissonKernel.cu:60`
+**重要发现**：PyTorch 的 CUDA Poisson 实现直接使用 **cuRAND 库的内置函数** `curand_poisson`，而不是自己实现算法。
+
+**文件**: `aten/src/ATen/native/cuda/Distributions.cu:44-62`
 
 ```cpp
-__global__ void poisson_kernel(
-    int64_t* output,
-    const float* lambda,
-    int64_t numel,
-    PhiloxCudaState rng_state) {
+template <typename scalar_t>
+void poisson_cuda_kernel(
+    const at::TensorBase &ret,
+    const at::TensorBase &lambda,
+    at::PhiloxCudaState philox_args) {
 
-  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= numel) return;
+  auto functor = [philox_args] __device__(
+          scalar_t & ret_val, const scalar_t& lambda) {
+        CUDA_KERNEL_ASSERT(lambda >= 0);
 
-  // 初始化 Philox
-  curandStatePhilox4_32_10_t state;
-  curand_init(rng_state.seed, idx, rng_state.offset, &state);
+        auto seeds = at::cuda::philox::unpack(philox_args);
+        curandStatePhilox4_32_10_t state;
+        curand_init(std::get<0>(seeds),
+                    blockIdx.x * blockDim.x + threadIdx.x,
+                    std::get<1>(seeds),
+                    &state);
 
-  float lambda_val = lambda[idx];
+        // 直接使用 cuRAND 的 Poisson 采样函数
+        ret_val = static_cast<scalar_t>(curand_poisson(&state, lambda));
+      };
 
-  // 算法选择
-  int64_t result;
-  if (lambda_val < 10.0f) {
-    result = poisson_knuth(lambda_val, &state);
-  } else {
-    result = poisson_ptrs(lambda_val, &state);
-  }
-
-  output[idx] = result;
+  at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t, decltype(functor),
+                               /*max_threads_per_block=*/512,
+                               /*min_blocks_per_sm==*/2>(ret, lambda, functor);
 }
 ```
+
+**cuRAND 的 `curand_poisson` 实现**：
+
+cuRAND 库内部根据 $\lambda$ 的大小自动选择算法：
+- **小 λ** (λ < 64): 使用 **等待时间方法**（类似 Knuth）
+- **大 λ** (λ ≥ 64): 使用 **变换拒绝采样**（PTRS 或类似算法）
+
+这样的好处：
+- ✅ 算法高度优化（NVIDIA 专家实现）
+- ✅ 自动选择最优算法
+- ✅ 代码简洁易维护
+
+**CPU vs CUDA 对比**：
+- **CPU**: PyTorch 自己实现 Knuth 和 PTRS（见 2.3.2 和 2.3.3）
+- **CUDA**: 直接调用 cuRAND 库函数
 
 ### 2.5 完整调用流程图
 
@@ -585,40 +572,55 @@ torch.poisson(lambda_rates)
     ↓
 torch._C.poisson
     ↓
-at::native::poisson(self, gen)
+at::native::_s_poisson(self, gen)  // _s 表示 sampling
     ↓
 【创建输出张量】
-result = at::empty_like(self, dtype=Long)
+result = at::zeros(lambda.sizes(), lambda.options())
     ↓
 【设备分派】
-    ├─ CPU → poisson_kernel_cpu
+    ├─ CPU → _s_poisson_cpu
     │   ↓
     │   for each element:
-    │       if lambda < 10:
-    │           use Knuth algorithm
-    │       else:
-    │           use PTRS algorithm
+    │       调用 sample_poisson(lambda_val, generator)
+    │       ↓
+    │       if lambda >= 10:
+    │           使用 PTRS (Hoermann, 1993)
+    │           - 变换拒绝采样
+    │           - 接受率 ~95%
+    │       else if lambda == 0:
+    │           return 0
+    │       else:  // lambda < 10
+    │           使用 Knuth 算法
+    │           - L = exp(-lambda)
+    │           - 累积乘 uniform 直到 < L
     │
-    └─ CUDA → poisson_kernel
+    └─ CUDA → poisson_cuda_kernel
         ↓
-        【获取 RNG 状态】
-        rng_state = gen->philox_cuda_state(counter_offset)
+        【获取 Philox 状态】
+        philox_args = gen->philox_cuda_state(20)
         ↓
-        【启动 kernel】
-        poisson_kernel<<<grid, block>>>(output, lambda, numel, rng_state)
-        ↓
-        【设备端执行】
-        每个线程:
-        1. 初始化 Philox
-        2. 读取 lambda[idx]
-        3. 选择算法:
-           ├─ lambda < 10 → Knuth
-           └─ lambda >= 10 → PTRS
-        4. 写入 output[idx]
+        【启动 CUDA kernel】
+        for each element (parallel):
+            ↓
+            1. 初始化 Philox RNG
+               curand_init(seed, idx, offset, &state)
+            ↓
+            2. 调用 cuRAND 内置函数
+               ret_val = curand_poisson(&state, lambda)
+               ↓
+               【cuRAND 内部自动选择算法】
+               - lambda < 64 → 等待时间方法
+               - lambda >= 64 → 变换拒绝采样
+            ↓
+            3. 写入结果
     ↓
 【返回结果】
 return result
 ```
+
+**关键差异**：
+- **CPU**: 阈值 10，手动实现 Knuth + PTRS
+- **CUDA**: 阈值 64（cuRAND），自动算法选择
 
 ---
 
@@ -668,65 +670,85 @@ results = torch.binomial(counts, probs)
 | $n \cdot p < 10$ 或 $n \cdot (1-p) < 10$ | **二项式反演法** | O(np) 期望 |
 | 其他 | **BTRS 算法** | O(1) 期望 |
 
-### 3.4 BTRS 算法
+### 3.4 BTRS 算法实现
 
-**BTRS** (Binomial Triangle Rejection Sampling) 是一种高效的拒绝采样算法，特别适合大 $n$ 和中等 $p$ 的情况。
+**BTRS** (Binomial Triangle Rejection Sampling) 是一种高效的拒绝采样算法，由 TensorFlow 实现并被 PyTorch 采用。
 
-**文件**: `aten/src/ATen/native/cuda/DistributionBinomialKernel.cu:30`
+**文件**: `aten/src/ATen/native/Distributions.h:171-221`
 
 ```cpp
-__device__ int64_t binomial_btrs(
-    float n, float p,
-    curandStatePhilox4_32_10_t* state) {
+template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t>
+C10_DEVICE scalar_t btrs(scalar_t count, scalar_t prob,
+    BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
 
-  // BTRS 参数
-  float np = n * p;
-  float npq = np * (1.0f - p);
-  float f_m = np + p;
-  int64_t m = (int64_t)f_m;
+  scalar_t k;
+  accscalar_t U, V, us;
 
-  float p1 = floorf(2.195f * sqrtf(npq) - 4.6f * p) + 0.5f;
-  float xm = (float)m + 0.5f;
-  float xl = xm - p1;
-  float xr = xm + p1;
+  // spq = 标准差
+  const accscalar_t stddev = compat_sqrt(count * prob * (1 - prob));
 
-  float c = 0.134f + 20.5f / (15.3f + (float)m);
-  float lambda_l = (xm - xl) * (1.0f + 0.5f * c);
-  float lambda_r = (xr - xm) * (1.0f + 0.5f * c);
-  float p2 = p1 * (1.0f + 2.0f * c);
-  float p3 = p2 + c / lambda_l;
-  float p4 = p3 + c / lambda_r;
+  // BTRS 系数
+  const accscalar_t b = 1.15 + 2.53 * stddev;
+  const accscalar_t a = -0.0873 + 0.0248 * b + 0.01 * prob;
+  const accscalar_t c = count * prob + 0.5;
+  const accscalar_t v_r = 0.92 - 4.2 / b;
+  const accscalar_t r = prob / (1 - prob);
 
-  for (;;) {
-    float u = curand_uniform(state) * p4;
-    float v = curand_uniform(state);
+  const accscalar_t alpha = (2.83 + 5.1 / b) * stddev;
+  const accscalar_t m = compat_floor((count + 1) * prob);
 
-    float x;
-    if (u <= p1) {
-      // 中心区域（矩形）
-      x = xm - p1 * v + u;
-    } else if (u <= p2) {
-      // 左尾
-      float y = logf(v * lambda_l / p1);
-      x = xl + y;
-      if (x < 0.0f) continue;
-    } else if (u <= p3) {
-      // 右尾
-      float y = logf(v * lambda_r / p1);
-      x = xr - y;
-      if (x > n) continue;
-    } else {
-      // 远端区域
-      x = (u - p3) * lambda_r + xr;
-      if (x > n) continue;
+  while (true) {
+    U = standard_uniform.sample() - 0.5;
+    V = standard_uniform.sample();
+
+    us = 0.5 - compat_abs(U);
+    k = static_cast<scalar_t>(compat_floor((2 * a / us + b) * U + c));
+
+    // 拒绝非法值
+    if (k < 0 || k > count) {
+      continue;
     }
 
-    int64_t k = (int64_t)floorf(x);
+    // 紧密区域：快速接受
+    if (us >= 0.07 && V <= v_r) {
+      return k;
+    }
 
-    // 拒绝检验
-    float rho = // ... 复杂的接受概率计算
-    if (v <= rho) return k;
+    // 精确拒绝检验
+    V = compat_log(V * alpha / (a / (us * us) + b));
+    accscalar_t upperbound =
+        ((m + 0.5) * compat_log((m + 1) / (r * (count - m + 1))) +
+         (count + 1) * compat_log((count - m + 1) / (count - k + 1)) +
+         (k + 0.5) * compat_log(r * (count - k + 1) / (k + 1)) +
+         stirling_approx_tail<accscalar_t>(m) +
+         stirling_approx_tail<accscalar_t>(count - m) -
+         stirling_approx_tail<accscalar_t>(k) -
+         stirling_approx_tail<accscalar_t>(count - k));
+
+    if (V <= upperbound) {
+      return k;
+    }
   }
+}
+```
+
+**Stirling 近似尾部函数**（用于快速计算组合数对数）：
+
+**文件**: `aten/src/ATen/native/Distributions.h:128-147`
+
+```cpp
+template<typename scalar_t>
+C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
+  const static scalar_t kTailValues[] = {
+    0.0810614667953272,   // k=0
+    0.0413406959554092,   // k=1
+    // ... 共10个预计算值
+  };
+  if (k <= 9) {
+    return kTailValues[static_cast<size_t>(k)];
+  }
+  scalar_t kp1sq = (k + 1) * (k + 1);
+  return (1.0 / 12 - (1.0 / 360 - 1.0 / 1260 / kp1sq) / kp1sq) / (k + 1);
 }
 ```
 
@@ -826,27 +848,60 @@ __device__ float standard_gamma_marsaglia(
 
 ### 4.4 CUDA Kernel 实现
 
-**文件**: `aten/src/ATen/native/cuda/DistributionGammaKernel.cu:55`
+**文件**: `aten/src/ATen/native/cuda/Distributions.cu:96-127`
 
 ```cpp
-__global__ void standard_gamma_kernel(
-    float* output,
-    const float* alpha,
-    int64_t numel,
-    PhiloxCudaState rng_state) {
+template <typename scalar_t>
+void gamma_cuda_kernel(
+    const at::TensorBase &ret,
+    const at::TensorBase &alpha,
+    at::PhiloxCudaState philox_args) {
 
-  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= numel) return;
+  using accscalar_t = at::acc_type<scalar_t, true>;
 
-  curandStatePhilox4_32_10_t state;
-  curand_init(rng_state.seed, idx, rng_state.offset, &state);
+  auto functor = [philox_args] __device__(
+          scalar_t & ret_val, const scalar_t& alpha) {
 
-  float alpha_val = alpha[idx];
-  float result = standard_gamma_marsaglia(alpha_val, &state);
+        auto seeds = at::cuda::philox::unpack(philox_args);
+        curandStatePhilox4_32_10_t state;
+        curand_init(std::get<0>(seeds),
+                    blockIdx.x * blockDim.x + threadIdx.x,
+                    std::get<1>(seeds),
+                    &state);
 
-  output[idx] = result;
+        // 创建 uniform 和 normal 采样器
+        auto uniform_lambda = [&state] __device__ () {
+          return curand_uniform(&state);
+        };
+        BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
+
+        auto normal_lambda = [&state] __device__ () {
+          return curand_normal(&state);
+        };
+        BaseSampler<accscalar_t, decltype(normal_lambda)> standard_normal(normal_lambda);
+
+        // 调用 Marsaglia-Tsang 算法（在 Distributions.h 中定义）
+        auto sample = sample_gamma<scalar_t, accscalar_t,
+                                   decltype(uniform_lambda),
+                                   decltype(normal_lambda)>(
+            alpha, standard_uniform, standard_normal);
+
+        // 防止下溢
+        auto min_value = std::numeric_limits<scalar_t>::min();
+        ret_val = (min_value > sample) ? min_value : sample;
+      };
+
+  at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t, decltype(functor),
+                               /*max_threads_per_block=*/256,
+                               /*min_blocks_per_sm==*/2>(ret, alpha, functor);
 }
 ```
+
+**关键点**：
+- CUDA 和 CPU 使用**完全相同的 `sample_gamma` 算法**（在 `Distributions.h` 中定义）
+- 唯一区别是 RNG：
+  - CPU 使用 MT19937
+  - CUDA 使用 Philox（通过 curand_uniform 和 curand_normal）
 
 ### 4.5 完整调用流程图
 
@@ -855,37 +910,60 @@ torch._standard_gamma(alpha)
     ↓
 torch._C._standard_gamma
     ↓
-at::native::_standard_gamma(self, gen)
+at::native::_s_gamma(self, gen)  // _s 表示 sampling
     ↓
 【创建输出张量】
-result = at::empty_like(self)
+result = at::zeros(alpha.sizes(), alpha.options())
     ↓
 【设备分派】
-    ├─ CPU → standard_gamma_kernel_cpu
+    ├─ CPU → _s_gamma_cpu
     │   ↓
     │   for each element:
-    │       use Marsaglia-Tsang algorithm
+    │       调用 sample_gamma(alpha, uniform_sampler, normal_sampler)
+    │       ↓
+    │       if alpha < 1:
+    │           // 变换法
+    │           x = sample_gamma(alpha + 1, ...)
+    │           return x * U^(1/alpha)
+    │       else:  // alpha >= 1
+    │           // Marsaglia-Tsang 拒绝采样
+    │           d = alpha - 1/3
+    │           c = 1/sqrt(9*d)
+    │           loop:
+    │               Z ~ N(0,1)
+    │               V = (1 + cZ)^3
+    │               if V > 0:
+    │                   if 快速接受检验 or 精确接受检验:
+    │                       return d*V
     │
-    └─ CUDA → standard_gamma_kernel
+    └─ CUDA → gamma_cuda_kernel
         ↓
-        【获取 RNG 状态】
-        rng_state = gen->philox_cuda_state(counter_offset)
+        【获取 Philox 状态】
+        philox_args = gen->philox_cuda_state(counter_offset)
         ↓
-        【启动 kernel】
-        standard_gamma_kernel<<<grid, block>>>(output, alpha, numel, rng_state)
-        ↓
-        【设备端执行】
-        每个线程:
-        1. 初始化 Philox
-        2. 读取 alpha[idx]
-        3. 执行 Marsaglia-Tsang:
-           ├─ alpha < 1 → 递归调用 + 变换
-           └─ alpha >= 1 → 拒绝采样
-        4. 写入 output[idx]
+        【启动 CUDA kernel】
+        for each element (parallel):
+            ↓
+            1. 初始化 Philox RNG
+               curand_init(...)
+            ↓
+            2. 创建采样器包装
+               uniform_sampler → curand_uniform
+               normal_sampler → curand_normal
+            ↓
+            3. 调用 sample_gamma(alpha, uniform_sampler, normal_sampler)
+               【与 CPU 完全相同的算法】
+            ↓
+            4. 写入结果（防止下溢）
     ↓
 【返回结果】
 return result
 ```
+
+**关键优势**：
+- CPU 和 CUDA 共享同一套算法实现（`Distributions.h`）
+- 只需在一个地方维护和优化算法
+- 保证 CPU 和 CUDA 的数学一致性
 
 ---
 

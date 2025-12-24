@@ -328,40 +328,37 @@ struct RandomFromToStub {
 
 ### 3.1 random_from_to_impl 模板函数
 
+文件位置: `aten/src/ATen/native/DistributionTemplates.h:134-185`
+
 `random_from_to_impl` 处理范围检查和参数规范化，然后调用设备特定的 kernel。
 
 **核心逻辑**（简化版）：
 ```cpp
-template<typename Stub, typename Generator>
+template<template<typename> class random_from_to_kernel, typename RNG>
 Tensor& random_from_to_impl(
     Tensor& self,
     int64_t from,
     std::optional<int64_t> to_opt,
-    std::optional<Generator> gen) {
+    std::optional<Generator> generator) {
 
-  // 1. 获取数据类型的有效范围
-  int64_t min_value = /* dtype 的最小值 */;
-  int64_t max_value = /* dtype 的最大值 */;
-
-  // 2. 处理 to 参数
-  int64_t to = to_opt.has_value() ? to_opt.value() : (max_value + 1);
-
-  // 3. 范围检查
-  TORCH_CHECK(from < to, "from must be less than to");
-  TORCH_CHECK(from >= min_value && to <= max_value + 1, "out of range");
-
-  // 4. 计算范围
-  uint64_t range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
-
-  // 5. 创建 TensorIterator
   auto iter = TensorIterator::borrowing_nullary_op(self);
 
-  // 6. 分派到 CPU 或 CUDA kernel
-  if (range == 0) {
-    // 特殊情况：完整 64 位范围
-    Stub()(iter, gen);  // 调用 random_full_64_bits_range_kernel
+  if (to_opt.has_value()) {
+    // 路径 1: [from, to) 有明确范围
+    int64_t to = *to_opt;
+    TORCH_CHECK(from < to, "random_ expects 'from' < 'to'");
+    // 浮点类型需要调整边界（update_from/update_to）
+    range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
+    random_from_to_kernel<RNG>()(iter, range, from, generator);
+
+  } else if (from != std::numeric_limits<int64_t>::lowest()) {
+    // 路径 2: [from, dtype_max]
+    range = static_cast<uint64_t>(to_inc) - static_cast<uint64_t>(from) + 1;
+    random_from_to_kernel<RNG>()(iter, range, from, generator);
+
   } else {
-    Stub()(iter, range, from, gen);  // 调用 random_from_to_kernel
+    // 路径 3: 完整 64 位范围 [int64_min, int64_max]
+    random_from_to_kernel<RNG>()(iter, generator);  // 无 range 参数
   }
 
   return self;
@@ -369,7 +366,7 @@ Tensor& random_from_to_impl(
 ```
 
 **关键决策点**：
-- **range == 0** 表示完整 64 位范围（例如 int64 的 [-2^63, 2^63)）
+- **路径 3**（`from == int64_min && to == None`）：调用特殊的 `random_full_64_bits_range_kernel`
 - **range < 2^28**（非 FBCODE）或 **range < 2^32**（FBCODE）：使用 32 位随机数
 - **range >= 2^28/2^32**：使用 64 位随机数（组合两个 32 位）
 
@@ -469,7 +466,7 @@ void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range,
 ```
 
 **关键设计决策**：
-- **FBCODE 版本**：`range >= 2^32` 时使用 64 位（严格无偏）
+- **FBCODE 版本**：当类型为 `int64_t/double/float/BFloat16` **且** `range >= 2^32` 时使用 64 位
 - **开源版本**：`range >= 2^28` 时使用 64 位（允许 ~5% modulo bias）
 - **向量化**：`curand4` 一次生成 4 个 32 位随机数
 
@@ -748,7 +745,7 @@ Tensor& randperm_out_cuda(int64_t n, std::optional<Generator> generator, Tensor&
 
 **处理重复 key**：
 
-文件位置: `aten/src/ATen/native/cuda/Randperm.cuh:13-39`
+文件位置: `aten/src/ATen/native/cuda/Randperm.cuh:12-39`
 
 ```cpp
 template<typename T, typename scalar_t>
@@ -798,37 +795,42 @@ keys: 001 010 011 011 011 100 101 110 110
 
 ### 4.7 random_full_64_bits_range_kernel（完整 64 位范围）
 
-文件位置: `aten/src/ATen/native/cuda/DistributionTemplates.h:349-376`
+文件位置: `aten/src/ATen/native/cuda/DistributionTemplates.h:353-376`
 
 #### 4.7.1 触发条件
 
 这是一个**特殊 kernel**，专门处理一种极端情况：当需要生成**完整 int64 范围**的随机数时。
 
-**range == 0 的触发逻辑**：
+**触发逻辑**（位于 `aten/src/ATen/native/DistributionTemplates.h:178-182`）：
 
 ```cpp
-// 在 random_from_to_impl 中（第 3.1 节）
-int64_t from = std::numeric_limits<int64_t>::lowest();  // -2^63
-int64_t to = std::numeric_limits<int64_t>::max() + 1;   // 2^63（理论值）
-
-// 计算 range
-uint64_t range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
-// range = uint64_t(2^63) - uint64_t(-2^63)
-//       = 2^63 - (2^64 - 2^63)  // 有符号转无符号时的补码
-//       = 2^64
-
-// 但 uint64_t 最大值是 2^64 - 1，所以会溢出：
-// range = 0  ← 这就是为什么 range == 0 表示完整范围
+// 在 random_from_to_impl 中
+} else {
+  // [std::numeric_limits<int64_t>::lowest(), std::numeric_limits<int64_t>::max()]
+  // range = 2^64
+  CHECK_EMPTY_AND_RETURN(self);
+  random_from_to_kernel<RNG>()(iter, generator);  // 无 range 参数版本
+}
 ```
 
-**分派逻辑**（回顾第 3.1 节）：
+触发条件是：`from == std::numeric_limits<int64_t>::lowest() && !to_opt.has_value()`
+
+当用户调用 `tensor.random_()` 无参数版本时，对于 int64 类型会进入此路径。
+
+**分派逻辑**（完整版）：
 
 ```cpp
-if (range == 0) {
-  // 特殊情况：完整 64 位范围
-  Stub()(iter, gen);  // 调用 random_full_64_bits_range_kernel
+if (to_opt.has_value()) {
+  // 有明确的 [from, to) 范围
+  range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
+  random_from_to_kernel<RNG>()(iter, range, from, generator);
+} else if (from != std::numeric_limits<int64_t>::lowest()) {
+  // [from, dtype_max]
+  range = static_cast<uint64_t>(to_inc) - static_cast<uint64_t>(from) + 1;
+  random_from_to_kernel<RNG>()(iter, range, from, generator);
 } else {
-  Stub()(iter, range, from, gen);  // 调用 random_from_to_kernel
+  // 完整 64 位范围，调用特殊 kernel
+  random_from_to_kernel<RNG>()(iter, generator);  // 无 range 参数
 }
 ```
 
@@ -926,7 +928,7 @@ void random_full_64_bits_range_kernel(TensorIteratorBase& iter, RNG gen) {
 
 ### 5.1 random_from_to_kernel CPU 版本
 
-文件位置: `aten/src/ATen/native/cpu/DistributionTemplates.h:21-34`
+文件位置: `aten/src/ATen/native/cpu/DistributionTemplates.h:25-34`
 
 CPU 实现相对简单，使用 TensorIterator 的 lambda：
 
@@ -949,7 +951,7 @@ void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t bas
 
 **uniform_int_from_to_distribution**：
 
-文件位置: `aten/src/ATen/core/DistributionsHelper.h:37-62`
+文件位置: `aten/src/ATen/core/DistributionsHelper.h:36-62`
 
 ```cpp
 template <typename T>
@@ -982,9 +984,11 @@ struct uniform_int_from_to_distribution {
 
 ### 5.2 randperm CPU 实现
 
-文件位置: `aten/src/ATen/native/TensorFactories.cpp:1404-1449`
+文件位置: `aten/src/ATen/native/TensorFactories.cpp:1404-1431`
 
-CPU 版本使用**经典的 Fisher-Yates shuffle**：
+CPU 版本使用 **Fisher-Yates shuffle**，但有两条路径：
+- **小 n**（`n < UINT32_MAX/20`）：传统 Fisher-Yates + 32 位随机数
+- **大 n**：inside-out Fisher-Yates 变体 + 64 位随机数（避免 modulo bias）
 
 ```cpp
 Tensor& randperm_out_cpu(
@@ -1224,7 +1228,7 @@ at::cuda::cub::radix_sort_pairs<int, int64_t>(
     ↓ 步骤 5: 检测并处理 key 重复的"岛"
 randperm_handle_duplicate_keys(keys_out, result.data_ptr(), bits=20, n=1000, generator)
     ↓
-Randperm.cuh:43-56
+Randperm.cuh:42-56
     ↓ 获取 Philox 状态
 gen = get_generator_or_default<CUDAGeneratorImpl>(generator, ...)
 rng_engine_inputs = gen->philox_cuda_state(counter_offset=1000)
