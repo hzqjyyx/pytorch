@@ -1,0 +1,233 @@
+--------------------------------
+TopKTypeConfig (类型转换配置)
+来源: aten/src/ATen/native/cuda/SortingRadixSelect.cuh
+--------------------------------
+
+【作用】
+为不同标量类型提供到无符号整数的可比较转换，用于基数选择算法
+
+【类型映射】
+float/double → uint32/uint64        # 保持浮点数排序语义（含NaN处理）
+int8/int16/int32/int64 → uint32/64  # 有符号整数偏移到无符号范围
+Half/BFloat16 → uint32              # 半精度浮点同理
+uint8 → uint32                       # 直接转换
+
+【接口】
+convert(v: scalar_t) -> RadixType
+    用途: 将原始值转为可排序的无符号整数表示
+    性质: v1 < v2 ⟺ convert(v1) < convert(v2)
+
+deconvert(v: RadixType) -> scalar_t
+    用途: 从无符号整数表示恢复原始值
+
+【float/double转换逻辑】
+convert(v):
+    x = reinterpret_as_int(v)
+    # 根据符号位选择掩码:
+    # 负数: 翻转所有位（符号位+指数+尾数）
+    # 正数: 只翻转符号位
+    mask = (x & sign_bit) ? all_bits : sign_bit
+    return (v == v) ? (x ^ mask) : max_uint  # NaN映射到最大值
+
+deconvert(v):
+    mask = (v & sign_bit) ? sign_bit : all_bits
+    return reinterpret_as_float(v ^ mask)
+
+【整数转换逻辑】
+convert(v: int_t):
+    return uint_t(v + offset)  # offset = 2^(bits-1)
+
+deconvert(v: uint_t):
+    return int_t(v - offset)
+
+【备注】
+- NaN 值会聚集到一起（映射到 0xffffffff/0xffffffffffffffff）
+- 负无穷 → 0x0000..., 正无穷 → 0x1ff00...
+- 转换保持排序顺序，支持基数排序/选择算法
+
+--------------------------------
+countRadixUsingMask
+来源: aten/src/ATen/native/cuda/SortingRadixSelect.cuh
+--------------------------------
+
+【签名】
+    @device
+    countRadixUsingMask<scalar_t, bitwise_t, index_t, CountType, RadixSize, RadixBits>(
+        counts: CountType[RadixSize],           # 输出: 每个线程的计数
+        smem: CountType[RadixSize],             # 共享内存: 块级聚合
+        desired: bitwise_t,                     # 目标位模式
+        desiredMask: bitwise_t,                 # 有效位掩码
+        radixDigitPos: int,                     # 当前处理的基数位位置
+        sliceSize: index_t,                     # 切片元素总数
+        withinSliceStride: index_t,             # 切片内跨步
+        data: scalar_t[sliceSize * withinSliceStride]
+    )
+
+【算法】
+    # Step 1: 清空计数
+    for i in range(RadixSize):
+        counts[i] = 0
+
+    if threadIdx.x < RadixSize:
+        smem[threadIdx.x] = 0
+    __syncthreads()
+
+    # Step 2: Warp级投票统计
+    for i in range(threadIdx.x, sliceSize, blockDim.x):
+        val = TopKTypeConfig::convert(data[i * withinSliceStride])
+        
+        # 检查是否匹配过滤条件
+        hasVal = (val & desiredMask) == desired
+        
+        # 提取当前基数位的数字 (radixDigitPos 开始的 RadixBits 位)
+        digitInRadix = Bitfield::getBitfield(val, radixDigitPos, RadixBits)
+        
+        # 对每个可能的基数数字投票
+        for j in range(RadixSize):
+            vote = hasVal and (digitInRadix == j)
+            counts[j] += __popc(WARP_BALLOT(vote))  # warp内统计投票数
+
+    # Step 3: 每个warp的lane 0原子累加到共享内存
+    if getLaneId() == 0:
+        for i in range(RadixSize):
+            gpuAtomicAddNoReturn(&smem[i], counts[i])
+    
+    __syncthreads()
+
+    # Step 4: 广播块级结果到所有线程
+    for i in range(RadixSize):
+        counts[i] = smem[i]
+    
+    __syncthreads()
+
+【并行模式】
+    - 每个线程处理 sliceSize / blockDim.x 个元素
+    - Warp级并行: WARP_BALLOT 统计同一warp内的投票
+    - Block级归约: 原子加聚合所有warp的结果
+    - 使用共享内存避免全局内存竞争
+
+【备注】
+    - RadixSize = 2^RadixBits (通常为4，即基数为4)
+    - desiredMask 用于过滤已确定的高位数字
+    - ROCm 使用 __popcll(WARP_BALLOT(vote))，CUDA 使用 __popc(WARP_BALLOT(vote, mask))
+
+--------------------------------
+findPattern
+来源: aten/src/ATen/native/cuda/SortingRadixSelect.cuh
+--------------------------------
+
+【签名】
+    @device
+    findPattern<scalar_t, bitwise_t, index_t>(
+        smem: scalar_t[2],                      # 共享内存: [found_flag, value]
+        data: scalar_t[sliceSize * withinSliceStride],
+        sliceSize: index_t,
+        withinSliceStride: index_t,
+        desired: bitwise_t,                     # 目标位模式
+        desiredMask: bitwise_t                  # 有效位掩码
+    ) -> scalar_t
+
+【算法】
+    # Step 1: 初始化共享内存标志
+    if threadIdx.x < 2:
+        smem[threadIdx.x] = 0
+    __syncthreads()
+
+    # Step 2: 所有线程参与搜索（确保同步）
+    numIterations = round_up(sliceSize, blockDim.x)
+    for i in range(threadIdx.x, numIterations, blockDim.x):
+        inRange = (i < sliceSize)
+        v = data[i * withinSliceStride] if inRange else 0
+        
+        # 检查是否匹配模式
+        if inRange and (TopKTypeConfig::convert(v) & desiredMask) == desired:
+            smem[0] = 1        # 设置找到标志
+            smem[1] = v        # 存储值
+        
+        __syncthreads()
+        
+        # 检查是否有线程找到
+        if smem[0] != 0:
+            return smem[1]     # 所有线程返回相同值
+        
+        __syncthreads()
+
+    # 不应到达此处（表示逻辑错误）
+    CUDA_KERNEL_ASSERT(false)
+    return 0
+
+【并行模式】
+    - 每个线程检查不同元素
+    - 找到匹配值后通过共享内存广播
+    - 所有线程同步返回相同值
+
+【备注】
+    - 仅在已知存在唯一匹配值时调用
+    - 使用 smem[0] 作为标志避免 v=0 的歧义
+
+--------------------------------
+radixSelect
+来源: aten/src/ATen/native/cuda/SortingRadixSelect.cuh
+--------------------------------
+
+【签名】
+    @device
+    radixSelect<scalar_t, bitwise_t, index_t>(
+        data: scalar_t[sliceSize * withinSliceStride],
+        k: index_t,                             # 选择第k大/小元素（1-based）
+        largest: bool,                          # true=第k大, false=第k小
+        sliceSize: index_t,
+        withinSliceStride: index_t,
+        smem: int[RADIX_SIZE],                  # 共享内存
+        topK: scalar_t*                         # 输出: 第k大/小元素
+    )
+
+【算法】
+    # 初始化
+    desired = 0           # 当前确定的位模式
+    desiredMask = 0       # 已确定位的掩码
+    kToFind = k           # 剩余需要查找的排名
+
+    # 从最高位到最低位迭代（每次处理 RADIX_BITS 位）
+    for digitPos in range(sizeof(scalar_t)*8 - RADIX_BITS, 0, -RADIX_BITS):
+        
+        # Step 1: 统计当前基数位的分布
+        countRadixUsingMask(counts, smem, desired, desiredMask, 
+                           digitPos, sliceSize, withinSliceStride, data)
+        
+        # Step 2: 根据 largest 决定遍历顺序
+        for i in (descending if largest else ascending):
+            count = counts[i]
+            
+            # Case A: 找到唯一值
+            if count == 1 and kToFind == 1:
+                desired = Bitfield::setBitfield(desired, i, digitPos, RADIX_BITS)
+                desiredMask = Bitfield::setBitfield(desiredMask, RADIX_MASK, digitPos, RADIX_BITS)
+                
+                # 搜索匹配 (desired & desiredMask) 的唯一元素
+                *topK = findPattern(smem, data, sliceSize, withinSliceStride, 
+                                   desired, desiredMask)
+                return
+            
+            # Case B: 范围缩小到当前基数数字
+            if count >= kToFind:
+                desired = Bitfield::setBitfield(desired, i, digitPos, RADIX_BITS)
+                desiredMask = Bitfield::setBitfield(desiredMask, RADIX_MASK, digitPos, RADIX_BITS)
+                break  # 继续处理下一组低位
+            
+            # Case C: 排除当前基数数字，继续寻找
+            kToFind -= count
+
+    # 所有位都已确定但非唯一（存在重复值）
+    *topK = TopKTypeConfig::deconvert(desired)
+
+【并行模式】
+    - 块内所有线程协同执行
+    - 迭代次数: sizeof(scalar_t)*8 / RADIX_BITS（如 float 为 32/2=16 轮）
+    - 每轮调用 countRadixUsingMask 进行块级归约
+
+【备注】
+    - RADIX_BITS = 2, RADIX_SIZE = 4, RADIX_MASK = 3
+    - 基数选择算法: 逐位确定第k大/小元素的位表示
+    - largest=true: 从高到低累积元素，跳过不足k的前缀
+    - largest=false: 从低到高累积元素，同理

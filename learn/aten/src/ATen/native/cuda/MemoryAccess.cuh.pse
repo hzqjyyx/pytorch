@@ -1,0 +1,234 @@
+--------------------------------
+内存访问工具 (向量化与循环策略)
+来源: aten/src/ATen/native/cuda/MemoryAccess.cuh
+--------------------------------
+
+【核心数据结构】
+
+aligned_vector<scalar_t, vec_size>
+    用途: 强制对齐的向量类型，触发硬件向量化加载/存储
+    对齐: alignas(sizeof(scalar_t) * vec_size)
+    字段: val[vec_size]
+
+【函数】
+
+static_unroll<func, end, current=0>::with_args(args...)
+    用途: 编译期循环展开，模拟 #pragma unroll 但支持 std::get<i>(tuple)
+    实现: 递归模板，func<current>::apply(args...) 然后调用 static_unroll<func, end, current+1>
+    终止: current == end 时特化为空操作
+
+load_vector<vec_size>(ptr: scalar_t*, offset: uint32) -> aligned_vector<scalar_t, vec_size>
+    @device
+    用途: 向量化加载，单次加载 vec_size 个元素
+    实现: reinterpret_cast<aligned_vector*>(ptr)[offset]
+    特例: bool 类型通过 uint8_t 加载后转换
+
+can_vectorize_up_to<scalar_t>(ptr: char*) -> int
+    @host @device
+    用途: 检测指针可支持的最大向量化宽度 (1/2/4/8/16)
+    实现: 检查地址对齐 (address % vec{2,4,8,16}_alignment)
+    平台: ROCm 对 1/2 字节类型支持 vec16，CUDA 最大 vec8
+
+can_vectorize_up_to<func_t>(pointers: array) -> int
+    用途: 检测函数所有参数的最小向量化宽度
+    实现: 取 return_type 和所有 arg_type 的最小 can_vectorize_up_to
+
+【加载/存储策略】
+
+LoadWithoutCast
+    load<scalar_t>(base_ptr: char*, offset: uint32, arg: int) -> scalar_t
+        @device
+        用途: 直接加载，不进行类型转换
+        实现: c10::load(reinterpret_cast<scalar_t*>(base_ptr) + offset)
+
+LoadWithCast<N>
+    状态:
+        dtypes: array<ScalarType, N>        # 每个输入的实际类型
+        element_sizes: array<uint32, N>     # 每个输入的元素大小
+    
+    构造: LoadWithCast(iter: TensorIteratorBase)
+        初始化: dtypes[i] = iter.dtype(i + noutputs)
+                element_sizes[i] = c10::elementSize(dtype[i])
+    
+    load<scalar_t>(base_ptr: char*, offset: uint32, arg: int) -> scalar_t
+        @device
+        用途: 加载并转换为目标类型
+        实现: ptr = base_ptr + element_sizes[arg] * offset
+              return c10::fetch_and_cast<scalar_t>(dtypes[arg], ptr)
+
+StoreWithoutCast
+    store<scalar_t>(value: scalar_t, base_ptr: char*, offset: uint32, arg: int = 0)
+        @device
+        用途: 直接存储，不进行类型转换
+        实现: *(reinterpret_cast<scalar_t*>(base_ptr) + offset) = value
+
+StoreWithCast<N>
+    状态:
+        dtypes: array<ScalarType, N>        # 每个输出的实际类型
+        element_sizes: array<uint32, N>     # 每个输出的元素大小
+    
+    构造: StoreWithCast(iter: TensorIteratorBase)
+        初始化: dtypes[i] = iter.dtype(i)
+                element_sizes[i] = c10::elementSize(dtype[i])
+    
+    store<scalar_t>(value: scalar_t, base_ptr: char*, offset: uint32, arg: int = 0)
+        @device
+        用途: 转换类型后存储
+        实现: ptr = base_ptr + element_sizes[arg] * offset
+              c10::cast_and_store<scalar_t>(dtypes[arg], ptr, value)
+
+【内存访问策略】
+
+policies::unroll<data_t, inp_calc_t, out_calc_t, loader_t, storer_t, elems_per_thread, num_outputs=1>
+    @device
+    用途: 非向量化的循环展开策略，支持非连续张量
+    
+    状态:
+        data: data_t                         # 指针数组 [output, input0, input1, ...]
+        remaining: int                       # 剩余元素数
+        input_offset_calculator: inp_calc_t  # 输入偏移计算器
+        output_offset_calculator: out_calc_t # 输出偏移计算器
+        loader: loader_t                     # 加载策略
+        storer: storer_t                     # 存储策略
+    
+    check_inbounds(thread_work_elem: int) -> bool
+        实现: threadIdx.x + thread_work_elem * num_threads() < remaining
+    
+    load(args: args_t*, idx: int)
+        算法:
+            thread_idx = threadIdx.x
+            for i in range(elems_per_thread):
+                if thread_idx >= remaining: return
+                linear_idx = thread_idx + elems_per_thread * num_threads() * idx
+                offset = input_offset_calculator.get(linear_idx)
+                # 使用 static_unroll 加载每个参数
+                for arg_index in range(arity):
+                    args[i][arg_index] = loader.load<arg_t>(
+                        data[arg_index + num_outputs], 
+                        offset[arg_index], 
+                        arg_index
+                    )
+                thread_idx += num_threads()
+    
+    store(from: scalar_t*, idx: int)
+        算法:
+            thread_idx = threadIdx.x
+            for i in range(elems_per_thread):
+                if thread_idx >= remaining: return
+                linear_idx = thread_idx + elems_per_thread * num_threads() * idx
+                offset = output_offset_calculator.get(linear_idx)[0]
+                storer.store(from[i], data[0], offset)
+                thread_idx += num_threads()
+
+policies::vectorized<vec_size, data_t, elems_per_thread>
+    @device
+    用途: 向量化访问策略，假设所有张量连续且已对齐
+    
+    约束: elems_per_thread % vec_size == 0
+    
+    状态:
+        data: data_t                         # 指针数组
+        loop_size = elems_per_thread / vec_size
+    
+    check_inbounds(thread_work_elem: int) -> bool
+        实现: return true  # 调用者保证边界
+    
+    load_single_arg(to: accessor_t, from: scalar_t*)
+        算法:
+            thread_idx = threadIdx.x
+            for i in range(loop_size):
+                index = thread_idx + i * num_threads()
+                v = load_vector<vec_size>(from, index)
+                for j in range(vec_size):
+                    to(vec_size * i + j) = v.val[j]
+    
+    load(args: args_t*, idx: int)
+        算法:
+            # 使用 static_unroll 对每个参数调用 load_single_arg
+            for arg_index in range(arity):
+                ptr = reinterpret_cast<arg_t*>(data[arg_index + 1]) + block_work_size * idx
+                load_single_arg(
+                    lambda thread_unroll_idx: args[thread_unroll_idx][arg_index],
+                    ptr
+                )
+    
+    store(from: scalar_t*, idx: int)
+        算法:
+            to = reinterpret_cast<scalar_t*>(data[0]) + elems_per_thread * num_threads() * idx
+            to_vec = reinterpret_cast<aligned_vector<scalar_t, vec_size>*>(to)
+            thread_idx = threadIdx.x
+            for i in range(loop_size):
+                index = thread_idx + i * num_threads()
+                v.val[j] = from[vec_size * i + j] for j in range(vec_size)
+                to_vec[index] = v
+
+policies::multi_outputs_unroll<data_t, inp_calc_t, out_calc_t, num_outputs>
+    @device
+    用途: 多输出的循环展开策略
+    
+    状态:
+        data: data_t
+        remaining: int
+        input_offset_calculator: inp_calc_t
+        output_offset_calculator: out_calc_t
+        loader: LoadWithoutCast
+        storer: StoreWithoutCast
+    
+    check_inbounds(thread_work_elem: int) -> bool
+        实现: threadIdx.x + thread_work_elem * num_threads() < remaining
+    
+    load(args: args_t*, idx: int)
+        算法: 同 unroll::load，但 num_outputs 影响 data 数组索引
+    
+    store(from: return_t*, idx: int)
+        算法:
+            thread_idx = threadIdx.x
+            for i in range(thread_work_size()):
+                if thread_idx >= remaining: return
+                linear_idx = thread_idx + block_work_size() * idx
+                offsets = output_offset_calculator.get(linear_idx)
+                # 使用 static_unroll 存储每个输出
+                for output_idx in range(num_outputs):
+                    T* to = reinterpret_cast<T*>(data[output_idx]) + offsets[output_idx]
+                    *to = thrust::get<output_idx>(from[i])
+                thread_idx += num_threads()
+
+【辅助工具】
+
+vectorized_load_helper<arg_index>
+    用途: 配合 static_unroll 向量化加载单个参数
+    apply(self: policy_t, args: args_t*, idx: int, block_work_size: int)
+        实现: ptr = reinterpret_cast<arg_t*>(self.data[arg_index + 1]) + block_work_size * idx
+              self.load_single_arg(lambda i: args[i][arg_index], ptr)
+
+unroll_load_helper<arg_index>
+    用途: 配合 static_unroll 加载单个参数（非向量化）
+    apply(self: policy_t, args: args_t*, offset: offset_t, loader: loader_t, j: int, num_outputs: int)
+        实现: args[j][arg_index] = loader.load<arg_t>(
+                  self.data[arg_index + num_outputs], 
+                  offset[arg_index], 
+                  arg_index
+              )
+
+multi_outputs_store_helper<current>
+    用途: 配合 static_unroll 存储多输出
+    apply(data: data_t, offsets: offsets_t, ret: thrust::tuple<Args...>)
+        @host @device
+        实现: T* to = reinterpret_cast<T*>(data[current]) + offsets[current]
+              *to = thrust::get<current>(ret)
+
+【备注】
+    - 策略选择:
+        - vectorized: 连续张量 + 对齐 + 无类型转换
+        - unroll: 非连续张量或需要类型转换
+        - multi_outputs_unroll: 多输出场景
+    
+    - 向量化条件:
+        - 指针对齐到 vec_size * sizeof(scalar_t)
+        - 张量连续（stride == sizeof(scalar_t)）
+        - 剩余元素数是 vec_size 的倍数
+    
+    - 性能优化:
+        - aligned_vector 触发 ld.128/st.128 指令
+        - static_unroll 避免运行时循环开销
+        - thrust::tuple 支持多参数函数的类型安全

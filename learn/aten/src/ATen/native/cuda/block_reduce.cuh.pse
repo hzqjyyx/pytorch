@@ -1,0 +1,225 @@
+--------------------------------
+WarpReduceSum
+来源: aten/src/ATen/native/cuda/block_reduce.cuh
+--------------------------------
+
+【签名】
+    @device
+    WarpReduceSum(val: T) -> T
+
+【算法】
+    # Warp内归约求和
+    for offset in [C10_WARP_SIZE/2, C10_WARP_SIZE/4, ..., 1]:
+        val += WARP_SHFL_DOWN(val, offset)
+    return val
+
+【并行模式】
+    warp_reduce(sum)
+
+【备注】
+    - 要求 blockDim 是 C10_WARP_SIZE 的倍数
+    - 使用 warp shuffle 指令实现无共享内存的归约
+
+--------------------------------
+WarpReduceMax
+来源: aten/src/ATen/native/cuda/block_reduce.cuh
+--------------------------------
+
+【签名】
+    @device
+    WarpReduceMax(val: T) -> T
+
+【算法】
+    # Warp内归约求最大值
+    for offset in [C10_WARP_SIZE/2, C10_WARP_SIZE/4, ..., 1]:
+        val = max_propagate_nan(val, WARP_SHFL_DOWN(val, offset))
+    return val
+
+【并行模式】
+    warp_reduce(max)
+
+【备注】
+    - 使用 max_propagate_nan 保证 NaN 传播
+
+--------------------------------
+BlockReduceSum
+来源: aten/src/ATen/native/cuda/block_reduce.cuh
+--------------------------------
+
+【签名】
+    @device
+    BlockReduceSum(val: T, shared: T*) -> T
+    
+    模板参数:
+    - B: Block1D | Block2D (默认 Block1D)
+
+【算法】
+    tid = B::Tid()
+    lid = tid % C10_WARP_SIZE          # lane id
+    wid = tid / C10_WARP_SIZE          # warp id
+    
+    # Step 1: Warp内归约
+    val = WarpReduceSum(val)
+    __syncthreads()
+    
+    # Step 2: 每个warp的lane 0写入共享内存
+    if lid == 0:
+        shared[wid] = val
+    __syncthreads()
+    
+    # Step 3: 第一个warp对所有warp结果再次归约
+    val = (tid < B::Warps()) ? shared[lid] : T(0)
+    if wid == 0:
+        val = WarpReduceSum(val)
+    
+    return val
+
+【并行模式】
+    block_reduce(sum)
+    
+    两阶段归约:
+    1. 各warp内并行归约 (WarpReduceSum)
+    2. 第一个warp归约所有warp结果
+
+【备注】
+    - 返回值仅对 thread 0 有效
+    - shared 需要至少 sizeof(T) * num_warps 大小
+    - 算法限制: 最多处理 C10_WARP_SIZE² 个线程
+    - __syncthreads() 防止连续调用时的竞态
+
+--------------------------------
+BlockReduceMax
+来源: aten/src/ATen/native/cuda/block_reduce.cuh
+--------------------------------
+
+【签名】
+    @device
+    BlockReduceMax(val: T, shared: T*) -> T
+    
+    模板参数:
+    - B: Block1D | Block2D (默认 Block1D)
+
+【算法】
+    tid = B::Tid()
+    lid = tid % C10_WARP_SIZE
+    wid = tid / C10_WARP_SIZE
+    
+    # Step 1: Warp内归约
+    val = WarpReduceMax(val)
+    __syncthreads()
+    
+    # Step 2: 每个warp的lane 0写入共享内存
+    if lid == 0:
+        shared[wid] = val
+    __syncthreads()
+    
+    # Step 3: 第一个warp对所有warp结果再次归约
+    val = (tid < B::Warps()) ? shared[lid] : T(numeric_limits<T>::lowest())
+    if wid == 0:
+        val = WarpReduceMax(val)
+    
+    return val
+
+【并行模式】
+    block_reduce(max)
+
+【备注】
+    - 使用 numeric_limits<T>::lowest() 作为初始值
+    - 其他约束同 BlockReduceSum
+
+--------------------------------
+WarpReduce (通用版本)
+来源: aten/src/ATen/native/cuda/block_reduce.cuh
+--------------------------------
+
+【签名】
+    @device
+    WarpReduce(val: T, op: ReduceOp) -> T
+
+【算法】
+    for offset in [C10_WARP_SIZE/2, C10_WARP_SIZE/4, ..., 1]:
+        val = op.combine(val, op.warp_shfl_down(val, offset))
+    return val
+
+【并行模式】
+    warp_reduce(op)
+
+【备注】
+    - 通用化版本，支持自定义 ReduceOp
+
+--------------------------------
+BlockReduce (通用版本)
+来源: aten/src/ATen/native/cuda/block_reduce.cuh
+--------------------------------
+
+【签名】
+    @device
+    BlockReduce(
+        val: T, 
+        op: ReduceOp, 
+        identity_element: T, 
+        shared: T*
+    ) -> T
+    
+    模板参数:
+    - B: Block1D | Block2D (默认 Block1D)
+
+【算法】
+    tid = B::Tid()
+    lid = tid % C10_WARP_SIZE
+    wid = tid / C10_WARP_SIZE
+    
+    # Step 1: Warp内归约
+    val = WarpReduce(val, op)
+    __syncthreads()
+    
+    # Step 2: 每个warp的lane 0写入共享内存
+    if lid == 0:
+        shared[wid] = val
+    __syncthreads()
+    
+    # Step 3: 第一个warp对所有warp结果再次归约
+    val = (tid < B::Warps()) ? shared[lid] : identity_element
+    if wid == 0:
+        val = WarpReduce(val, op)
+    
+    return val
+
+【并行模式】
+    block_reduce(op)
+
+【备注】
+    - 通用化版本，支持自定义归约操作和单位元
+
+--------------------------------
+Block1D / Block2D (辅助结构)
+来源: aten/src/ATen/native/cuda/block_reduce.cuh
+--------------------------------
+
+【接口】
+    Block1D::Tid() -> int
+        用途: 返回线程在block内的1D索引 (threadIdx.x)
+    
+    Block1D::Warps() -> int
+        用途: 返回block内warp数量 (blockDim.x / C10_WARP_SIZE)
+    
+    Block2D::Tid() -> int
+        用途: 返回线程在block内的线性化索引 (threadIdx.x + threadIdx.y * blockDim.x)
+    
+    Block2D::Warps() -> int
+        用途: 返回block内warp数量 (blockDim.x * blockDim.y / C10_WARP_SIZE)
+
+【备注】
+    - 用于模板参数 B，统一处理 1D/2D block 配置
+
+--------------------------------
+常量定义
+来源: aten/src/ATen/native/cuda/block_reduce.cuh
+--------------------------------
+
+kCUDABlockReduceNumThreads = 512
+    # 推荐的block归约线程数
+
+kCUDABlockReduceMaxThreads = C10_WARP_SIZE * C10_WARP_SIZE
+    # 最大支持线程数 (算法限制: 两次WarpReduce)
+    # 注: ≥ 当前硬件最大block size (1024)

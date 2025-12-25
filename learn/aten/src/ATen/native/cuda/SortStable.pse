@@ -1,0 +1,314 @@
+--------------------------------
+launch_stable_sort_kernel
+来源: aten/src/ATen/native/cuda/SortStable.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_stable_sort_kernel(
+        self: Tensor[*D],
+        dim: int64,
+        descending: bool,
+        values: Tensor[*D],      # 预分配的输出，contiguous
+        indices: Tensor[*D, int64]  # 预分配的输出，contiguous
+    ) -> void
+
+    约束:
+    - values 和 indices 必须预分配且 contiguous
+
+【算法】
+    if self.numel == 0:
+        return
+
+    nsort = self.size(dim)
+    numel_or_intmax = min(self.numel, INT_MAX)
+    nbatch = (numel_or_intmax / nsort) * nsort
+
+    # 分批处理：每次处理 nbatch 个元素
+    remaining = self.numel
+    ptr_offset = 0
+
+    while remaining > 0:
+        n = min(remaining, nbatch)
+        nsegments = n / nsort
+
+        # 根据 segment 数量和 segment 大小选择策略
+        if nsegments == 1 or nsort >= 1000000:
+            # 单segment或segment很大：逐segment独立排序
+            segmented_sort_large_segments(
+                nsegments, nsort, n, descending,
+                self_ptr + ptr_offset,
+                values_ptr + ptr_offset,
+                indices_ptr + ptr_offset
+            )
+
+        else if nsegments < 128:
+            # segment数量少：使用全局排序法
+            segmented_sort_pairs_by_full_sort(
+                nsegments, nsort, n, descending,
+                self_ptr + ptr_offset,
+                values_ptr + ptr_offset,
+                indices_ptr + ptr_offset
+            )
+
+        else:
+            # 中等规模：使用 CUB segmented sort
+            segmented_sort_pairs(
+                nsegments, nsort, n, descending,
+                self_ptr + ptr_offset,
+                values_ptr + ptr_offset,
+                indices_ptr + ptr_offset
+            )
+
+        remaining -= n
+        ptr_offset += n
+
+【备注】
+    - 支持所有数据类型：整数、浮点、bool、half、bfloat16
+    - 三种策略的选择基于性能启发式：
+      * large_segments: 单次排序足够大，占满GPU
+      * full_sort: segment少，两次全局排序更高效
+      * segmented_sort_pairs: 一般情况，CUB分段排序
+
+--------------------------------
+segmented_sort_large_segments (内部辅助)
+来源: aten/src/ATen/native/cuda/SortStable.cu
+--------------------------------
+
+【签名】
+    @host→device
+    segmented_sort_large_segments(
+        nsegments: int64,
+        nsort: int64,
+        n: int64,
+        descending: bool,
+        self_ptr: const scalar_t*,
+        values_ptr: scalar_t*,
+        indices_ptr: int64_t*
+    ) -> void
+
+【算法】
+    # 初始化索引 [0, 1, 2, ..., nsort-1]
+    indices = device_alloc(nsort)
+    fill_reverse_indices_kernel<<<grid, block>>>(indices, nsort, nsort_divider)
+
+    # 逐segment调用 CUB radix sort
+    for i in range(nsegments):
+        at::cuda::cub::radix_sort_pairs(
+            self_ptr,       # keys 输入
+            values_ptr,     # keys 输出
+            indices,        # values 输入（初始索引）
+            indices_ptr,    # values 输出（排序后索引）
+            nsort,
+            descending
+        )
+        # 移动指针到下一个segment
+        self_ptr += nsort
+        values_ptr += nsort
+        indices_ptr += nsort
+
+【并行模式】
+    - fill_reverse_indices_kernel: parallel_for idx in range(nsort)
+        indices[idx] = idx % nsort
+    - 每个segment独立排序，串行遍历segments
+
+--------------------------------
+segmented_sort_pairs_by_full_sort (内部辅助)
+来源: aten/src/ATen/native/cuda/SortStable.cu
+--------------------------------
+
+【签名】
+    @host→device
+    segmented_sort_pairs_by_full_sort(
+        nsegments: int64,
+        nsort: int64,
+        n: int64,
+        descending: bool,
+        self_ptr: const scalar_t*,
+        values_ptr: scalar_t*,
+        indices_ptr: int64_t*
+    ) -> void
+
+【算法】
+    # 全局排序法（见文件头注释说明）
+    # 输入: values 和对应的 (segment_id, index_in_segment)
+
+    numel = nsort * nsegments
+    segment_bits = ceil(log2(nsegments))
+
+    # Step 1: 填充索引和segment_id
+    i_s_ptr = device_alloc(numel * sizeof(int2))  # int2{segment_id, index}
+    fill_index_and_segment_kernel<<<grid, block>>>(i_s_ptr, numel, nsort_divider)
+    # 结果: i_s_ptr[k] = {k / nsort, k % nsort}
+
+    # Step 2: 按 values 全局排序（stable）
+    i_s_ptr2 = device_alloc(numel * sizeof(int2))
+    at::cuda::cub::radix_sort_pairs(
+        self_ptr,    # keys
+        nullptr,     # keys 输出（丢弃）
+        i_s_ptr,     # values 输入
+        i_s_ptr2,    # values 输出
+        n,
+        descending
+    )
+
+    # Step 3: 按 segment_id 稳定排序（仅看 int2 的低32位）
+    at::cuda::cub::radix_sort_keys(
+        reinterpret_cast<int64_t*>(i_s_ptr2),  # 输入
+        reinterpret_cast<int64_t*>(i_s_ptr),   # 输出
+        n,
+        descending=false,
+        begin_bit=0,
+        end_bit=segment_bits
+    )
+
+    # Step 4: 后处理，恢复 values 和 indices
+    sort_postprocess_kernel<<<grid, block>>>(
+        self_ptr, values_ptr, indices_ptr, i_s_ptr, nsegments, nsort
+    )
+
+【并行模式】
+    - fill_index_and_segment_kernel: parallel_for idx in range(numel)
+        i_s_ptr[idx] = int2{idx / nsort, idx % nsort}
+
+    - sort_postprocess_kernel: parallel_for i in range(numel)
+        segment = i / nsort
+        j = i % nsort
+        offset = segment * nsort
+        idx = i_s_ptr[offset + j].y  # 原始索引
+        indices[offset + j] = idx
+        values[offset + j] = self[offset + idx]
+
+【备注】
+    - 适用于 nsegments < 128 的情况
+    - 两次全局排序：先按值排序，再按segment稳定排序
+    - 稳定性保证：segment内原有顺序在值相同时保持
+
+--------------------------------
+segmented_sort_pairs (内部辅助)
+来源: aten/src/ATen/native/cuda/SortStable.cu
+--------------------------------
+
+【签名】
+    @host→device
+    segmented_sort_pairs(
+        nsegments: int64,
+        nsort: int64,
+        n: int64,
+        descending: bool,
+        self_ptr: const scalar_t*,
+        values_ptr: scalar_t*,
+        indices_ptr: int64_t*
+    ) -> void
+
+【算法】
+    numel = nsort * nsegments
+
+    # 初始化索引 [0, 1, ..., nsort-1, 0, 1, ..., nsort-1, ...]
+    reverse_indices = device_alloc(numel * sizeof(int64_t))
+    fill_reverse_indices_kernel<<<grid, block>>>(
+        reverse_indices, numel, nsort_divider
+    )
+    # 结果: reverse_indices[idx] = idx % nsort
+
+    # CUB 分段排序
+    at::cuda::cub::segmented_sort_pairs(
+        self_ptr,         # keys 输入
+        values_ptr,       # keys 输出
+        reverse_indices,  # values 输入
+        indices_ptr,      # values 输出
+        n,
+        nsegments,
+        offset_t{nsort, 0},  # segment 起始偏移：[0, nsort, 2*nsort, ...]
+        offset_t{nsort, 1},  # segment 结束偏移：[nsort, 2*nsort, 3*nsort, ...]
+        descending
+    )
+
+【并行模式】
+    - fill_reverse_indices_kernel: parallel_for idx in range(numel)
+        reverse_indices[idx] = idx % nsort
+
+    - CUB segmented_sort_pairs: 每个segment并行排序
+
+【备注】
+    - 使用 CUB 库的 DeviceSegmentedRadixSort
+    - offset_t: 自定义迭代器，生成 segment 边界
+      * begin[i] = stride * (begin_base + i) = nsort * i
+      * end[i] = nsort * (i + 1)
+
+--------------------------------
+fill_index_and_segment_kernel (CUDA kernel)
+来源: aten/src/ATen/native/cuda/SortStable.cu
+--------------------------------
+
+【签名】
+    @device
+    fill_index_and_segment_kernel(
+        data: int2*,
+        numel: int,
+        nsort_divider: IntDivider<uint32_t>
+    ) -> void
+
+【算法】
+    parallel_for idx in range(numel):
+        div_mod = nsort_divider.divmod(idx)
+        segment = static_cast<int>(div_mod.div)
+        sort = static_cast<int>(div_mod.mod)
+        data[idx] = int2{segment, sort}
+
+【并行模式】
+    elementwise
+
+--------------------------------
+fill_reverse_indices_kernel (CUDA kernel)
+来源: aten/src/ATen/native/cuda/SortStable.cu
+--------------------------------
+
+【签名】
+    @device
+    fill_reverse_indices_kernel(
+        data: int64_t*,
+        numel: int,
+        nsort_divider: IntDivider<uint32_t>
+    ) -> void
+
+【算法】
+    parallel_for idx in range(numel):
+        data[idx] = nsort_divider.mod(idx)
+
+【并行模式】
+    elementwise
+
+--------------------------------
+sort_postprocess_kernel (CUDA kernel)
+来源: aten/src/ATen/native/cuda/SortStable.cu
+--------------------------------
+
+【签名】
+    @device
+    sort_postprocess_kernel(
+        in: const scalar_t*,
+        out: scalar_t*,
+        index: int64_t*,
+        i_s_ptr: const int2*,  # int2{segment_id, original_index}
+        nsegments: int,
+        nsort: int
+    ) -> void
+
+【算法】
+    parallel_for i in range(nsegments * nsort):
+        segment = i / nsort
+        j = i % nsort
+
+        offset = segment * nsort
+        idx = i_s_ptr[offset + j].y  # 原始索引
+
+        index[offset + j] = idx
+        out[offset + j] = in[offset + idx]
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 从排序后的 (segment_id, index) 对中恢复最终的 values 和 indices
+    - i_s_ptr 已按 segment_id 排序，因此同一 segment 连续

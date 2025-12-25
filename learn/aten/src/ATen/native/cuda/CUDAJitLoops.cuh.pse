@@ -1,0 +1,311 @@
+--------------------------------
+tuple_to_array_helper
+来源: aten/src/ATen/native/cuda/CUDAJitLoops.cuh
+--------------------------------
+
+【签名】
+    tuple_to_array_helper(t: Tuple, seq: index_sequence<I...>) -> array<const void*, N>
+
+【算法】
+    return [&std::get<I>(t)...]  # 将tuple每个元素取地址，装入数组
+
+【备注】
+    - 辅助函数，配合 tuple_to_array 使用
+    - 返回的指针仅在原 tuple 生命周期内有效
+
+--------------------------------
+tuple_to_array
+来源: aten/src/ATen/native/cuda/CUDAJitLoops.cuh
+--------------------------------
+
+【签名】
+    tuple_to_array(extra_args: tuple<Args...>) -> array<const void*, N>
+
+【算法】
+    N = sizeof...(Args)
+    return tuple_to_array_helper(extra_args, make_index_sequence<N>())
+
+【备注】
+    - 将 tuple 转换为 void* 数组，用于传递给 CUDA kernel
+    - 指针仅在原 tuple 生命周期内有效
+
+--------------------------------
+JittedVecKernelCache
+来源: aten/src/ATen/native/cuda/CUDAJitLoops.cuh
+--------------------------------
+
+【状态】
+    vec1: NvrtcFunction    # 向量化1元素
+    vec2: NvrtcFunction    # 向量化2元素
+    vec4: NvrtcFunction    # 向量化4元素
+    vec8: NvrtcFunction    # 向量化8元素
+    vec16: NvrtcFunction   # 向量化16元素 (仅 ROCm)
+
+--------------------------------
+JittedKernelVariantCache
+来源: aten/src/ATen/native/cuda/CUDAJitLoops.cuh
+--------------------------------
+
+【状态】
+    vec: JittedVecKernelCache               # 连续+无类型转换的向量化kernel组
+    noncontiguous: NvrtcFunction            # 非连续+无类型转换
+    dynamic_contiguous: NvrtcFunction       # 连续+有类型转换
+    dynamic_noncontiguous: NvrtcFunction    # 非连续+有类型转换
+
+--------------------------------
+pack_kernel_args
+来源: aten/src/ATen/native/cuda/CUDAJitLoops.cuh
+--------------------------------
+
+【签名】
+    pack_kernel_args(
+        args: initializer_list<const void*>,
+        extra_args: ArrayRef<const void*>
+    ) -> SmallBuffer<const void*, 64>
+
+【算法】
+    ret = new SmallBuffer(args.size() + extra_args.size())
+    copy(args, ret.data())
+    copy(extra_args, ret.data() + args.size())
+    return ret
+
+【备注】
+    - 合并固定参数和额外参数为单一数组
+
+--------------------------------
+launch_jitted_unrolled_kernel
+来源: aten/src/ATen/native/cuda/CUDAJitLoops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    launch_jitted_unrolled_kernel(
+        jiterator_mutex: mutex,
+        fn_cache: NvrtcFunction,                  # kernel缓存
+        desc: KernelDescriptor,                   # kernel描述
+        N: int64,                                 # 元素总数
+        data: array<char*, ntensors>,             # 输入/输出指针数组
+        ic: InputOffsetCalculator,                # 输入偏移计算器
+        oc: OutputOffsetCalculator,               # 输出偏移计算器
+        l: Loader,                                # 加载器 (可能带类型转换)
+        s: Storer,                                # 存储器 (可能带类型转换)
+        contiguous: bool,
+        scalar_pos: BinaryFuncVariant,            # 标量参数位置
+        scalar_val: const void*,
+        extra_args: ArrayRef<const void*>
+    )
+
+【算法】
+    assert 0 < N <= int32_max
+
+    # Step 1: 计算线程工作量和grid大小
+    tws = calc_thread_work_size(desc.nInputs, desc.nOutputs, desc.f_inputs_type, desc.result_type)
+    bws = tws * num_threads()
+    grid = (N + bws - 1) / bws
+
+    # Step 2: JIT编译 (首次调用时)
+    if fn_cache.function == null:
+        lock(jiterator_mutex):
+            if fn_cache.function == null:  # double-check
+                dynamic_casting = (Loader != LoadWithoutCast) or (Storer != StoreWithoutCast)
+                code = at::cuda::jit::generate_code(desc, contiguous, dynamic_casting, scalar_pos, tws)
+                fn_cache = at::cuda::jit::jit_pwise_function(code, desc.name)
+
+    # Step 3: 打包参数并启动kernel
+    args = pack_kernel_args({&N, &data, &ic, &oc, &l, &s, scalar_val}, extra_args)
+    at::cuda::jit::launch_jitted_pwise_function(fn_cache, args.data(), {grid, 1, 1}, {num_threads(), 1, 1})
+
+【备注】
+    - 用于非向量化或有类型转换的场景
+    - 使用 double-checked locking 避免重复编译
+
+--------------------------------
+launch_jitted_vectorized_kernel
+来源: aten/src/ATen/native/cuda/CUDAJitLoops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    launch_jitted_vectorized_kernel<arity>(
+        jiterator_mutex: mutex,
+        fn_cache: JittedVecKernelCache,
+        desc: KernelDescriptor,
+        N: int64,
+        data: array<char*, arity+1>,
+        scalar_pos: BinaryFuncVariant,
+        scalar_val: const void*,
+        extra_args: ArrayRef<const void*>
+    )
+
+【算法】
+    assert 0 < N <= int32_max
+
+    # Step 1: 计算线程工作量和grid大小
+    tws = calc_thread_work_size(desc.nInputs, desc.nOutputs, desc.f_inputs_type, desc.result_type)
+    bws = tws * num_threads()
+    grid = (N + bws - 1) / bws
+
+    # Step 2: 确定向量化宽度
+    vec_size = can_vectorize_up_to(desc, data)
+
+    # CUDA平台优化
+    if not USE_ROCM:
+        input_size = scalarTypeToTypeMeta(desc.f_inputs_type).itemsize()
+        optimal_vec_size = 16 / input_size
+        vec_size = min(optimal_vec_size, vec_size)
+
+        # NVCC bug workaround: 1字节数据不使用vec8
+        if input_size < 2:
+            vec_size = min(vec_size, 4)
+
+    # Step 3: 根据 vec_size 选择对应的缓存函数
+    fn_ptr = match vec_size:
+        16 -> &fn_cache.vec16  # 仅 ROCm
+        8  -> &fn_cache.vec8
+        4  -> &fn_cache.vec4
+        2  -> &fn_cache.vec2
+        1  -> &fn_cache.vec1
+        _  -> assert(false)
+
+    vectorized = (vec_size > 1)
+
+    # Step 4: JIT编译 (首次调用时)
+    if fn_ptr->function == null:
+        lock(jiterator_mutex):
+            if fn_ptr->function == null:
+                code = at::cuda::jit::generate_code(
+                    desc, contiguous=true, dynamic_casting=false,
+                    scalar_pos, tws, vectorized, vec_size)
+                kernel_name = vectorized ? desc.name + "_vectorized" + to_string(vec_size) : desc.name
+                *fn_ptr = at::cuda::jit::jit_pwise_function(code, kernel_name)
+
+    # Step 5: 启动kernel
+    if vectorized:
+        args = pack_kernel_args({&N, &data, scalar_val}, extra_args)
+        at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.data(), {grid, 1, 1}, {num_threads(), 1, 1})
+    else:
+        # vec_size=1 时，回退到非向量化路径
+        ic = TrivialOffsetCalculator<arity>()
+        oc = TrivialOffsetCalculator<1>()
+        l = LoadWithoutCast()
+        s = StoreWithoutCast()
+        args = pack_kernel_args({&N, &data, &ic, &oc, &l, &s, scalar_val}, extra_args)
+        at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.data(), {grid, 1, 1}, {num_threads(), 1, 1})
+
+【备注】
+    - 仅用于连续且无类型转换的场景
+    - 针对不同 vec_size 缓存不同的kernel
+    - CUDA平台限制1字节数据不使用vec8 (NVCC数值精度bug workaround)
+
+--------------------------------
+jitted_gpu_kernel_generic
+来源: aten/src/ATen/native/cuda/CUDAJitLoops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    jitted_gpu_kernel_generic<arity>(
+        jiterator_mutex: mutex,
+        cache: JittedKernelVariantCache,
+        desc: KernelDescriptor,
+        scalar_pos: BinaryFuncVariant,
+        extra_args: ArrayRef<const void*>,
+        iter: TensorIteratorBase,
+        dynamic_casting: bool,
+        scalar_val: const void*
+    )
+
+【算法】
+    assert iter.can_use_32bit_indexing()
+    assert iter.ninputs() == arity
+    assert iter.noutputs() == 1
+
+    # Step 1: 提取数据指针
+    ntensors = arity + 1
+    data = [iter.data_ptr(i) for i in range(ntensors)]
+
+    numel = iter.numel()
+    contiguous = iter.is_contiguous()
+
+    # Step 2: 根据 dynamic_casting 和 contiguous 选择4种kernel路径之一
+
+    if not dynamic_casting:
+        if contiguous:
+            # Case 1: 无类型转换 + 连续 -> 向量化
+            launch_jitted_vectorized_kernel<arity>(
+                jiterator_mutex, cache.vec, desc,
+                numel, data, scalar_pos, scalar_val, extra_args)
+            return
+
+        # Case 2: 无类型转换 + 非连续
+        ic = make_input_offset_calculator<arity>(iter)
+        oc = make_output_offset_calculator(iter)
+        l = LoadWithoutCast()
+        s = StoreWithoutCast()
+        launch_jitted_unrolled_kernel(
+            jiterator_mutex, cache.noncontiguous, desc, numel, data,
+            ic, oc, l, s, contiguous, scalar_pos, scalar_val, extra_args)
+        return
+
+    # Case 3 和 4: 有类型转换
+    s = StoreWithCast<1>(iter)
+    l = LoadWithCast<arity>(iter)
+
+    if contiguous:
+        # Case 3: 有类型转换 + 连续
+        ic = TrivialOffsetCalculator<arity>()
+        oc = TrivialOffsetCalculator<1>()
+        launch_jitted_unrolled_kernel(
+            jiterator_mutex, cache.dynamic_contiguous, desc, numel, data,
+            ic, oc, l, s, contiguous, scalar_pos, scalar_val, extra_args)
+        return
+
+    # Case 4: 有类型转换 + 非连续
+    ic = make_input_offset_calculator<arity>(iter)
+    oc = make_output_offset_calculator(iter)
+    launch_jitted_unrolled_kernel(
+        jiterator_mutex, cache.dynamic_noncontiguous, desc, numel, data,
+        ic, oc, l, s, contiguous, scalar_pos, scalar_val, extra_args)
+
+【备注】
+    - 4种kernel路径:
+      1. 无类型转换 + 连续 -> 向量化
+      2. 无类型转换 + 非连续 -> 非向量化
+      3. 有类型转换 + 连续 -> 非向量化
+      4. 有类型转换 + 非连续 -> 非向量化
+
+--------------------------------
+jitted_gpu_kernel_impl
+来源: aten/src/ATen/native/cuda/CUDAJitLoops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    jitted_gpu_kernel_impl<name, result_type, f_inputs_type, arity, scalar_pos, ExtraArgs...>(
+        iter: TensorIteratorBase,
+        f: string,                                   # kernel函数体代码
+        dynamic_casting: bool,
+        scalar_val: opmath_type<f_inputs_type>,
+        extra_args: tuple<ExtraArgs...>
+    )
+
+【算法】
+    # Step 1: 静态初始化 (每个模板实例化一次)
+    static jiterator_mutex: mutex
+    static device_caches: vector<JittedKernelVariantCache>[device_count()]
+    static desc = make_kernel_descriptor<result_type, f_inputs_type, ExtraArgs...>(
+        name, f, nInputs=arity, nOutputs=1)
+
+    # Step 2: 获取当前设备的缓存
+    cache = device_caches[iter.device().index()]
+    extra_args_array = tuple_to_array(extra_args)
+
+    # Step 3: 调用通用kernel启动函数
+    jitted_gpu_kernel_generic<arity>(
+        jiterator_mutex, cache, desc, scalar_pos, extra_args_array,
+        iter, dynamic_casting, &scalar_val)
+
+【备注】
+    - 每个 (name, result_type, f_inputs_type, arity, scalar_pos, ExtraArgs...) 组合生成一个独立的静态实例
+    - 每个GPU设备有独立的kernel缓存
+    - nOutputs 目前固定为1

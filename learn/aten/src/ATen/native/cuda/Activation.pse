@@ -1,0 +1,186 @@
+--------------------------------
+glu_backward_cuda_out
+来源: aten/src/ATen/native/cuda/Activation.cpp
+--------------------------------
+
+【签名】
+    glu_backward_cuda_out(
+        grad_output: Tensor[*D, dim=M],
+        input: Tensor[*D, dim=N],
+        dim: int,
+        grad_input: Tensor[*D, dim=N]
+    ) -> Tensor[*D, dim=N]
+
+    约束:
+    - input.dim() > 0
+    - N % 2 == 0 (dim维度必须是偶数)
+    - M == N / 2
+
+【算法】
+    wrap_dim = maybe_wrap_dim(dim, input.dim())
+    nIn = input.size(wrap_dim)
+    dim_size = nIn / 2
+
+    resize_output(grad_input, input.sizes())
+
+    # 构建迭代形状 (将dim维度减半)
+    iter_shape = input.sizes()
+    iter_shape[wrap_dim] = dim_size
+
+    # 配置迭代器
+    iter = TensorIteratorConfig()
+        .add_output(grad_input)
+        .add_const_input(input)
+        .add_const_input(grad_output)
+        .resize_outputs(false)
+        .declare_static_shape(iter_shape)
+        .build()
+
+    if iter.numel() == 0:
+        return grad_input
+
+    # 计算跨步
+    I_stride = input.strides()[wrap_dim] * dim_size
+    gI_stride = grad_input.strides()[wrap_dim] * dim_size
+
+    # 启动kernel
+    if iter.can_use_32bit_indexing():
+        launch_glu_backward_kernel(iter, gI_stride, I_stride)
+    else:
+        for sub_iter in iter.with_32bit_indexing():
+            launch_glu_backward_kernel(sub_iter, gI_stride, I_stride)
+
+    return grad_input
+
+【并行模式】
+    通过 TensorIterator 并行，处理减半后的维度形状
+    kernel 内部使用 I_stride 和 gI_stride 访问前后两半数据
+
+【备注】
+    - GLU (Gated Linear Unit) 将输入沿dim分成两半: [a, b]
+    - 前向: output = a * sigmoid(b)
+    - 后向: 需要计算对完整input的梯度
+    - launch_glu_backward_kernel: 实际的CUDA kernel，见 Activation.h
+
+--------------------------------
+glu_backward_cuda
+来源: aten/src/ATen/native/cuda/Activation.cpp
+--------------------------------
+
+【签名】
+    glu_backward_cuda(
+        grad_output: Tensor[*D, dim=M],
+        input: Tensor[*D, dim=N],
+        dim: int
+    ) -> Tensor[*D, dim=N]
+
+【算法】
+    grad_input = at::empty({0}, input.options())
+    return glu_backward_cuda_out(grad_output, input, dim, grad_input)
+
+--------------------------------
+log_sigmoid_forward_out_cuda
+来源: aten/src/ATen/native/cuda/Activation.cpp
+--------------------------------
+
+【签名】
+    log_sigmoid_forward_out_cuda(
+        input: Tensor[*D],
+        result: Tensor[*D],
+        buffer: Tensor
+    ) -> (Tensor[*D], Tensor)
+
+【算法】
+    iter = TensorIteratorConfig()
+        .add_output(result)
+        .add_const_input(input)
+        .build()
+
+    launch_log_sigmoid_forward_kernel(iter)
+
+    return (result, buffer)
+
+【并行模式】
+    elementwise (通过 TensorIterator)
+
+【备注】
+    - buffer 参数仅用于CPU实现，CUDA版本忽略
+    - log_sigmoid(x) = log(sigmoid(x)) = log(1 / (1 + exp(-x)))
+    - launch_log_sigmoid_forward_kernel: 实际的CUDA kernel，见 Activation.h
+
+--------------------------------
+log_sigmoid_forward_cuda
+来源: aten/src/ATen/native/cuda/Activation.cpp
+--------------------------------
+
+【签名】
+    log_sigmoid_forward_cuda(input: Tensor[*D]) -> (Tensor[*D], Tensor)
+
+【算法】
+    result = at::empty_like(input)
+    buffer = at::empty({0}, input.options())
+    return log_sigmoid_forward_out_cuda(input, result, buffer)
+
+--------------------------------
+gelu_out_cuda
+来源: aten/src/ATen/native/cuda/Activation.cpp
+--------------------------------
+
+【签名】
+    @host→device
+    gelu_out_cuda(
+        self: Tensor[*D],
+        approximate: "none" | "tanh",
+        result: Tensor[*D]
+    )
+
+【算法】
+    GeluCUDAKernelImpl(*this, get_gelutype_enum(approximate))
+
+【备注】
+    - TORCH_IMPL_FUNC 自动生成的函数，*this 是 TensorIteratorBase
+    - GeluCUDAKernelImpl: 实际的CUDA kernel实现，见 Activation.h
+    - GELU公式参见第9节示例1
+
+--------------------------------
+gelu_backward_out_cuda
+来源: aten/src/ATen/native/cuda/Activation.cpp
+--------------------------------
+
+【签名】
+    @host→device
+    gelu_backward_out_cuda(
+        grad: Tensor[*D],
+        self: Tensor[*D],
+        approximate: "none" | "tanh",
+        grad_input: Tensor[*D]
+    )
+
+【算法】
+    GeluBackwardCUDAKernelImpl(*this, get_gelutype_enum(approximate))
+
+【备注】
+    - TORCH_IMPL_FUNC 自动生成的函数，*this 是 TensorIteratorBase
+    - GeluBackwardCUDAKernelImpl: 实际的CUDA kernel实现，见 Activation.h
+
+--------------------------------
+内核声明 (Activation.h)
+来源: aten/src/ATen/native/cuda/Activation.h
+--------------------------------
+
+【函数】
+    launch_glu_backward_kernel(
+        iter: TensorIteratorBase,
+        gI_stride: int64,
+        I_stride: int64
+    )
+        用途: 启动GLU反向传播CUDA kernel
+
+    launch_log_sigmoid_forward_kernel(iter: TensorIteratorBase)
+        用途: 启动log_sigmoid前向CUDA kernel
+
+    GeluCUDAKernelImpl(it: TensorIteratorBase, approximate: GeluType)
+        用途: 启动GELU前向CUDA kernel
+
+    GeluBackwardCUDAKernelImpl(it: TensorIteratorBase, approximate: GeluType)
+        用途: 启动GELU反向传播CUDA kernel

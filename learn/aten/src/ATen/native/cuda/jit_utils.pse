@@ -1,0 +1,1066 @@
+# ATen JIT 工具模块 (CUDA Kernel 动态编译)
+
+来源: aten/src/ATen/native/cuda/jit_utils.cpp, jit_utils.h
+
+---
+
+## 【概述】
+
+该模块提供 CUDA/ROCm kernel 的运行时编译（JIT）功能，包括：
+- NVRTC/HIP 代码生成
+- 内核缓存管理
+- 类型系统与向量化支持
+
+---
+
+## 【核心数据结构】
+
+### NvrtcFunction
+```
+struct NvrtcFunction:
+    module: CUmodule           # 编译后的模块句柄
+    function: CUfunction       # kernel 函数指针
+```
+
+### KernelDescriptor
+```
+struct KernelDescriptor:
+    name: string               # kernel 名称
+    f: string                  # functor 代码字符串
+    f_inputs_type: ScalarType  # 输入张量类型
+    result_type: ScalarType    # 输出张量类型
+    extra_args_types: SmallVector[ScalarType]  # 额外参数类型列表
+    nInputs: int               # 输入张量数
+    nOutputs: int              # 输出张量数
+```
+
+### BinaryFuncVariant (枚举)
+```
+enum BinaryFuncVariant:
+    NoScalar      # 无标量，所有参数为张量
+    RhsScalar     # 右操作数为标量
+    LhsScalar     # 左操作数为标量
+```
+
+---
+
+## 【工具函数】
+
+### make_kernel_descriptor
+```
+make_kernel_descriptor<result_type, f_inputs_type, ...ExtraArgs>(
+    name: string,
+    f: string,
+    nInputs: int,
+    nOutputs: int
+) -> KernelDescriptor
+
+用途: 构造 KernelDescriptor，自动推导类型信息
+```
+
+### can_vectorize_up_to (重载1)
+```
+can_vectorize_up_to(
+    default_alignment: size_t,
+    pointer: void*
+) -> int
+
+用途: 检测指针对齐级别，返回可向量化宽度 (1/2/4/8/16)
+算法:
+    ip = reinterpret_cast<uintptr_t>(pointer)
+    
+    # ROCm 特殊处理
+    if USE_ROCM:
+        if default_alignment == 1 and ip % 16 == 0:
+            return 16
+        if default_alignment <= 2 and ip % (8 * default_alignment) == 0:
+            return 8
+    else:
+        if ip % (8 * default_alignment) == 0:
+            return 8
+    
+    # 通用检测
+    if ip % (4 * default_alignment) == 0:
+        return 4
+    if ip % (2 * default_alignment) == 0:
+        return 2
+    return 1
+```
+
+### can_vectorize_up_to (重载2)
+```
+can_vectorize_up_to(
+    desc: KernelDescriptor,
+    pointers: ArrayRef[char*]
+) -> int
+
+用途: 检测所有输入输出指针的最小对齐级别
+约束:
+    - desc.nOutputs == 1
+    - pointers.size == 1 + desc.nInputs
+
+算法:
+    result_size = scalarTypeToTypeMeta(desc.result_type).itemsize()
+    result = can_vectorize_up_to(result_size, pointers[0])
+    
+    input_size = scalarTypeToTypeMeta(desc.f_inputs_type).itemsize()
+    for i in range(1, pointers.size):
+        result = min(result, can_vectorize_up_to(input_size, pointers[i]))
+    
+    return result
+```
+
+### calc_io_size
+```
+calc_io_size(
+    nInputs: int,
+    nOutputs: int,
+    inputs_type: ScalarType,
+    result_type: ScalarType
+) -> int
+
+用途: 计算 I/O 最小元素大小（用于向量化决策）
+算法:
+    if nInputs > 0 and nOutputs > 0:
+        return min(elementSize(inputs_type), elementSize(result_type))
+    if nInputs > 0:
+        return elementSize(inputs_type)
+    if nOutputs > 0:
+        return elementSize(result_type)
+    return 0
+```
+
+### calc_thread_work_size
+```
+calc_thread_work_size(
+    nInputs: int,
+    nOutputs: int,
+    inputs_type: ScalarType,
+    result_type: ScalarType
+) -> int
+
+用途: 计算每线程工作量（单位：元素数）
+算法:
+    io_size = calc_io_size(nInputs, nOutputs, inputs_type, result_type)
+    assert io_size > 0
+    
+    if USE_ROCM:
+        if io_size == 1:
+            return 16
+        elif io_size < 4:
+            return 8
+        else:
+            return 4
+    else:  # CUDA
+        if io_size == 1:
+            return 16
+        else:
+            return 8
+```
+
+---
+
+## 【代码生成】
+
+### generate_code (Pointwise)
+```
+generate_code(
+    nInputs: int,
+    nOutputs: int,
+    func: string,                      # functor 代码
+    name: string,                      # kernel 名称
+    f_inputs_type: string,             # 输入类型名
+    compute_type: string,              # 计算类型名
+    result_type: string,               # 输出类型名
+    contiguous: bool,                  # 是否连续内存
+    dynamic_casting: bool,             # 是否需要动态类型转换
+    scalar_pos: BinaryFuncVariant,     # 标量位置
+    extra_args_typenames: SmallVector[string],
+    thread_work_size: int = JIT_THREAD_WORK_SIZE,
+    vectorized: bool = false,
+    vec_size: int = 0,
+    return_by_ref: bool = false        # 多输出时是否用引用返回
+) -> string
+
+用途: 生成 pointwise kernel 的 CUDA 代码
+参数:
+    - contiguous: 决定用 TrivialOffsetCalculator 还是 OffsetCalculator
+    - dynamic_casting: 决定用 LoadWithCast/StoreWithCast 还是无类型转换版本
+    - vectorized: 决定用向量化模板还是标量模板
+    - return_by_ref: 决定 functor 调用方式（out = f(...) vs f(..., out)）
+
+算法:
+    env = TemplateEnv()
+    
+    # Step 1: 设置基础参数
+    env.s("index_type", "unsigned int")
+    env.s("nInputs", nInputs)
+    env.s("nOutputs", nOutputs)
+    env.s("scalar_type", f_inputs_type)
+    env.s("compute_type", compute_type)
+    env.s("functor", func)
+    env.s("name", name)
+    env.s("thread_work_size", thread_work_size)
+    
+    # Step 2: 生成额外参数（如 polygamma 的 n）
+    extra_params = ""
+    extra_args = ""
+    for i, type in enumerate(extra_args_typenames):
+        name = f"extra_arg_{i}"
+        extra_params += f", {type} {name}"
+        extra_args += f", {name}"
+    env.s("extra_params", extra_params)
+    env.s("extra_args", extra_args)
+    
+    # Step 3: 生成局部数组声明
+    declare_load_arrays = ""
+    for i in range(nInputs):
+        declare_load_arrays += f"{f_inputs_type} arg{i}[{thread_work_size}];\n"
+    
+    declare_store_arrays = ""
+    for i in range(nOutputs):
+        declare_store_arrays += f"{result_type} out{i}[{thread_work_size}];\n"
+    
+    # Step 4: 生成 functor 调用
+    if scalar_pos == NoScalar:
+        functor_args = ", ".join(f"arg{i}[j]" for i in range(nInputs))
+    elif scalar_pos == LhsScalar:
+        functor_args = "scalar_val, arg0[j]"
+    else:  # RhsScalar
+        functor_args = "arg0[j], scalar_val"
+    
+    if return_by_ref:
+        # 多输出情况
+        functor_outs = ", ".join(f"out{i}[j]" for i in range(nOutputs))
+        if compute_type != result_type:
+            # 需要临时变量
+            call_functor = f"{compute_type} {temp_outs};\n"
+            call_functor += f"{name}<{compute_type}>({functor_args}{extra_args}, {temp_outs});\n"
+            call_functor += "\n".join(f"out{i}[j] = temp_out{i};" for i in range(nOutputs))
+        else:
+            call_functor = f"{name}<{compute_type}>({functor_args}{extra_args}, {functor_outs});"
+    else:
+        # 单输出情况
+        call_functor = f"out0[j] = {name}<{compute_type}>({functor_args}{extra_args});"
+    
+    env.s("call_functor", call_functor)
+    
+    # Step 5: 设置类型支持字符串
+    if f_inputs_type in ["at::Half", "std::complex<at::Half>"] or \
+       result_type in ["at::Half", "std::complex<at::Half>"] or \
+       dynamic_casting:
+        env.s("half_string", jiterator_half_support_literal)
+    else:
+        env.s("half_string", "")
+    
+    if f_inputs_type == "at::BFloat16" or result_type == "at::BFloat16" or dynamic_casting:
+        env.s("bfloat16_string", jiterator_bfloat16_support_literal)
+    else:
+        env.s("bfloat16_string", "")
+    
+    if f_inputs_type in ["std::complex<float>", "std::complex<double>", "std::complex<at::Half>"] or \
+       result_type in ["std::complex<float>", "std::complex<double>", "std::complex<at::Half>"]:
+        env.s("traits_string", get_traits_string_but_hiprtc_safe())
+        env.s("complex_body_string", get_complex_body_string())
+        env.s("complex_math_string", get_complex_math_string())
+        if USE_ROCM:
+            func = unhipify_math_functions(func)
+            env.s("functor", func)
+    elif dynamic_casting:
+        env.s("traits_string", get_traits_string_but_hiprtc_safe())
+        env.s("complex_body_string", get_complex_body_string())
+        env.s("complex_math_string", "")
+    else:
+        env.s("traits_string", "")
+        env.s("complex_body_string", "")
+        env.s("complex_math_string", "")
+    
+    if f_inputs_type == "std::complex<at::Half>" or \
+       result_type == "std::complex<at::Half>" or \
+       dynamic_casting:
+        env.s("complex_half_body_string", get_complex_half_body_string())
+    else:
+        env.s("complex_half_body_string", "")
+    
+    env.s("load_support", load_support_literal)
+    
+    # Step 6: 选择模板
+    if not vectorized:
+        # 标量模板
+        if dynamic_casting:
+            env.s("loader", f"LoadWithCast<{nInputs}>")
+            env.s("storer", f"StoreWithCast<{nOutputs}>")
+            env.s("dynamic_casting_string", dynamic_cast_support_literal)
+        else:
+            env.s("loader", "LoadWithoutCast")
+            env.s("storer", "StoreWithoutCast")
+            env.s("dynamic_casting_string", no_dynamic_cast_support_literal)
+        
+        if contiguous:
+            env.s("offset_calculator", "TrivialOffsetCalculator")
+        else:
+            env.s("offset_calculator", "OffsetCalculator")
+        
+        # 生成 load/store 代码
+        load_inputs = ""
+        for i in range(nInputs):
+            load_inputs += f"arg{i}[j] = l.load<{f_inputs_type}>(data[{i+nOutputs}], input_offsets[{i}], {i});\n"
+        
+        store_outputs = ""
+        for i in range(nOutputs):
+            store_outputs += f"s.store<{result_type}>(out{i}[j], data[{i}], output_offsets[{i}], {i});\n"
+        
+        env.s("load_inputs", load_inputs)
+        env.s("store_outputs", store_outputs)
+        
+        template = jit_preamble + jit_common_types + offset_calc_template + jit_code_template + jit_epilogue
+        return CodeTemplate(template).format(env)
+    
+    else:
+        # 向量化模板
+        env.s("vec_size", vec_size)
+        env.s("result_type", result_type)
+        
+        # 生成向量化 load/store 代码（省略细节）
+        ...
+        
+        template = jit_preamble + jit_common_types + jit_vectorized_code_template + jit_epilogue
+        return CodeTemplate(template).format(env)
+```
+
+### generate_reduction_code
+```
+generate_reduction_code(
+    nOutputs: int,
+    func: string,
+    name: string,
+    vt0: int,                          # 值类型参数（用于 reduction）
+    f_inputs_type: string,
+    reduction_accum_type: string,       # 累加器类型
+    result_type: string,
+    contiguous: bool,
+    vectorized: bool,
+    vec_size: int,
+    max_threads_codegen: int
+) -> string
+
+用途: 生成 reduction kernel 的 CUDA 代码
+算法:
+    env = TemplateEnv()
+    env.s("index_type", "unsigned int")
+    env.s("scalar_type", f_inputs_type)
+    env.s("result_type", result_type)
+    env.s("reduction_accum_type", reduction_accum_type)
+    env.s("vt0", vt0)
+    env.s("name", name)
+    env.s("max_threads_lb", max_threads_codegen)
+    env.s("thread_work_size", JIT_THREAD_WORK_SIZE)
+    
+    # 类型支持字符串（同 generate_code）
+    ...
+    
+    env.s("functor", func)
+    env.s("output_vec_size", vec_size)
+    
+    template = jit_preamble + jit_common_types + offset_calc_template + get_reduction_template() + jit_epilogue
+    return CodeTemplate(template).format(env)
+
+备注:
+    - reduction 不支持 dynamic_casting
+    - 使用 reduction_template.cuh 中的模板
+```
+
+---
+
+## 【编译与缓存】
+
+### get_cache_dir
+```
+get_cache_dir() -> Optional[string]
+
+用途: 获取或创建 kernel 缓存目录
+算法:
+    # Step 1: 检查是否禁用缓存
+    use_kernel_cache = getenv("USE_PYTORCH_KERNEL_CACHE")
+    if use_kernel_cache == "0":
+        return None
+    
+    # Step 2: 确定缓存路径
+    if (ptkcp = getenv("PYTORCH_KERNEL_CACHE_PATH")) != null:
+        cache_dir = ptkcp
+        kernels_cache_dir = ""
+    elif (ptkcp = getenv("TEMP" if WIN32 else "XDG_CACHE_HOME")) != null:
+        cache_dir = ptkcp + "/torch/kernels"
+        kernels_cache_dir = "/torch/kernels"
+    elif (ptkcp = getenv("HOME")) != null:
+        cache_dir = ptkcp + "/.cache/torch/kernels"
+        kernels_cache_dir = "/.cache/torch/kernels"
+    else:
+        warn("No cache path available, caching disabled")
+        return None
+    
+    # Step 3: 创建目录（如果不存在）
+    if not exists(cache_dir):
+        if not r_mkdir_with_base(ptkcp, kernels_cache_dir):
+            warn("Cannot create cache directory")
+            return None
+    
+    # Step 4: 检查读写权限
+    if not readable(cache_dir) or not writable(cache_dir):
+        warn("Cache directory not accessible")
+        return None
+    
+    return cache_dir
+
+依赖:
+    - access(), mkdir()    # 文件系统操作
+```
+
+### codegenOutputQuery
+```
+codegenOutputQuery(
+    prop: cudaDeviceProp*,
+    out cuda_major: int,
+    out cuda_minor: int,
+    out nvrtc_major: int,
+    out nvrtc_minor: int,
+    out compile_to_sass: bool
+)
+
+用途: 查询编译目标架构（PTX vs SASS）
+参数:
+    - prop: GPU 设备属性
+    - cuda_major/minor: 目标 CUDA 计算能力
+    - nvrtc_major/minor: NVRTC 版本
+    - compile_to_sass: 是否编译到 SASS（需 CUDA 11.1+）
+
+算法:
+    nvrtcVersion(&nvrtc_major, &nvrtc_minor)
+    
+    if USE_ROCM:
+        cuda_major = prop->major
+        cuda_minor = prop->minor
+        compile_to_sass = false
+    else:
+        dev_version = (prop->major, prop->minor)
+        
+        # 查询 NVRTC 支持的最大设备版本
+        if nvrtc_major <= 7:
+            max_dev_version = (5, 0)
+        elif nvrtc_major <= 8:
+            max_dev_version = (6, 0)
+        elif nvrtc_major <= 9:
+            max_dev_version = (7, 2)
+        elif nvrtc_major <= 10:
+            max_dev_version = (7, 5)
+        elif nvrtc_version == (11, 0):
+            max_dev_version = (8, 0)
+        elif nvrtc_major == 11 and nvrtc_minor < 8:
+            max_dev_version = (8, 6)
+        else:
+            max_dev_version = dev_version
+        
+        if dev_version > max_dev_version:
+            cuda_major, cuda_minor = max_dev_version
+            compile_to_sass = false  # 降级到 PTX
+        else:
+            cuda_major, cuda_minor = dev_version
+            compile_to_sass = (CUDA_VERSION >= 11010)
+```
+
+### jit_pwise_function
+```
+jit_pwise_function(
+    code: string,
+    kernel_name: string
+) -> NvrtcFunction
+
+用途: JIT 编译或从缓存加载 pointwise kernel
+算法:
+    initializeCudaContext()
+    prop = getCurrentDeviceProperties()
+    codegenOutputQuery(prop, cuda_major, cuda_minor, nvrtc_major, nvrtc_minor, compile_to_sass)
+    
+    name = kernel_name + "_kernel"
+    cache_dir = get_cache_dir()
+    
+    # Step 1: 尝试从缓存加载
+    if cache_dir.has_value():
+        hash_code = sha1(code).str()
+        file_path = f"{cache_dir}/{kernel_name}_arch{cuda_major}.{cuda_minor}_nvrtc{nvrtc_major}.{nvrtc_minor}_{'sass' if compile_to_sass else 'ptx'}_{len(code)}_{hash_code}"
+        
+        if exists(file_path):
+            buffer = read_binary(file_path)
+            cuModuleLoadData(&compiled_kernel.module, buffer.data())
+            cuModuleGetFunction(&compiled_kernel.function, compiled_kernel.module, name)
+            return compiled_kernel
+    
+    # Step 2: JIT 编译
+    nvrtcCreateProgram(&program, code, ...)
+    
+    compute = f"--gpu-architecture={'sm' if compile_to_sass else 'compute'}_{cuda_major}{cuda_minor}"
+    args = ["--std=c++17", compute, "-default-device"]
+    
+    if DEBUG:
+        args.append("-lineinfo")
+    else:
+        args.append("-DNDEBUG")
+    
+    if nvrtcCompileProgram(program, args) != SUCCESS:
+        logsize = nvrtcGetProgramLogSize(program)
+        log = nvrtcGetProgramLog(program, logsize)
+        throw runtime_error(code + log)
+    
+    # 获取 PTX/SASS
+    getSize = nvrtcGetCUBINSize if compile_to_sass else nvrtcGetPTXSize
+    getFunc = nvrtcGetCUBIN if compile_to_sass else nvrtcGetPTX
+    
+    getSize(program, &ptx_size)
+    ptx.resize(ptx_size)
+    getFunc(program, ptx.data())
+    
+    cuModuleLoadData(&compiled_kernel.module, ptx.data())
+    cuModuleGetFunction(&compiled_kernel.function, compiled_kernel.module, name)
+    nvrtcDestroyProgram(&program)
+    
+    # Step 3: 写入缓存
+    if cache_dir.has_value():
+        tmp_file_path = f"{file_path}_tmp_{getpid()}"
+        write_binary(tmp_file_path, ptx)
+        rename(tmp_file_path, file_path)  # 原子替换
+    
+    return compiled_kernel
+
+依赖:
+    - nvrtc.nvrtcCreateProgram / nvrtcCompileProgram
+    - nvrtc.cuModuleLoadData / cuModuleGetFunction
+    - c10::sha1                        # SHA1 哈希
+```
+
+---
+
+## 【运行时执行】
+
+### initializeCudaContext
+```
+initializeCudaContext()
+
+用途: 懒初始化 CUDA context（如果不存在）
+算法:
+    cuCtxGetCurrent(&pctx)
+    if pctx == null:
+        lock(getFreeMutex())
+        cudaFree(nullptr)  # 触发 context 创建
+```
+
+### launch_jitted_pwise_function
+```
+@host
+launch_jitted_pwise_function(
+    function: NvrtcFunction,
+    args: void* const[],
+    nBlocks: dim3,
+    kBlockSize: dim3,
+    smem: int = 0
+)
+
+用途: 在当前 stream 上启动已编译的 kernel
+算法:
+    initializeCudaContext()
+    stream = getCurrentCUDAStream()
+    cuLaunchKernel(
+        function.function,
+        nBlocks.x, nBlocks.y, nBlocks.z,
+        kBlockSize.x, kBlockSize.y, kBlockSize.z,
+        smem,
+        stream,
+        args,
+        nullptr
+    )
+```
+
+---
+
+## 【字符串工具】
+
+### replace_all
+```
+replace_all(
+    inout s: string,
+    to_replace: string,
+    replace_with: string
+)
+
+用途: 原地替换所有匹配子串
+```
+
+### unhipify_math_functions
+```
+unhipify_math_functions(original: string) -> string
+
+用途: 将 HIPify 替换的数学函数恢复为 std:: 命名空间
+算法:
+    mappings = [
+        (" std::max", " ::max"),
+        (" std::min", " ::min"),
+        (" std::ceil", " ::ceil"),
+        # ... 其他函数
+    ]
+    
+    ret = original
+    for (std_name, global_name) in mappings:
+        replace_all(ret, global_name, std_name)
+    
+    return ret
+
+备注:
+    - 仅在 USE_ROCM 时调用
+    - 搜索 " ::<name>" 避免重复替换
+```
+
+### get_traits_string_but_hiprtc_safe
+```
+get_traits_string_but_hiprtc_safe() -> string
+
+用途: 获取类型 traits 定义字符串（ROCm 版本去除重复定义）
+算法:
+    if USE_ROCM:
+        return R"ESCAPE(
+            namespace std {
+                template <class _Tp>
+                _Tp&& __declval(int);
+                ...
+                template <class _A1, class _A2 = void, class _A3 = void>
+                class __promote : public __promote_imp<_A1, _A2, _A3> {};
+            }
+        )ESCAPE"
+    else:
+        return get_traits_string()
+
+备注:
+    - hiprtc 已内置部分 traits（integral_constant, is_same 等）
+    - 需避免重复定义
+```
+
+---
+
+## 【类型系统】
+
+### typeName (模板函数)
+```
+typeName<T>() -> string
+
+用途: 获取类型的 CUDA 代码字符串
+特化:
+    - bool -> "bool"
+    - at::Half -> "at::Half"
+    - at::BFloat16 -> "at::BFloat16"
+    - at::Float8_e5m2 -> "at::Float8_e5m2"
+    - at::Float8_e4m3fn -> "at::Float8_e4m3fn"
+    - at::Float8_e5m2fnuz -> "at::Float8_e5m2fnuz"
+    - at::Float8_e4m3fnuz -> "at::Float8_e4m3fnuz"
+    - at::Float8_e8m0fnu -> "at::Float8_e8m0fnu"
+    - c10::complex<at::Half> -> "std::complex<at::Half>"
+    - c10::complex<float> -> "std::complex<float>"
+    - c10::complex<double> -> "std::complex<double>"
+    - (其他标量类型通过 AT_FORALL_SCALAR_TYPES 宏生成)
+
+备注:
+    - 无效类型触发 static_assert(delayed_false<T>::value)
+```
+
+### typeName (运行时版本)
+```
+typeName(t: ScalarType) -> string
+
+用途: 运行时类型到字符串转换
+算法:
+    switch t:
+        case ScalarType::Byte: return typeName<uint8_t>()
+        case ScalarType::Char: return typeName<int8_t>()
+        ...
+        case ScalarType::ComplexDouble: return typeName<c10::complex<double>>()
+        default: TORCH_CHECK(false, "invalid type for jiterator")
+```
+
+---
+
+## 【代码模板常量】
+
+### jit_preamble / jit_epilogue
+```
+# ROCm 需要强制 __host__ __device__ 属性
+if USE_ROCM:
+    jit_preamble = R"ESCAPE(
+        #pragma clang force_cuda_host_device begin
+    )ESCAPE"
+    jit_epilogue = R"ESCAPE(
+        #pragma clang force_cuda_host_device end
+    )ESCAPE"
+else:
+    jit_preamble = ""
+    jit_epilogue = ""
+```
+
+### jit_common_types
+```
+包含:
+    - MAX_DIMS, CUDA_OR_ROCM_NUM_THREADS 常量定义
+    - int64_t, uint32_t, int8_t, uint8_t, int16_t 类型定义
+    - ScalarType 枚举
+    - Array<T, size> 模板（设备端固定大小数组）
+    - AT_FORALL_SCALAR_TYPES_WITH_COMPLEX 宏
+    - ${half_string}, ${bfloat16_string}, ${complex_body_string} 占位符
+```
+
+### jiterator_half_support_literal
+```
+定义 at::Half 结构:
+    struct alignas(2) Half {
+        unsigned short x;
+        
+        __host__ __device__ Half(float value) {
+            # CUDA: PTX 内联汇编
+            asm("{  cvt.rn.f16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+            # ROCm: __float2half
+        }
+        
+        __host__ __device__ operator float() const {
+            # CUDA: PTX 内联汇编
+            asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(x));
+            # ROCm: __half2float
+        }
+    }
+```
+
+### jiterator_bfloat16_support_literal
+```
+定义 at::BFloat16 结构:
+    struct alignas(2) BFloat16 {
+        unsigned short x;
+        
+        __host__ __device__ BFloat16(float value) {
+            # CUDA Ampere+: 硬件指令
+            if __CUDA_ARCH__ >= 800:
+                asm("{  cvt.rn.bf16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+            else:
+                # 软件舍入
+                x = __internal_float2bfloat16(value, sign, remainder)
+                if remainder > 0x80000000 or (remainder == 0x80000000 and x & 0x1):
+                    x++
+        }
+        
+        __host__ __device__ operator float() const {
+            # CUDA: 位操作
+            asm("{ mov.b32 %0, {0,%1};}\n" : "=f"(val) : "h"(x));
+            # ROCm: 联合体转换
+        }
+    }
+```
+
+### load_support_literal
+```
+定义 c10::load 模板:
+    template <typename T>
+    struct LoadImpl {
+        __device__ static T apply(const void *src) {
+            return *reinterpret_cast<const T*>(src);
+        }
+    };
+    
+    # bool 特化（避免未定义行为）
+    template <>
+    struct LoadImpl<bool> {
+        __device__ static bool apply(const void *src) {
+            return LoadImpl<char>::apply(src);
+        }
+    };
+```
+
+### dynamic_cast_support_literal
+```
+定义动态类型转换工具:
+    - is_complex<T> trait
+    - static_cast_with_inter_type<dest_t, src_t>（处理复数到实数转换）
+    - fetch_and_cast<dest_t>(src_type: ScalarType, ptr: void*) -> dest_t
+    - cast_and_store<src_t>(dest_type: ScalarType, ptr: void*, value: src_t)
+    - LoadWithCast<N> / StoreWithCast<N> 模板
+
+关键逻辑:
+    # uint8_t 需要中间类型 int64_t（避免溢出）
+    template <>
+    struct static_cast_with_inter_type<uint8_t, src_t> {
+        static uint8_t apply(src_t src) {
+            return static_cast<uint8_t>(static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
+        }
+    };
+    
+    # complex<Half> 特殊处理
+    template <>
+    struct static_cast_with_inter_type<std::complex<at::Half>, at::Half> {
+        static std::complex<at::Half> apply(at::Half src) {
+            return static_cast<std::complex<at::Half>>(float{src});
+        }
+    };
+```
+
+### no_dynamic_cast_support_literal
+```
+定义无类型转换版本:
+    struct LoadWithoutCast {
+        template <typename scalar_t>
+        __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg=0) {
+            return c10::load(reinterpret_cast<scalar_t*>(base_ptr) + offset);
+        }
+    };
+    
+    struct StoreWithoutCast {
+        template<typename scalar_t>
+        __device__ void store(scalar_t value, char *base_ptr, uint32_t offset, int arg=0) {
+            *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
+        }
+    };
+```
+
+### offset_calc_template
+```
+定义偏移计算工具:
+    - IntDivider（快速整数除法，使用魔数优化）
+    - TrivialOffsetCalculator<NARGS>（连续内存，线性索引）
+    - OffsetCalculator<NARGS>（非连续内存，步幅计算）
+
+TrivialOffsetCalculator 算法:
+    Array<index_type, NARGS> get(linear_idx: index_type) const {
+        Array<index_type, NARGS> offsets;
+        #pragma unroll
+        for arg in range(NARGS):
+            offsets[arg] = linear_idx
+        return offsets
+    }
+
+OffsetCalculator 算法:
+    Array<index_type, NARGS> get(linear_idx: index_type) const {
+        Array<index_type, NARGS> offsets = {0, ...}
+        
+        #pragma unroll
+        for dim in range(MAX_DIMS):
+            if dim == dims:
+                break
+            
+            divmod = sizes_[dim].divmod(linear_idx)
+            linear_idx = divmod.div
+            
+            #pragma unroll
+            for arg in range(NARGS):
+                offsets[arg] += divmod.mod * strides_[dim][arg]
+        
+        return offsets
+    }
+```
+
+### jit_code_template (Pointwise)
+```
+Kernel 签名:
+    extern "C" __global__
+    void ${name}_kernel(
+        const int numel,
+        Array<char*, ${nInputs}+${nOutputs}> data,
+        ${offset_calculator}<${nInputs}> input_calculator,
+        ${offset_calculator}<${nOutputs}> output_calculator,
+        ${loader} l,
+        ${storer} s,
+        ${compute_type} scalar_val${extra_params}
+    )
+
+执行流程:
+    # 局部数组
+    ${declare_load_arrays}
+    ${declare_store_arrays}
+    
+    idx = blockIdx.x
+    remaining = numel - block_work_size * idx
+    thread_idx = threadIdx.x
+    
+    # Load phase
+    #pragma unroll
+    for j in range(thread_work_size):
+        if thread_idx >= remaining:
+            break
+        
+        linear_idx = thread_idx + block_work_size * idx
+        input_offsets = input_calculator.get(linear_idx)
+        ${load_inputs}
+        thread_idx += num_threads
+    
+    # Compute phase
+    #pragma unroll
+    for j in range(thread_work_size):
+        if (threadIdx.x + j*num_threads) < remaining:
+            ${call_functor}
+    
+    # Store phase
+    thread_idx = threadIdx.x
+    #pragma unroll
+    for j in range(thread_work_size):
+        if thread_idx >= remaining:
+            break
+        
+        linear_idx = thread_idx + block_work_size * idx
+        output_offsets = output_calculator.get(linear_idx)
+        ${store_outputs}
+        thread_idx += num_threads
+```
+
+### jit_vectorized_code_template
+```
+Kernel 签名:
+    extern "C" __global__
+    void ${name}_vectorized${vec_size}_kernel(
+        const int N,
+        Array<char*, ${nInputs}+${nOutputs}> data,
+        ${compute_type} scalar_val${extra_params}
+    )
+
+执行流程:
+    constexpr vec_size = ${vec_size}
+    using scalar_t = ${scalar_type}
+    
+    remaining = N - block_work_size * blockIdx.x
+    
+    if remaining < block_work_size:
+        # 非完整块：标量路径
+        ${load_unrolled_inputs}
+        ${call_functor}
+        ${store_unrolled_outputs}
+    else:
+        # 完整块：向量化路径
+        constexpr loop_size = thread_work_size / vec_size
+        
+        # 向量化 load
+        ${vector_inputs}
+        #pragma unroll
+        for i in range(loop_size):
+            ${load_vectorized_inputs}
+            thread_idx += num_threads
+        
+        # 计算
+        #pragma unroll
+        for j in range(thread_work_size):
+            ${call_functor}
+        
+        # 向量化 store
+        ${vector_outputs}
+        thread_idx = threadIdx.x
+        #pragma unroll
+        for i in range(loop_size):
+            vec_t_output v
+            ${store_vectorized_outputs}
+            thread_idx += num_threads
+```
+
+---
+
+## 【辅助工具】
+
+### _r_mkdir / r_mkdir_with_base
+```
+_r_mkdir(dir: string) -> bool
+
+用途: 递归创建目录
+算法:
+    if exists(dir):
+        return true
+    
+    if mkdir(dir) == 0:
+        return true
+    
+    pos = dir.find_last_of("/\\")
+    if pos == npos:
+        return false
+    
+    if not _r_mkdir(dir.substr(0, pos)):
+        return false
+    
+    return mkdir(dir) == 0
+
+r_mkdir_with_base(base: string, dir: string) -> bool
+
+用途: 基于已存在的 base 路径创建子目录
+约束: base 必须存在
+```
+
+### load_code_template
+```
+load_code_template(path: string) -> string
+
+用途: 从文件加载代码模板
+算法:
+    ifs = ifstream(path)
+    return string(istreambuf_iterator<char>(ifs), istreambuf_iterator<char>())
+```
+
+---
+
+## 【依赖 API】
+
+### NVRTC/Driver API
+```
+nvrtc.nvrtcVersion(&major, &minor)
+nvrtc.nvrtcCreateProgram(&program, code, ...)
+nvrtc.nvrtcCompileProgram(program, args_size, args)
+nvrtc.nvrtcGetProgramLogSize(program, &logsize)
+nvrtc.nvrtcGetProgramLog(program, log)
+nvrtc.nvrtcGetPTXSize(program, &size) / nvrtcGetCUBINSize
+nvrtc.nvrtcGetPTX(program, ptx) / nvrtcGetCUBIN
+nvrtc.nvrtcDestroyProgram(&program)
+
+nvrtc.cuCtxGetCurrent(&pctx)
+nvrtc.cuModuleLoadData(&module, ptx)
+nvrtc.cuModuleGetFunction(&function, module, name)
+nvrtc.cuLaunchKernel(function, gridDim..., blockDim..., smem, stream, args, nullptr)
+```
+
+### ATen API
+```
+at::globalContext().getNVRTC()            # 获取 NVRTC 接口
+at::cuda::getCurrentDeviceProperties()    # 获取设备属性
+at::cuda::getCurrentCUDAStream()          # 获取当前流
+at::cuda::jit::get_traits_string()        # 获取类型 traits 字符串
+at::cuda::jit::get_complex_body_string()  # 获取复数定义
+at::cuda::jit::get_complex_math_string()  # 获取复数数学函数
+at::cuda::jit::get_cmath_string()         # 获取数学函数
+at::cuda::jit::get_reduction_template()   # 获取 reduction 模板
+```
+
+### C10 API
+```
+c10::scalarTypeToTypeMeta(dtype).itemsize()    # 获取类型字节数
+c10::CppTypeToScalarType<T>::value             # C++ 类型到 ScalarType
+c10::sha1                                      # SHA1 哈希
+c10::utils::get_env(name)                      # 环境变量读取
+c10::cuda::getFreeMutex()                      # CUDA 内存分配互斥锁
+```
+
+---
+
+## 【平台特定】
+
+### ROCm
+```
+- USE_ROCM 宏分支
+- hiprtc 去重复定义（is_same, integral_constant 等）
+- unhipify_math_functions（恢复 std:: 前缀）
+- #pragma clang force_cuda_host_device
+- gcnArchName（GPU 架构名）
+- JIT_THREAD_WORK_SIZE = 4（vs CUDA 的 8）
+- 向量化对齐检测差异（支持 16x 对齐）
+```
+
+### CUDA
+```
+- CUDA_VERSION 宏（控制 SASS 编译）
+- sm_ vs compute_ 架构前缀
+- PTX 内联汇编（Half/BFloat16 转换）
+- Ampere+ BF16 硬件指令（__CUDA_ARCH__ >= 800）
+- 魔数整数除法优化（IntDivider）
+```

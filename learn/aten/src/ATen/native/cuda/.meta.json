@@ -157,7 +157,8 @@
         "Activation.h": "a82a4a44d9dbc87c"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "TensorTopK": {
@@ -190,7 +191,8 @@
         "SortStable.h": "5ab26c806742ab8b"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "linalg/linalg/CUDASolver": {
@@ -200,7 +202,8 @@
         "linalg/CUDASolver.h": "a3b504a3a331870d"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "jit_utils": {
@@ -210,7 +213,8 @@
         "jit_utils.h": "e4d0aabac7c00259"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "linalg/linalg/BatchLinearAlgebraLib": {
@@ -220,7 +224,8 @@
         "linalg/BatchLinearAlgebraLib.h": "330ccf8c95dbc240"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "block_reduce.cuh": {
@@ -229,7 +234,8 @@
         "block_reduce.cuh": "78da5a54f340e20a"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "SortingRadixSelect.cuh": {
@@ -238,7 +244,8 @@
         "SortingRadixSelect.cuh": "e41c5cb1da656e89"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Normalization.cuh": {
@@ -247,7 +254,8 @@
         "Normalization.cuh": "ca12c2e2e6adb5e6"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "TensorModeKernel.cuh": {
@@ -256,7 +264,8 @@
         "TensorModeKernel.cuh": "f799a87c6589c23b"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "im2col.cuh": {
@@ -265,7 +274,8 @@
         "im2col.cuh": "42d04bc7d17c092f"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "CUDAJitLoops.cuh": {
@@ -274,7 +284,8 @@
         "CUDAJitLoops.cuh": "675a0cd05e430685"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "DeviceSqrt.cuh": {
@@ -355,7 +366,8 @@
         "MemoryAccess.cuh": "78fe49f834c5ed24"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "fused_adamw_impl.cuh": {

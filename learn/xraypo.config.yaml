@@ -29,7 +29,19 @@ exclude_patterns:
   - "__pycache__"
   - "node_modules"
   - "*.min.js"
-  - "aten/src/ATen/native/cpu/**"
+  - "ao_sparse"
+  - "cpu"
+  - "hip"
+  - "kleidiai"
+  - "metal"
+  - "miopen"
+  - "mkl"
+  - "mkldnn"
+  - "mps"
+  - "sparse"
+  - "ufunc"
+  - "vulkan"
+  - "xnnpack"
 
 # 模型选择配置
 model_selection:
@@ -38,7 +50,7 @@ model_selection:
 
   # token 阈值，超过该阈值使用更强模型
   token_thresholds:
-    tier1: 300000  # >300000 tokens 用 tier1 (opus)
+    tier1: 30000000  # >30000000 tokens 用 tier1 (opus)
     tier2: 3000   # >3000 tokens 用 tier2 (sonnet)
 
   # 路径匹配覆盖，匹配的文件使用指定模型

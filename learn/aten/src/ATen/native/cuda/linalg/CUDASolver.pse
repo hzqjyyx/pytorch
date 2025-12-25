@@ -1,0 +1,819 @@
+# CUDASolver - cuSOLVER线性代数接口封装
+
+来源: aten/src/ATen/native/cuda/linalg/CUDASolver.cpp, CUDASolver.h
+
+---
+
+## getrf (LU分解)
+
+【签名】
+```
+getrf<T>(
+    handle: cusolverDnHandle_t,
+    m: int, n: int,
+    dA: T*,           # 输入/输出矩阵，device指针
+    ldda: int,        # 列主序leading dimension
+    ipiv: int*,       # 输出pivot索引，device指针
+    info: int*        # 输出状态码，device指针
+) where T in {float, double, complex<float>, complex<double>}
+```
+
+【算法】
+```
+# Step 1: 查询工作空间大小
+lwork = cusolverDn{S|D|C|Z}getrf_bufferSize(handle, m, n, dA, ldda)
+
+# Step 2: 分配工作空间
+workspace = CUDACachingAllocator::allocate(sizeof(T) * lwork)
+
+# Step 3: 执行LU分解
+cusolverDn{S|D|C|Z}getrf(
+    handle, m, n, 
+    dA, ldda,           # in-place更新为L和U
+    workspace, 
+    ipiv,               # 输出行交换索引
+    info                # 0成功，<0参数错误，>0奇异矩阵
+)
+```
+
+【依赖】
+- cusolverDn{S|D|C|Z}getrf: cuSOLVER的LU分解
+- TORCH_CUSOLVER_CHECK: 错误检查宏
+- c10::cuda::CUDACachingAllocator: 临时内存分配
+
+---
+
+## getrs (用LU分解求解线性方程组)
+
+【签名】
+```
+getrs<T>(
+    handle: cusolverDnHandle_t,
+    n: int, nrhs: int,
+    dA: T*,           # LU分解结果（来自getrf）
+    lda: int,
+    ipiv: int*,       # pivot索引（来自getrf）
+    ret: T*,          # 输入右端项B，输出解X
+    ldb: int,
+    info: int*,
+    trans: cublasOperation_t = CUBLAS_OP_N
+) where T in {float, double, complex<float>, complex<double>}
+```
+
+【算法】
+```
+cusolverDn{S|D|C|Z}getrs(
+    handle, trans, n, nrhs,
+    dA, lda,           # LU分解矩阵
+    ipiv,              # pivot索引
+    ret, ldb,          # in-place求解 A*X = B
+    info
+)
+```
+
+【备注】
+- 无需额外工作空间
+- trans指定是否转置/共轭转置求解
+
+---
+
+## sytrf (对称/Hermitian矩阵的Bunch-Kaufman分解)
+
+【签名】
+```
+sytrf_bufferSize<T>(
+    handle: cusolverDnHandle_t,
+    n: int,
+    A: T*,
+    lda: int,
+    lwork: int*       # 输出工作空间大小
+) where T in {float, double, complex<float>, complex<double>}
+
+sytrf<T>(
+    handle: cusolverDnHandle_t,
+    uplo: cublasFillMode_t,    # CUBLAS_FILL_MODE_UPPER/LOWER
+    n: int,
+    A: T*,
+    lda: int,
+    ipiv: int*,
+    work: T*,
+    lwork: int,
+    devInfo: int*
+)
+```
+
+【算法】
+```
+cusolverDn{S|D|C|Z}sytrf(
+    handle, uplo, n,
+    A, lda,            # in-place输出分解结果
+    ipiv,              # 输出pivot索引
+    work, lwork,
+    devInfo
+)
+```
+
+---
+
+## gesvd (奇异值分解 - 标准算法)
+
+【签名】
+```
+gesvd_buffersize<T>(handle, m, n, lwork) 
+    where T in {float, double, complex<float>, complex<double>}
+
+gesvd<T, Vtype>(
+    handle: cusolverDnHandle_t,
+    jobu: signed char,     # 'A'全U, 'S'瘦U, 'N'不计算
+    jobvt: signed char,    # 'A'全VT, 'S'瘦VT, 'N'不计算
+    m: int, n: int,
+    A: T*,                 # 输入矩阵
+    lda: int,
+    S: Vtype*,             # 输出奇异值（实数）
+    U: T*,
+    ldu: int,
+    VT: T*,
+    ldvt: int,
+    work: T*,
+    lwork: int,
+    rwork: Vtype*,         # 复数类型需要实数工作空间
+    info: int*
+) where (T, Vtype) in {(float, float), (double, double), 
+                       (complex<float>, float), (complex<double>, double)}
+```
+
+【算法】
+```
+cusolverDn{S|D|C|Z}gesvd(
+    handle, jobu, jobvt, m, n,
+    A, lda,
+    S,                 # 输出 min(m,n) 个奇异值
+    U, ldu,            # 左奇异向量
+    VT, ldvt,          # 右奇异向量（转置）
+    work, lwork,
+    rwork,             # 仅复数类型使用
+    info
+)
+```
+
+---
+
+## gesvdj (奇异值分解 - Jacobi迭代算法)
+
+【签名】
+```
+gesvdj_buffersize<T, Vtype>(
+    handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv, lwork, params
+)
+
+gesvdj<T, Vtype>(
+    handle: cusolverDnHandle_t,
+    jobz: cusolverEigMode_t,   # CUSOLVER_EIG_MODE_VECTOR/NOVECTOR
+    econ: int,                  # 0=全矩阵, 1=经济型
+    m: int, n: int,
+    A: T*,
+    lda: int,
+    S: Vtype*,
+    U: T*,
+    ldu: int,
+    V: T*,                      # 注意：V不是VT
+    ldv: int,
+    work: T*,
+    lwork: int,
+    info: int*,
+    params: gesvdjInfo_t        # Jacobi参数（容差、最大迭代等）
+)
+```
+
+【算法】
+```
+cusolverDn{S|D|C|Z}gesvdj(
+    handle, jobz, econ, m, n,
+    A, lda,
+    S,
+    U, ldu,
+    V, ldv,            # 右奇异向量（非转置）
+    work, lwork,
+    info,
+    params
+)
+```
+
+【备注】
+- 相比gesvd，Jacobi算法对小矩阵更快
+- params可设置容差和最大迭代次数
+
+---
+
+## gesvdjBatched (批量SVD - Jacobi算法)
+
+【签名】
+```
+gesvdjBatched<T, Vtype>(
+    handle, jobz, m, n,
+    A: T*,             # batch矩阵，连续存储
+    lda: int,
+    S: Vtype*,         # batch奇异值
+    U: T*,
+    ldu: int,
+    V: T*,
+    ldv: int,
+    info: int*,        # batch状态码
+    params: gesvdjInfo_t,
+    batchSize: int
+)
+```
+
+【算法】
+```
+# Step 1: 查询工作空间
+lwork = cusolverDn{S|D|C|Z}gesvdjBatched_bufferSize(
+    handle, jobz, m, n, A, lda, S, U, ldu, V, ldv, params, batchSize
+)
+
+# Step 2: 分配工作空间
+workspace = CUDACachingAllocator::allocate(sizeof(T) * lwork)
+
+# Step 3: 批量SVD
+cusolverDn{S|D|C|Z}gesvdjBatched(
+    handle, jobz, m, n,
+    A, lda,            # 输入 batchSize 个 m×n 矩阵
+    S,                 # 输出 batchSize 组奇异值
+    U, ldu,
+    V, ldv,
+    workspace, lwork,
+    info,              # batchSize 个状态码
+    params, batchSize
+)
+```
+
+---
+
+## gesvdaStridedBatched (批量SVD - Approximate算法，仅CUDA)
+
+【签名】
+```
+gesvdaStridedBatched_buffersize<T, Vtype>(
+    handle, jobz, rank, m, n,
+    A: T*, lda: int, strideA: long long,
+    S: Vtype*, strideS: long long,
+    U: T*, ldu: int, strideU: long long,
+    V: T*, ldv: int, strideV: long long,
+    lwork: int*,
+    batchSize: int
+)
+
+gesvdaStridedBatched<T, Vtype>(
+    handle, jobz, rank, m, n,
+    A: T*, lda: int, strideA: long long,
+    S: Vtype*, strideS: long long,
+    U: T*, ldu: int, strideU: long long,
+    V: T*, ldv: int, strideV: long long,
+    work: T*,
+    lwork: int,
+    info: int*,
+    h_R_nrmF: double*,  # 输出每个矩阵的Frobenius范数残差（host指针）
+    batchSize: int
+)
+```
+
+【算法】
+```
+cusolverDn{S|D|C|Z}gesvdaStridedBatched(
+    handle, jobz, rank, m, n,
+    A, lda, strideA,   # strided batch输入
+    S, strideS,        # 输出前rank个奇异值
+    U, ldu, strideU,   # 输出前rank列
+    V, ldv, strideV,   # 输出前rank行
+    work, lwork,
+    info,
+    h_R_nrmF,          # 输出近似误差
+    batchSize
+)
+```
+
+【备注】
+- rank: 指定保留的奇异值数量（低秩近似）
+- h_R_nrmF: host端数组，存储每个矩阵的残差范数
+- 仅CUDA支持（ROCm无此API）
+
+---
+
+## potrf (Cholesky分解)
+
+【签名】
+```
+potrf_buffersize<T>(handle, uplo, n, A, lda, lwork)
+
+potrf<T>(
+    handle: cusolverDnHandle_t,
+    uplo: cublasFillMode_t,    # UPPER/LOWER
+    n: int,
+    A: T*,                     # 输入正定矩阵，输出三角因子
+    lda: int,
+    work: T*,
+    lwork: int,
+    info: int*
+) where T in {float, double, complex<float>, complex<double>}
+```
+
+【算法】
+```
+cusolverDn{S|D|C|Z}potrf(
+    handle, uplo, n,
+    A, lda,            # in-place输出L或U
+    work, lwork,
+    info               # 0成功，>0矩阵非正定
+)
+```
+
+---
+
+## potrfBatched (批量Cholesky分解)
+
+【签名】
+```
+potrfBatched<T>(
+    handle: cusolverDnHandle_t,
+    uplo: cublasFillMode_t,
+    n: int,
+    A: T**,            # batch矩阵指针数组
+    lda: int,
+    info: int*,
+    batchSize: int
+)
+```
+
+【算法】
+```
+cusolverDn{S|D|C|Z}potrfBatched(
+    handle, uplo, n,
+    A, lda,            # batchSize 个矩阵指针
+    info,              # batchSize 个状态码
+    batchSize
+)
+```
+
+【备注】
+- 无需工作空间
+- A是指针数组（非strided batch）
+
+---
+
+## xpotrf (64位索引Cholesky分解，仅cuSOLVER >= 11000)
+
+【签名】
+```
+xpotrf_buffersize(
+    handle, params, uplo, n,
+    dataTypeA: cudaDataType,
+    A: void*,
+    lda: int64_t,
+    computeType: cudaDataType,
+    workspaceInBytesOnDevice: size_t*,
+    workspaceInBytesOnHost: size_t*
+)
+
+xpotrf(
+    handle, params, uplo, n,
+    dataTypeA: cudaDataType,
+    A: void*,
+    lda: int64_t,
+    computeType: cudaDataType,
+    bufferOnDevice: void*,
+    workspaceInBytesOnDevice: size_t,
+    bufferOnHost: void*,
+    workspaceInBytesOnHost: size_t,
+    info: int*
+)
+```
+
+【算法】
+```
+cusolverDnXpotrf(
+    handle, params, uplo, n,
+    dataTypeA, A, lda,
+    computeType,
+    bufferOnDevice, workspaceInBytesOnDevice,
+    bufferOnHost, workspaceInBytesOnHost,
+    info
+)
+```
+
+【备注】
+- 支持int64_t索引（大矩阵）
+- 需要device和host两侧工作空间
+- cudaDataType映射：CUDA_R_32F, CUDA_R_64F, CUDA_C_32F, CUDA_C_64F
+
+---
+
+## geqrf (QR分解)
+
+【签名】
+```
+geqrf_bufferSize<T>(handle, m, n, A, lda, lwork)
+
+geqrf<T>(
+    handle: cusolverDnHandle_t,
+    m: int, n: int,
+    A: T*,             # 输入矩阵，输出R（上三角）和Householder向量
+    lda: int,
+    tau: T*,           # 输出Householder系数
+    work: T*,
+    lwork: int,
+    devInfo: int*
+)
+```
+
+【算法】
+```
+cusolverDn{S|D|C|Z}geqrf(
+    handle, m, n,
+    A, lda,            # in-place输出R和隐式Q
+    tau,               # 输出 min(m,n) 个系数
+    work, lwork,
+    devInfo
+)
+```
+
+---
+
+## potrs (用Cholesky分解求解方程组)
+
+【签名】
+```
+potrs<T>(
+    handle: cusolverDnHandle_t,
+    uplo: cublasFillMode_t,
+    n: int, nrhs: int,
+    A: const T*,       # Cholesky因子（来自potrf）
+    lda: int,
+    B: T*,             # 输入右端项，输出解
+    ldb: int,
+    devInfo: int*
+)
+```
+
+【算法】
+```
+cusolverDn{S|D|C|Z}potrs(
+    handle, uplo, n, nrhs,
+    A, lda,            # 三角因子
+    B, ldb,            # in-place求解 A*X = B
+    devInfo
+)
+```
+
+---
+
+## potrsBatched (批量方程组求解)
+
+【签名】
+```
+potrsBatched<T>(
+    handle, uplo, n, nrhs,
+    Aarray: T*[],      # batch Cholesky因子
+    lda: int,
+    Barray: T*[],      # batch右端项
+    ldb: int,
+    info: int*,
+    batchSize: int
+)
+```
+
+【算法】
+```
+cusolverDn{S|D|C|Z}potrsBatched(
+    handle, uplo, n, nrhs,
+    Aarray, lda,
+    Barray, ldb,       # batchSize 个方程组
+    info,
+    batchSize
+)
+```
+
+---
+
+## xpotrs (64位索引方程组求解)
+
+【签名】
+```
+xpotrs(
+    handle, params, uplo, n, nrhs,
+    dataTypeA: cudaDataType,
+    A: const void*,
+    lda: int64_t,
+    dataTypeB: cudaDataType,
+    B: void*,
+    ldb: int64_t,
+    info: int*
+)
+```
+
+【算法】
+```
+cusolverDnXpotrs(
+    handle, params, uplo, n, nrhs,
+    dataTypeA, A, lda,
+    dataTypeB, B, ldb,
+    info
+)
+```
+
+---
+
+## orgqr (从QR分解生成正交矩阵Q)
+
+【签名】
+```
+orgqr_buffersize<T>(handle, m, n, k, A, lda, tau, lwork)
+
+orgqr<T>(
+    handle: cusolverDnHandle_t,
+    m: int, n: int, k: int,
+    A: T*,             # 输入Householder向量，输出Q
+    lda: int,
+    tau: const T*,     # Householder系数（来自geqrf）
+    work: T*,
+    lwork: int,
+    devInfo: int*
+)
+```
+
+【算法】
+```
+cusolverDn{S|D|C|Z}orgqr(  # 复数类型用ungqr
+    handle, m, n, k,
+    A, lda,            # in-place生成前n列Q
+    tau,
+    work, lwork,
+    devInfo
+)
+```
+
+【备注】
+- k: Householder反射的数量（通常 k = min(m,n)）
+- 复数类型调用ungqr（unitary而非orthogonal）
+
+---
+
+## ormqr (用Q矩阵左乘/右乘矩阵)
+
+【签名】
+```
+ormqr_bufferSize<T>(
+    handle, side, trans, m, n, k,
+    A: const T*,       # Householder向量（来自geqrf）
+    lda: int,
+    tau: const T*,
+    C: const T*,       # 输入矩阵
+    ldc: int,
+    lwork: int*
+)
+
+ormqr<T>(
+    handle, side, trans, m, n, k,
+    A: const T*, lda: int,
+    tau: const T*,
+    C: T*,             # 输出 Q*C 或 C*Q
+    ldc: int,
+    work: T*,
+    lwork: int,
+    devInfo: int*
+)
+```
+
+【算法】
+```
+cusolverDn{S|D|C|Z}ormqr(  # 复数类型用unmqr
+    handle, side, trans, m, n, k,
+    A, lda,
+    tau,
+    C, ldc,            # in-place更新
+    work, lwork,
+    devInfo
+)
+```
+
+【备注】
+- side: CUBLAS_SIDE_LEFT (Q*C) 或 RIGHT (C*Q)
+- trans: CUBLAS_OP_N (Q), T (Q^T), C (Q^H)
+
+---
+
+## xgeqrf (64位索引QR分解)
+
+【签名】
+```
+xgeqrf_bufferSize<T>(
+    handle, params, m, n,
+    A: const T*,
+    lda: int64_t,
+    tau: const T*,
+    workspaceInBytesOnDevice: size_t*,
+    workspaceInBytesOnHost: size_t*
+)
+
+xgeqrf<T>(
+    handle, params, m, n,
+    A: T*, lda: int64_t,
+    tau: T*,
+    bufferOnDevice: T*,
+    workspaceInBytesOnDevice: size_t,
+    bufferOnHost: T*,
+    workspaceInBytesOnHost: size_t,
+    info: int*
+)
+```
+
+【算法】
+```
+cusolverDnXgeqrf(
+    handle, params, m, n,
+    cudaDataType(T), A, lda,
+    cudaDataType(T), tau,
+    cudaDataType(T), bufferOnDevice, workspaceInBytesOnDevice,
+    bufferOnHost, workspaceInBytesOnHost,
+    info
+)
+```
+
+---
+
+## syevd (对称/Hermitian矩阵特征值分解 - Divide & Conquer)
+
+【签名】
+```
+syevd_bufferSize<T, Vtype>(
+    handle, jobz, uplo, n,
+    A: const T*,
+    lda: int,
+    W: const Vtype*,   # 特征值（实数）
+    lwork: int*
+) where (T, Vtype) in {(float, float), (double, double),
+                       (complex<float>, float), (complex<double>, double)}
+
+syevd<T, Vtype>(
+    handle, jobz, uplo, n,
+    A: T*,             # 输入矩阵，输出特征向量
+    lda: int,
+    W: Vtype*,         # 输出特征值
+    work: T*,
+    lwork: int,
+    info: int*
+)
+```
+
+【算法】
+```
+cusolverDn{S|D}syevd / cusolverDn{C|Z}heevd(
+    handle, jobz, uplo, n,
+    A, lda,            # in-place输出特征向量（列向量）
+    W,                 # 输出 n 个特征值
+    work, lwork,
+    info
+)
+```
+
+【备注】
+- jobz: CUSOLVER_EIG_MODE_VECTOR (计算特征向量) 或 NOVECTOR
+- 复数类型调用heevd（Hermitian）
+
+---
+
+## syevj (对称/Hermitian矩阵特征值分解 - Jacobi)
+
+【签名】
+```
+syevj_bufferSize<T, Vtype>(
+    handle, jobz, uplo, n,
+    A: const T*, lda: int,
+    W: const Vtype*,
+    lwork: int*,
+    params: syevjInfo_t
+)
+
+syevj<T, Vtype>(
+    handle, jobz, uplo, n,
+    A: T*, lda: int,
+    W: Vtype*,
+    work: T*,
+    lwork: int,
+    info: int*,
+    params: syevjInfo_t
+)
+```
+
+【算法】
+```
+cusolverDn{S|D}syevj / cusolverDn{C|Z}heevj(
+    handle, jobz, uplo, n,
+    A, lda,
+    W,
+    work, lwork,
+    info,
+    params             # 容差、最大迭代等
+)
+```
+
+---
+
+## syevjBatched (批量特征值分解 - Jacobi)
+
+【签名】
+```
+syevjBatched_bufferSize<T, Vtype>(
+    handle, jobz, uplo, n,
+    A: const T*, lda: int,
+    W: const Vtype*,
+    lwork: int*,
+    params: syevjInfo_t,
+    batchsize: int
+)
+
+syevjBatched<T, Vtype>(
+    handle, jobz, uplo, n,
+    A: T*, lda: int,
+    W: Vtype*,
+    work: T*,
+    lwork: int,
+    info: int*,
+    params: syevjInfo_t,
+    batchsize: int
+)
+```
+
+【算法】
+```
+cusolverDn{S|D}syevjBatched / cusolverDn{C|Z}heevjBatched(
+    handle, jobz, uplo, n,
+    A, lda,            # batch矩阵
+    W,                 # batch特征值
+    work, lwork,
+    info,              # batch状态码
+    params, batchsize
+)
+```
+
+---
+
+## xsyevd (64位索引特征值分解)
+
+【签名】
+```
+xsyevd_bufferSize<T, Vtype>(
+    handle, params, jobz, uplo, n,
+    A: const T*, lda: int64_t,
+    W: const Vtype*,
+    workspaceInBytesOnDevice: size_t*,
+    workspaceInBytesOnHost: size_t*
+)
+
+xsyevd<T, Vtype>(
+    handle, params, jobz, uplo, n,
+    A: T*, lda: int64_t,
+    W: Vtype*,
+    bufferOnDevice: T*,
+    workspaceInBytesOnDevice: size_t,
+    bufferOnHost: T*,
+    workspaceInBytesOnHost: size_t,
+    info: int*
+)
+```
+
+【算法】
+```
+cusolverDnXsyevd(
+    handle, params, jobz, uplo, n,
+    cudaDataType(T), A, lda,
+    cudaDataType(Vtype), W,
+    cudaDataType(T), bufferOnDevice, workspaceInBytesOnDevice,
+    bufferOnHost, workspaceInBytesOnHost,
+    info
+)
+```
+
+---
+
+## 辅助函数
+
+【函数】
+```
+get_cusolver_datatype<T>() -> cudaDataType
+    用途: 将C++类型映射到cudaDataType枚举
+    映射:
+        float           -> CUDA_R_32F
+        double          -> CUDA_R_64F
+        complex<float>  -> CUDA_C_32F
+        complex<double> -> CUDA_C_64F
+```
+
+【依赖】
+- cuSOLVER库: cusolverDn*系列函数
+- CUDA运行时: cudaDataType枚举
+- c10::cuda::CUDACachingAllocator: 临时GPU内存分配
+- TORCH_CUSOLVER_CHECK: 错误检查宏（封装cusolverStatus_t）
+
+【平台特定】
+- USE_CUSOLVER_64_BIT: 仅cuSOLVER >= 11000时启用64位API（xpotrf, xgeqrf, xsyevd等）
+- gesvdaStridedBatched: 仅CUDA支持（ROCm无此API，见#ifdef CUDART_VERSION）

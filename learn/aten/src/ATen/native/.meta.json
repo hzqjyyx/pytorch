@@ -1,0 +1,345 @@
+{
+  "version": 1,
+  "units": {
+    "Normalization": {
+      "type": "group",
+      "hashes": {
+        "Normalization.cpp": "20b41d42a3a655c1",
+        "Normalization.h": "4965dfa9b0f14f9b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PixelShuffle": {
+      "type": "group",
+      "hashes": {
+        "PixelShuffle.cpp": "77778b0b76924908",
+        "PixelShuffle.h": "a9b29d40091bfaec"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Repeat": {
+      "type": "group",
+      "hashes": {
+        "Repeat.cpp": "56531e5c4a1589d8",
+        "Repeat.h": "9d5dfc907d63dbfe"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorTransformations": {
+      "type": "group",
+      "hashes": {
+        "TensorTransformations.cpp": "3656d345f2161e6e",
+        "TensorTransformations.h": "68a10e687b9358a4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "layer_norm": {
+      "type": "group",
+      "hashes": {
+        "layer_norm.cpp": "900dcdd868b84272",
+        "layer_norm.h": "769cc8c919d8c95c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReduceOps": {
+      "type": "group",
+      "hashes": {
+        "ReduceOps.cpp": "dce569ba432bfd2b",
+        "ReduceOps.h": "af865af7884ca4d9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "GridSampler": {
+      "type": "group",
+      "hashes": {
+        "GridSampler.cpp": "c67e6764577609ba",
+        "GridSampler.h": "b3dcbe6b9f508552"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnfoldBackward": {
+      "type": "group",
+      "hashes": {
+        "UnfoldBackward.cpp": "a6166cfdc2cdfef8",
+        "UnfoldBackward.h": "b459be41afd4033d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Resize": {
+      "type": "group",
+      "hashes": {
+        "Resize.cpp": "b3d5c53ab4ff026b",
+        "Resize.h": "f3f0a3db72468d61"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryOps": {
+      "type": "group",
+      "hashes": {
+        "BinaryOps.cpp": "4e61beed0efbf58b",
+        "BinaryOps.h": "0e065bab4290065f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Fill": {
+      "type": "group",
+      "hashes": {
+        "Fill.cpp": "0aa2ba34d902e775",
+        "Fill.h": "a4829ab185f893b5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Unfold3d": {
+      "type": "group",
+      "hashes": {
+        "Unfold3d.cpp": "86c3b65fe15f1568",
+        "Unfold3d.h": "bbee13e24d17450d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "RangeFactories": {
+      "type": "group",
+      "hashes": {
+        "RangeFactories.cpp": "c15a2dc71ca6c3c3",
+        "RangeFactories.h": "9be5d3f7b3eced05"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Unfold2d": {
+      "type": "group",
+      "hashes": {
+        "Unfold2d.cpp": "7d68b9bdd807bcf7",
+        "Unfold2d.h": "33ce3c1836077066"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LinearAlgebra": {
+      "type": "group",
+      "hashes": {
+        "LinearAlgebra.cpp": "e197cd299b67c7ee",
+        "LinearAlgebra.h": "987a4e73755da0d5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Copy": {
+      "type": "group",
+      "hashes": {
+        "Copy.cpp": "b34838ebec29eaaf",
+        "Copy.h": "83b3083f81709db3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Cross": {
+      "type": "group",
+      "hashes": {
+        "Cross.cpp": "7120186894f195da",
+        "Cross.h": "53126d949aaf00e2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SobolEngineOpsUtils": {
+      "type": "group",
+      "hashes": {
+        "SobolEngineOpsUtils.cpp": "dea97c1bd6b93596",
+        "SobolEngineOpsUtils.h": "731cd9051ba3b6a9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "RNN": {
+      "type": "group",
+      "hashes": {
+        "RNN.cpp": "0fecae958bcea269",
+        "RNN.h": "bac16e3beaa55028"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DispatchStub": {
+      "type": "group",
+      "hashes": {
+        "DispatchStub.cpp": "cfb93eb61b463182",
+        "DispatchStub.h": "547c3be42943c84a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FunctionOfAMatrixUtils": {
+      "type": "group",
+      "hashes": {
+        "FunctionOfAMatrixUtils.cpp": "830e855637709080",
+        "FunctionOfAMatrixUtils.h": "35536c6937808902"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TypeProperties": {
+      "type": "group",
+      "hashes": {
+        "TypeProperties.cpp": "f35c2d29fa8f7751",
+        "TypeProperties.h": "dfb3f7847231d92a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SparseTensorUtils": {
+      "type": "group",
+      "hashes": {
+        "SparseTensorUtils.cpp": "4cbe3929a24a94a1",
+        "SparseTensorUtils.h": "b2b90987f4c0b555"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MaxPooling": {
+      "type": "group",
+      "hashes": {
+        "MaxPooling.cpp": "d0db74744dd196ea",
+        "MaxPooling.h": "db11d61ee5eeb407"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "IndexingUtils": {
+      "type": "group",
+      "hashes": {
+        "IndexingUtils.cpp": "6ef808fb6f802350",
+        "IndexingUtils.h": "6b4b57fd69739994"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Distance": {
+      "type": "group",
+      "hashes": {
+        "Distance.cpp": "ea7563902b779331",
+        "Distance.h": "ee29626d9397e113"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AmpKernels": {
+      "type": "group",
+      "hashes": {
+        "AmpKernels.cpp": "034fe2232c54af31",
+        "AmpKernels.h": "04af0d2bc0aaff6f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSample": {
+      "type": "group",
+      "hashes": {
+        "UpSample.cpp": "85c13cc3c85b04db",
+        "UpSample.h": "c6f283a380877846"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CPUFallback": {
+      "type": "group",
+      "hashes": {
+        "CPUFallback.cpp": "946ac782997f538a",
+        "CPUFallback.h": "8ce5a28533aeb4ce"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FusedAdagrad": {
+      "type": "group",
+      "hashes": {
+        "FusedAdagrad.cpp": "c89bcd7fc0709a9e",
+        "FusedAdagrad.h": "72de08fc3308b3e1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Pow": {
+      "type": "group",
+      "hashes": {
+        "Pow.cpp": "e3479837336232c1",
+        "Pow.h": "0508b6acb26eb7aa"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Distributions": {
+      "type": "group",
+      "hashes": {
+        "Distributions.cpp": "98e2c65578c4778a",
+        "Distributions.h": "7609ff2063e69f5a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReduceAllOps": {
+      "type": "group",
+      "hashes": {
+        "ReduceAllOps.cpp": "0532fea7148d93b9",
+        "ReduceAllOps.h": "851d32d85c435352"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Lerp": {
+      "type": "group",
+      "hashes": {
+        "Lerp.cpp": "647b88a3334428eb",
+        "Lerp.h": "98294279dae51d2e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    }
+  }
+}

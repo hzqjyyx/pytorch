@@ -1,0 +1,429 @@
+--------------------------------
+batch_norm_update_stats_channels_last_template
+来源: aten/src/ATen/native/cuda/Normalization.cuh
+--------------------------------
+
+【签名】
+    @device
+    batch_norm_update_stats_channels_last_template<T, accscalar_t>(
+        input: Tensor[N, H, W, C],
+        save_mean: Tensor[C],
+        save_invstd: Tensor[C],
+        running_mean: Optional[Tensor[C]],
+        running_var: Optional[Tensor[C]],
+        momentum: accscalar_t,
+        eps: accscalar_t
+    )
+
+【算法】
+    # 假设已展平为 (NHW, C)
+    plane = NHW  # N * H * W
+    c = blockIdx.x  # 每个block处理一个channel
+
+    # Step 1: 计算该channel的均值
+    sum = 0
+    for batch in parallel_for(plane):
+        sum += input[batch, c]
+    mean = block_reduce(sum, op=add) / plane
+
+    # Step 2: 计算方差
+    sum_sq = 0
+    for batch in parallel_for(plane):
+        diff = input[batch, c] - mean
+        sum_sq += diff * diff
+    variance = block_reduce(sum_sq, op=add) / plane
+    invstd = rsqrt(variance + eps)
+
+    # Step 3: 保存统计量
+    if threadIdx.x == 0:
+        save_mean[c] = mean
+        save_invstd[c] = invstd
+
+        # 更新滑动统计量
+        if running_mean is not None:
+            running_mean[c] = (1 - momentum) * running_mean[c] + momentum * mean
+        if running_var is not None:
+            running_var[c] = (1 - momentum) * running_var[c] + momentum * variance
+
+【并行模式】
+    grid: (C,)
+    block: (block_threads,)
+
+    - 每个block处理一个channel
+    - block内线程并行归约NHW维度
+
+--------------------------------
+batch_norm_transform_input_channels_last_template
+来源: aten/src/ATen/native/cuda/Normalization.cuh
+--------------------------------
+
+【签名】
+    @device
+    batch_norm_transform_input_channels_last_template<T, accscalar_t>(
+        input: Tensor[N, H, W, C],
+        output: Tensor[N, H, W, C],
+        mean: Tensor[C],
+        invstd: Tensor[C],
+        weight: Optional[Tensor[C]],
+        bias: Optional[Tensor[C]]
+    )
+
+【算法】
+    # 假设已展平为 (NHW, C)
+    plane = NHW
+    c = blockIdx.x  # 每个block处理一个channel
+
+    gamma = weight[c] if weight is not None else 1
+    beta = bias[c] if bias is not None else 0
+
+    for batch in parallel_for(plane):
+        output[batch, c] = (input[batch, c] - mean[c]) * invstd[c] * gamma + beta
+
+【并行模式】
+    grid: (C,)
+    block: (block_threads,)
+
+    - 每个block处理一个channel
+    - block内线程并行处理NHW维度
+
+--------------------------------
+batch_norm_backward_reduce_channels_last_template
+来源: aten/src/ATen/native/cuda/Normalization.cuh
+--------------------------------
+
+【签名】
+    @device
+    batch_norm_backward_reduce_channels_last_template<T, accscalar_t>(
+        grad_output: Tensor[N, H, W, C],
+        input: Tensor[N, H, W, C],
+        mean: Tensor[C],
+        invstd: Tensor[C],
+        sum_dy: Tensor[C],
+        sum_dy_xmu: Tensor[C],
+        grad_weight: Optional[Tensor[C]],
+        grad_bias: Optional[Tensor[C]]
+    )
+
+【算法】
+    # 假设已展平为 (NHW, C)
+    plane = NHW
+    c = blockIdx.x
+
+    # 计算归约量
+    s_dy = 0
+    s_dy_xmu = 0
+
+    for batch in parallel_for(plane):
+        dy = grad_output[batch, c]
+        x_centered = input[batch, c] - mean[c]
+        s_dy += dy
+        s_dy_xmu += dy * x_centered
+
+    s_dy = block_reduce(s_dy, op=add)
+    s_dy_xmu = block_reduce(s_dy_xmu, op=add)
+
+    if threadIdx.x == 0:
+        sum_dy[c] = s_dy
+        sum_dy_xmu[c] = s_dy_xmu
+
+        if grad_weight is not None:
+            grad_weight[c] = s_dy_xmu * invstd[c]
+
+        if grad_bias is not None:
+            grad_bias[c] = s_dy
+
+【并行模式】
+    grid: (C,)
+    block: (block_threads,)
+
+--------------------------------
+batch_norm_backward_elemt_channels_last_template
+来源: aten/src/ATen/native/cuda/Normalization.cuh
+--------------------------------
+
+【签名】
+    @device
+    batch_norm_backward_elemt_channels_last_template<T, accscalar_t>(
+        grad_output: Tensor[N, H, W, C],
+        input: Tensor[N, H, W, C],
+        mean: Tensor[C],
+        invstd: Tensor[C],
+        weight: Optional[Tensor[C]],
+        sum_dy: Tensor[C],
+        sum_dy_xmu: Tensor[C],
+        grad_input: Tensor[N, H, W, C]
+    )
+
+【算法】
+    # 假设已展平为 (NHW, C)
+    plane = NHW
+    c = blockIdx.x
+
+    gamma = weight[c] if weight is not None else 1
+    norm = 1.0 / plane
+
+    k = (sum_dy[c] * norm) * gamma
+    factor_1 = invstd[c] * gamma
+    factor_2 = (invstd[c] ** 2) * sum_dy_xmu[c] * norm * gamma
+
+    for batch in parallel_for(plane):
+        x_centered = input[batch, c] - mean[c]
+        grad_input[batch, c] = (grad_output[batch, c] - k - x_centered * factor_2) * factor_1
+
+【并行模式】
+    grid: (C,)
+    block: (block_threads,)
+
+--------------------------------
+batch_norm_collect_statistics_channels_last_kernel
+来源: aten/src/ATen/native/cuda/Normalization.cuh
+--------------------------------
+
+【签名】
+    @device
+    batch_norm_collect_statistics_channels_last_kernel<InT, StatT>(
+        input: Tensor[N, H, W, C],
+        eps: StatT,
+        momentum: StatT,
+        running_mean: Optional[Tensor[C]],
+        running_var: Optional[Tensor[C]],
+        save_mean: Tensor[C],
+        save_invstd: Tensor[C]
+    )
+
+【算法】
+    batch_norm_update_stats_channels_last_template(
+        input, save_mean, save_invstd,
+        running_mean, running_var, momentum, eps
+    )
+
+【并行模式】
+    同 batch_norm_update_stats_channels_last_template
+
+--------------------------------
+batch_norm_transform_input_channels_last_kernel
+来源: aten/src/ATen/native/cuda/Normalization.cuh
+--------------------------------
+
+【签名】
+    @device
+    batch_norm_transform_input_channels_last_kernel<InT, OutT, StatT>(
+        input: Tensor[N, H, W, C],
+        output: Tensor[N, H, W, C],
+        mean: Tensor[C],
+        invstd: Tensor[C],
+        weight: Optional[Tensor[C]],
+        bias: Optional[Tensor[C]]
+    )
+
+【算法】
+    batch_norm_transform_input_channels_last_template(
+        input, output, mean, invstd, weight, bias
+    )
+
+【并行模式】
+    同 batch_norm_transform_input_channels_last_template
+
+--------------------------------
+batch_norm_backward_reduce_channels_last_kernel
+来源: aten/src/ATen/native/cuda/Normalization.cuh
+--------------------------------
+
+【签名】
+    @device
+    batch_norm_backward_reduce_channels_last_kernel<InT, StatT>(
+        grad_output: Tensor[N, H, W, C],
+        input: Tensor[N, H, W, C],
+        mean: Tensor[C],
+        invstd: Tensor[C],
+        sum_dy: Tensor[C],
+        sum_dy_xmu: Tensor[C],
+        grad_weight: Optional[Tensor[C]],
+        grad_bias: Optional[Tensor[C]]
+    )
+
+【算法】
+    batch_norm_backward_reduce_channels_last_template(
+        grad_output, input, mean, invstd,
+        sum_dy, sum_dy_xmu, grad_weight, grad_bias
+    )
+
+【并行模式】
+    同 batch_norm_backward_reduce_channels_last_template
+
+--------------------------------
+batch_norm_backward_elemt_channels_last_kernel
+来源: aten/src/ATen/native/cuda/Normalization.cuh
+--------------------------------
+
+【签名】
+    @device
+    batch_norm_backward_elemt_channels_last_kernel<InT, OutT, StatT>(
+        grad_output: Tensor[N, H, W, C],
+        input: Tensor[N, H, W, C],
+        mean: Tensor[C],
+        invstd: Tensor[C],
+        weight: Optional[Tensor[C]],
+        sum_dy: Tensor[C],
+        sum_dy_xmu: Tensor[C],
+        grad_input: Tensor[N, H, W, C]
+    )
+
+【算法】
+    batch_norm_backward_elemt_channels_last_template(
+        grad_output, input, mean, invstd, weight,
+        sum_dy, sum_dy_xmu, grad_input
+    )
+
+【并行模式】
+    同 batch_norm_backward_elemt_channels_last_template
+
+--------------------------------
+batch_norm_stats_channels_last
+来源: aten/src/ATen/native/cuda/Normalization.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    batch_norm_stats_channels_last<InT, StatT>(
+        input: Tensor[N, H, W, C],
+        eps: StatT,
+        momentum: StatT,
+        running_mean: Optional[Tensor[C]],
+        running_var: Optional[Tensor[C]],
+        save_mean: Tensor[C],
+        save_invstd: Tensor[C]
+    )
+
+【算法】
+    tf32_flag = at::globalContext().allowTF32CuBLAS()
+    at::globalContext().setAllowTF32CuBLAS(false)
+
+    stream = at::cuda::getCurrentCUDAStream()
+    block = (512,)
+    grid = (C,)
+
+    batch_norm_collect_statistics_channels_last_kernel<<<grid, block, 0, stream>>>(
+        input, eps, momentum, running_mean, running_var, save_mean, save_invstd
+    )
+
+    at::globalContext().setAllowTF32CuBLAS(tf32_flag)
+
+【备注】
+    - 禁用TF32以保证数值精度
+
+--------------------------------
+batch_norm_elemt_channels_last
+来源: aten/src/ATen/native/cuda/Normalization.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    batch_norm_elemt_channels_last<InT, OutT, StatT>(
+        input: Tensor[N, H, W, C],
+        weight: Optional[Tensor[C]],
+        bias: Optional[Tensor[C]],
+        mean: Tensor[C],
+        invstd: Tensor[C],
+        output: Tensor[N, H, W, C]
+    )
+
+【算法】
+    tf32_flag = at::globalContext().allowTF32CuBLAS()
+    at::globalContext().setAllowTF32CuBLAS(false)
+
+    stream = at::cuda::getCurrentCUDAStream()
+    block = (512,)
+    grid = (C,)
+
+    batch_norm_transform_input_channels_last_kernel<<<grid, block, 0, stream>>>(
+        input, output, mean, invstd, weight, bias
+    )
+
+    at::globalContext().setAllowTF32CuBLAS(tf32_flag)
+
+【备注】
+    - 禁用TF32以保证数值精度
+
+--------------------------------
+batch_norm_backward_reduce_channels_last
+来源: aten/src/ATen/native/cuda/Normalization.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    batch_norm_backward_reduce_channels_last<InT, StatT>(
+        grad_output: Tensor[N, H, W, C],
+        input: Tensor[N, H, W, C],
+        mean: Tensor[C],
+        invstd: Tensor[C],
+        weight: Optional[Tensor[C]],
+        input_g: bool,
+        weight_g: bool,
+        bias_g: bool,
+        save_mean: Tensor[C],
+        save_invstd: Tensor[C],
+        running_mean: Tensor[C],
+        running_var: Tensor[C],
+        sum_dy: Tensor[C],
+        sum_dy_xmu: Tensor[C],
+        grad_weight: Tensor[C],
+        grad_bias: Tensor[C]
+    )
+
+【算法】
+    tf32_flag = at::globalContext().allowTF32CuBLAS()
+    at::globalContext().setAllowTF32CuBLAS(false)
+
+    stream = at::cuda::getCurrentCUDAStream()
+    block = (512,)
+    grid = (C,)
+
+    grad_weight_ptr = grad_weight if weight_g else None
+    grad_bias_ptr = grad_bias if bias_g else None
+
+    batch_norm_backward_reduce_channels_last_kernel<<<grid, block, 0, stream>>>(
+        grad_output, input, mean, invstd,
+        sum_dy, sum_dy_xmu, grad_weight_ptr, grad_bias_ptr
+    )
+
+    at::globalContext().setAllowTF32CuBLAS(tf32_flag)
+
+【备注】
+    - 禁用TF32以保证数值精度
+
+--------------------------------
+batch_norm_backward_elemt_channels_last
+来源: aten/src/ATen/native/cuda/Normalization.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    batch_norm_backward_elemt_channels_last<InT, OutT, StatT>(
+        grad_output: Tensor[N, H, W, C],
+        input: Tensor[N, H, W, C],
+        mean: Tensor[C],
+        invstd: Tensor[C],
+        weight: Optional[Tensor[C]],
+        sum_dy: Tensor[C],
+        sum_dy_xmu: Tensor[C],
+        grad_input: Tensor[N, H, W, C]
+    )
+
+【算法】
+    tf32_flag = at::globalContext().allowTF32CuBLAS()
+    at::globalContext().setAllowTF32CuBLAS(false)
+
+    stream = at::cuda::getCurrentCUDAStream()
+    block = (512,)
+    grid = (C,)
+
+    batch_norm_backward_elemt_channels_last_kernel<<<grid, block, 0, stream>>>(
+        grad_output, input, mean, invstd, weight,
+        sum_dy, sum_dy_xmu, grad_input
+    )
+
+    at::globalContext().setAllowTF32CuBLAS(tf32_flag)
+
+【备注】
+    - 禁用TF32以保证数值精度

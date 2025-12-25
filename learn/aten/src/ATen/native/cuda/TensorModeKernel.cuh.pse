@@ -1,0 +1,299 @@
+--------------------------------
+inclusivePrefixScan
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cuh
+--------------------------------
+
+【签名】
+    @device
+    inclusivePrefixScan<Power2ScanSize, T, BinaryOp>(
+        smem: T*,           # 共享内存数组，大小 = Power2ScanSize
+        binop: BinaryOp     # 二元归约操作
+    )
+
+    约束:
+    - Power2ScanSize 必须是2的幂次
+    - smem大小 >= Power2ScanSize
+
+【算法】
+    # 包含式前缀扫描 (Blelloch算法)
+    # 两阶段: upsweep 归约 + downsweep 分发
+
+    # Phase 1: Upsweep (自底向上归约)
+    for stride in [1, 2, 4, ..., Power2ScanSize/2]:
+        index = (threadIdx.x + 1) * stride * 2 - 1
+        if index < Power2ScanSize:
+            smem[index] = binop(smem[index], smem[index - stride])
+        __syncthreads()
+
+    # Phase 2: Downsweep (自顶向下分发)
+    for stride in [Power2ScanSize/4, ..., 2, 1]:
+        index = (threadIdx.x + 1) * stride * 2 - 1
+        if (index + stride) < Power2ScanSize:
+            smem[index + stride] = binop(smem[index + stride], smem[index])
+        __syncthreads()
+
+【并行模式】
+    block内并行扫描
+    - 每个线程处理2个元素
+    - log2(Power2ScanSize)次同步
+
+【备注】
+    经典示例 (加法扫描):
+    输入: [0, 1, 2, 3, 4, 5, 6, 7]
+    Upsweep构建:    [-, 1, -, 5, -, 9, -, 13] → [-, -, -, 6, -, -, -, 22] → [-, -, -, -, -, -, -, 28]
+    Downsweep分发: [-, -, -, 15, -, -, -, 28] → [-, 3, -, 10, -, 15, -, 21] → 最终结果
+
+--------------------------------
+reduceBlockWithNThreadLocalReductions
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cuh
+--------------------------------
+
+【签名】
+    @device
+    reduceBlockWithNThreadLocalReductions<N, T, ReduceOp>(
+        smem: T*,              # 共享内存缓冲区
+        threadVals: T[N],      # 每线程持有N个值 (寄存器)
+        numVals: uint,         # 有效元素总数
+        reduceOp: ReduceOp,    # 归约操作符
+        init: T                # 归约初始值
+    ) -> T
+
+【算法】
+    # Step 1: 线程内归约 (N个值 → 1个值)
+    offset = threadIdx.x * N
+    local = (offset < numVals) ? threadVals[0] : init
+
+    for i in [1, 2, ..., N-1]:
+        offset += 1
+        next = (offset < numVals) ? threadVals[i] : init
+        local = reduceOp.combine(local, next)
+
+    # Step 2: Block内归约 (所有线程 → thread 0)
+    result = cuda_utils::BlockReduce(local, reduceOp, init, smem)
+    return result
+
+【并行模式】
+    两级归约:
+    1. 线程内顺序归约 (寄存器)
+    2. Block内warp归约 (共享内存)
+
+【备注】
+    - 适用于每线程处理多个元素的场景
+    - BlockReduce是标准的warp/block归约，见block_reduce.cuh
+
+--------------------------------
+swapVars
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cuh
+--------------------------------
+
+【签名】
+    @device
+    swapVars<T>(t1: T&, t2: T&)
+
+【算法】
+    tmp = t1
+    t1 = t2
+    t2 = tmp
+
+--------------------------------
+bitonicSwap / bitonicSwapKeys
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cuh
+--------------------------------
+
+【签名】
+    @device
+    bitonicSwap<Comparator, K, V>(
+        kA: K&, vA: V&, validA: bool&,    # 元素A
+        kB: K&, vB: V&, validB: bool&,    # 元素B
+        dir: bool,                         # 排序方向
+        comp: Comparator                   # 比较器
+    )
+
+    bitonicSwapKeys<Comparator, K>(
+        kA: K&, validA: bool&,
+        kB: K&, validB: bool&,
+        dir: bool,
+        comp: Comparator
+    )
+
+【算法】
+    # 计算是否需要交换
+    swap = (comp(kA, kB) && validA) || !validB
+
+    # 根据方向决定是否执行交换
+    if swap == dir:
+        swapVars(kA, kB)
+        swapVars(vA, vB)          # bitonicSwap有这行
+        swapVars(validA, validB)
+
+【备注】
+    - 无效元素永远排到末尾
+    - bitonicSwapKeys只交换key和valid标记
+
+--------------------------------
+bitonicSortKeys
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cuh
+--------------------------------
+
+【签名】
+    @device
+    bitonicSortKeys<K, IndexType, Power2SortSize, Comparator>(
+        keys: K[Power2SortSize],        # 每线程持有的keys数组
+        valid: bool[Power2SortSize],    # 有效性标记
+        comp: Comparator
+    )
+
+    约束:
+    - Power2SortSize 必须是2的幂次
+
+【算法】
+    # 双调排序网络
+    # Phase 1: 构建双调序列
+    for size in [2, 4, 8, ..., Power2SortSize/2]:
+        flag = (threadIdx.x & (size/2)) != 0
+
+        for stride in [size/2, size/4, ..., 1]:
+            __syncthreads()
+            pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1))
+            bitonicSwapKeys(keys[pos], valid[pos], 
+                           keys[pos+stride], valid[pos+stride],
+                           flag, comp)
+
+    # Phase 2: 全局归并
+    for stride in [Power2SortSize/2, ..., 2, 1]:
+        __syncthreads()
+        pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1))
+        bitonicSwapKeys(keys[pos], valid[pos],
+                       keys[pos+stride], valid[pos+stride],
+                       false, comp)
+
+    __syncthreads()
+
+【并行模式】
+    block内并行排序网络
+    - 每线程持有2个元素
+    - O(log²n)次同步
+
+【备注】
+    - ROCm平台禁用#pragma unroll以减少寄存器压力
+
+--------------------------------
+compute_mode
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cuh
+--------------------------------
+
+【签名】
+    @device
+    compute_mode<T, Power2Size>(
+        input: T*,                                      # 输入slice，已拍平
+        values: TensorInfo<T, uint>,                    # 输出mode值
+        indices: TensorInfo<int64, uint>,               # 输出mode索引
+        sliceSize: int64,
+        slices: int64
+    )
+
+    约束:
+    - Power2Size >= sliceSize
+    - 每个block处理一个slice
+    - 每个线程处理2个元素
+
+【算法】
+    # 每个block计算一个slice的mode
+    blockId = getLinearBlockId()
+    if blockId >= slices:
+        return
+
+    linearOffset = blockId * sliceSize
+    tidx = threadIdx.x
+    stidx = blockDim.x + threadIdx.x
+
+    # === 共享内存布局动态变化 ===
+    # Phase 1: [smem: T[Power2Size] | bmem: bool[Power2Size] | scratch]
+
+    # Step 1: 加载元素到共享内存
+    if tidx < sliceSize:
+        smem[tidx] = input[linearOffset + tidx]
+    if stidx < sliceSize:
+        smem[stidx] = input[linearOffset + stidx]
+
+    bmem[tidx] = (tidx < sliceSize)
+    bmem[stidx] = (stidx < sliceSize)
+    __syncthreads()
+
+    # Step 2: 双调排序
+    bitonicSortKeys<T, uint, Power2Size>(smem, bmem, λ(a,b). a < b)
+    __syncthreads()
+
+    # Phase 2: [smem: T[Power2Size] | ubpmem: (val:uint, flag:bool)[Power2Size]]
+
+    # Step 3: 标记segment起点和长度
+    ubpmem[0] = {val=0, flag=true}
+
+    ubpmem[tidx*2+1].flag = (smem[tidx*2] != smem[tidx*2+1])
+    ubpmem[tidx*2+1].val = !ubpmem[tidx*2+1].flag
+
+    if ((tidx+1)*2) < Power2Size:
+        ubpmem[(tidx+1)*2].flag = (smem[(tidx+1)*2-1] != smem[(tidx+1)*2])
+        ubpmem[(tidx+1)*2].val = !ubpmem[(tidx+1)*2].flag
+    __syncthreads()
+
+    # Step 4: Segmented scan计算run-length
+    # 示例: sorted = [0,0,1,1,1,2]
+    #       flag   = [1,0,1,0,0,1]
+    #       val    = [0,1,0,1,2,0] (初始)
+    #       → scan → [0,1,0,1,2,0] (run-length - 1)
+    inclusivePrefixScan<Power2Size>(ubpmem, 
+        λ(a,b). {val = a.flag ? a.val : a.val + b.val,
+                 flag = a.flag | b.flag})
+
+    # Phase 3: [smem: T[Power2Size] | uupmem: (val:uint, index:uint)[Power2Size]]
+
+    # Step 5: 归约找最大run-length的索引
+    uup[0] = {index=tidx*2,   val=ubpmem[tidx*2].val}
+    uup[1] = {index=tidx*2+1, val=ubpmem[tidx*2+1].val}
+    __syncthreads()
+
+    max_op = λ(a,b). (b.val > a.val) ? b : a
+    max = reduceBlockWithNThreadLocalReductions<2>(uupmem, uup, sliceSize, max_op, {0,0})
+
+    # Step 6: 确定mode值
+    __shared__ mode: T
+    if tidx == 0:
+        mode = smem[max.index]
+    __syncthreads()
+
+    # Step 7: 找mode在原始输入中的最大索引
+    mode_index[0] = 0
+    mode_index[1] = 0
+    if tidx*2 < sliceSize:
+        idx = tidx * 2
+        mode_index[0] = (input[linearOffset + idx] == mode) ? idx : 0
+
+    if tidx*2+1 < sliceSize:
+        idx = tidx*2 + 1
+        mode_index[1] = (input[linearOffset + idx] == mode) ? idx : 0
+
+    max_index_op = λ(a,b). max(a, b)
+    index = reduceBlockWithNThreadLocalReductions<2>(
+        reinterpret_cast<uint*>(shmem), mode_index, sliceSize, max_index_op, 0u)
+
+    # Step 8: 写回结果
+    if tidx == 0:
+        outputOffset = IndexToOffset(blockId, values)
+        values.data[outputOffset] = mode
+        indices.data[outputOffset] = index
+
+【并行模式】
+    grid: (slices,)
+    block: (Power2Size / 2,)
+
+    每个block处理一个slice:
+    1. 双调排序 → O(log²n)次同步
+    2. Segmented scan → O(log n)次同步
+    3. 两次block归约 → O(log n)次同步
+
+【备注】
+    - 共享内存最小需求: sizeof(T)*Power2Size + 2*sizeof(uint)*Power2Size
+    - CUDA 11.7+: __launch_bounds__(1024, 1) 优化寄存器使用
+    - 三次重解释共享内存: T[] → bool[] → (uint,bool)[] → (uint,uint)[]
+    - 算法关键: 排序后用segmented scan统计run-length，然后找最大

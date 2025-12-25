@@ -1,0 +1,348 @@
+--------------------------------
+im2col (图像到列的展开):
+来源: aten/src/ATen/native/cuda/im2col.cuh
+--------------------------------
+
+【签名】
+    @device
+    im2col_kernel<dt>(
+        n: int64,                    # 总输出元素数 = channels * height_col * width_col
+        data_im: dt*,                # 输入图像数据
+        height: int64,               # 输入图像高度
+        width: int64,                # 输入图像宽度
+        kernel_height: int64,        # 卷积核高度
+        kernel_width: int64,         # 卷积核宽度
+        pad_height: int64,           # 高度方向padding
+        pad_width: int64,            # 宽度方向padding
+        stride_height: int64,        # 高度方向步长
+        stride_width: int64,         # 宽度方向步长
+        dilation_height: int64,      # 高度方向膨胀
+        dilation_width: int64,       # 宽度方向膨胀
+        height_col: int64,           # 输出列矩阵高度
+        width_col: int64,            # 输出列矩阵宽度
+        data_col: dt*                # 输出列矩阵
+    )
+
+【算法】
+    parallel_for index in range(n):
+        # 从线性索引解码输出位置
+        w_out = index % width_col
+        idx = index / width_col
+        h_out = idx % height_col
+        channel_in = idx / height_col
+        
+        # 计算输出通道起始位置和输入patch左上角
+        channel_out = channel_in * kernel_height * kernel_width
+        h_in = h_out * stride_height - pad_height
+        w_in = w_out * stride_width - pad_width
+        
+        # 计算输出和输入指针位置
+        col = data_col + (channel_out * height_col + h_out) * width_col + w_out
+        im = data_im + (channel_in * height + h_in) * width + w_in
+        
+        # 展开卷积核窗口内的所有元素
+        for i in range(kernel_height):
+            for j in range(kernel_width):
+                h = h_in + i * dilation_height
+                w = w_in + j * dilation_width
+                
+                # 边界检查：超出范围填充0，否则读取对应值
+                *col = im[i * dilation_height * width + j * dilation_width] 
+                       if (h >= 0 and w >= 0 and h < height and w < width) 
+                       else 0
+                
+                col += height_col * width_col
+
+【并行模式】
+    grid: GET_BLOCKS(n)
+    block: 1024 threads
+    
+    每个线程独立处理一个输出位置的所有卷积核窗口元素
+
+--------------------------------
+im2col (主机接口):
+来源: aten/src/ATen/native/cuda/im2col.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    im2col<dt>(
+        stream: cudaStream_t,
+        data_im: dt*,
+        channels: int64,
+        height: int64,
+        width: int64,
+        height_col: int64,
+        width_col: int64,
+        kernel_height: int64,
+        kernel_width: int64,
+        pad_height: int64,
+        pad_width: int64,
+        stride_height: int64,
+        stride_width: int64,
+        dilation_height: int64,
+        dilation_width: int64,
+        data_col: dt*
+    )
+
+【算法】
+    num_kernels = channels * height_col * width_col
+    
+    im2col_kernel<<<GET_BLOCKS(num_kernels), 1024, 0, stream>>>(
+        num_kernels, data_im, height, width,
+        kernel_height, kernel_width,
+        pad_height, pad_width,
+        stride_height, stride_width,
+        dilation_height, dilation_width,
+        height_col, width_col,
+        data_col)
+    
+    C10_CUDA_KERNEL_LAUNCH_CHECK()
+
+--------------------------------
+col2im_device (列到图像的累加，设备函数):
+来源: aten/src/ATen/native/cuda/im2col.cuh
+--------------------------------
+
+【签名】
+    @device
+    col2im_device<accT, dt>(
+        index: int64,                # 输出图像的线性索引
+        data_col: dt*,               # 输入列矩阵
+        height: int64,               # 输出图像高度
+        width: int64,                # 输出图像宽度
+        kernel_h: int64,
+        kernel_w: int64,
+        pad_height: int64,
+        pad_width: int64,
+        stride_height: int64,
+        stride_width: int64,
+        dilation_height: int64,
+        dilation_width: int64,
+        height_col: int64,
+        width_col: int64,
+        data_im: dt*                 # 输出图像数据
+    )
+
+【算法】
+    # 从线性索引解码图像位置
+    w_im = index % width + pad_width
+    h_im = (index / width) % height + pad_height
+    c_im = index / (width * height)
+    
+    # 计算卷积核覆盖范围
+    kernel_extent_w = (kernel_w - 1) * dilation_width + 1
+    kernel_extent_h = (kernel_h - 1) * dilation_height + 1
+    
+    # 计算该位置可能贡献的输出列范围
+    w_col_start = 0 if w_im < kernel_extent_w else (w_im - kernel_extent_w) / stride_width + 1
+    w_col_end = min(w_im / stride_width + 1, width_col)
+    h_col_start = 0 if h_im < kernel_extent_h else (h_im - kernel_extent_h) / stride_height + 1
+    h_col_end = min(h_im / stride_height + 1, height_col)
+    
+    # 累加所有可能位置的贡献
+    val = 0
+    for h_col in range(h_col_start, h_col_end):
+        for w_col in range(w_col_start, w_col_end):
+            h_k = h_im - h_col * stride_height
+            w_k = w_im - w_col * stride_width
+            
+            # 检查是否对应到卷积核的整数位置
+            if h_k % dilation_height == 0 and w_k % dilation_width == 0:
+                h_k /= dilation_height
+                w_k /= dilation_width
+                
+                data_col_index = (((c_im * kernel_h + h_k) * kernel_w + w_k) * height_col + h_col) * width_col + w_col
+                val += data_col[data_col_index]
+    
+    data_im[index] = val
+
+【备注】
+    使用 accT 类型累加以保持精度
+
+--------------------------------
+col2im_kernel:
+来源: aten/src/ATen/native/cuda/im2col.cuh
+--------------------------------
+
+【签名】
+    @device
+    col2im_kernel<dt, accT>(
+        n: int64,                    # 总输出元素数 = channels * height * width
+        data_col: dt*,
+        height: int64,
+        width: int64,
+        kernel_h: int64,
+        kernel_w: int64,
+        pad_height: int64,
+        pad_width: int64,
+        stride_height: int64,
+        stride_width: int64,
+        dilation_height: int64,
+        dilation_width: int64,
+        height_col: int64,
+        width_col: int64,
+        data_im: dt*
+    )
+
+【算法】
+    parallel_for index in range(n):
+        col2im_device<accT>(
+            index, data_col,
+            height, width,
+            kernel_h, kernel_w,
+            pad_height, pad_width,
+            stride_height, stride_width,
+            dilation_height, dilation_width,
+            height_col, width_col,
+            data_im)
+
+【并行模式】
+    grid: GET_BLOCKS(n, 512)
+    block: 512 threads
+    
+    每个线程独立计算输出图像的一个位置，避免原子操作
+
+--------------------------------
+col2im (主机接口):
+来源: aten/src/ATen/native/cuda/im2col.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    col2im<dt, accT>(
+        stream: cudaStream_t,
+        data_col: dt*,
+        channels: int64,
+        height: int64,
+        width: int64,
+        height_col: int64,
+        width_col: int64,
+        patch_height: int64,
+        patch_width: int64,
+        pad_height: int64,
+        pad_width: int64,
+        stride_height: int64,
+        stride_width: int64,
+        dilation_height: int64,
+        dilation_width: int64,
+        data_im: dt*
+    )
+
+【算法】
+    num_kernels = channels * height * width
+    
+    col2im_kernel<dt, accT><<<GET_BLOCKS(num_kernels, 512), 512, 0, stream>>>(
+        num_kernels, data_col,
+        height, width,
+        patch_height, patch_width,
+        pad_height, pad_width,
+        stride_height, stride_width,
+        dilation_height, dilation_width,
+        height_col, width_col,
+        data_im)
+    
+    C10_CUDA_KERNEL_LAUNCH_CHECK()
+
+【备注】
+    每个输出维度启动一个kernel，然后在kernel内部累加所有贡献，避免原子操作
+
+--------------------------------
+col2im_batched_kernel:
+来源: aten/src/ATen/native/cuda/im2col.cuh
+--------------------------------
+
+【签名】
+    @device
+    col2im_batched_kernel<dt>(
+        n: int64,                    # 单个batch的元素数 = channels * height * width
+        data_col: dt*,
+        col_batch_stride: int64,     # 列矩阵batch间步长
+        nbatch: int64,               # batch数量
+        height: int64,
+        width: int64,
+        kernel_h: int64,
+        kernel_w: int64,
+        pad_height: int64,
+        pad_width: int64,
+        stride_height: int64,
+        stride_width: int64,
+        dilation_height: int64,
+        dilation_width: int64,
+        height_col: int64,
+        width_col: int64,
+        data_im: dt*,
+        im_batch_stride: int64       # 图像batch间步长
+    )
+
+【算法】
+    im_numel = n * nbatch
+    
+    parallel_for index in range(im_numel):
+        ibatch = index / n
+        slice_index = index % n
+        
+        col2im_device<acc_type<dt, true>>(
+            slice_index,
+            data_col + ibatch * col_batch_stride,
+            height, width,
+            kernel_h, kernel_w,
+            pad_height, pad_width,
+            stride_height, stride_width,
+            dilation_height, dilation_width,
+            height_col, width_col,
+            data_im + ibatch * im_batch_stride)
+
+【并行模式】
+    grid: GET_BLOCKS(im_numel, 512)
+    block: 512 threads
+    
+    每个线程处理一个batch的一个输出位置
+
+--------------------------------
+col2im_batched (批量主机接口):
+来源: aten/src/ATen/native/cuda/im2col.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    col2im_batched<dt>(
+        stream: cudaStream_t,
+        data_col: dt*,
+        col_batch_stride: int64,
+        nbatch: int64,
+        channels: int64,
+        height: int64,
+        width: int64,
+        height_col: int64,
+        width_col: int64,
+        patch_height: int64,
+        patch_width: int64,
+        pad_height: int64,
+        pad_width: int64,
+        stride_height: int64,
+        stride_width: int64,
+        dilation_height: int64,
+        dilation_width: int64,
+        data_im: dt*,
+        im_batch_stride: int64
+    )
+
+【算法】
+    num_kernels = channels * height * width
+    output_numel = nbatch * num_kernels
+    
+    if output_numel == 0:
+        return
+    
+    col2im_batched_kernel<<<GET_BLOCKS(output_numel, 512), 512, 0, stream>>>(
+        num_kernels, data_col, col_batch_stride,
+        nbatch, height, width,
+        patch_height, patch_width,
+        pad_height, pad_width,
+        stride_height, stride_width,
+        dilation_height, dilation_width,
+        height_col, width_col,
+        data_im, im_batch_stride)
+    
+    C10_CUDA_KERNEL_LAUNCH_CHECK()

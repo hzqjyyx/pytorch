@@ -1,0 +1,1468 @@
+# BatchLinearAlgebraLib - 批量线性代数库（cuSOLVER/cuBLAS）
+
+**来源**: aten/src/ATen/native/cuda/linalg/BatchLinearAlgebraLib.cpp + BatchLinearAlgebraLib.h
+
+**说明**: 本文件实现基于 cuSOLVER 和 cuBLAS 的批量线性代数运算，包括 SVD、Cholesky 分解、QR 分解、特征值分解、LU 分解等。代码通过循环或批量 API 处理多个矩阵。
+
+---
+
+## 辅助工具
+
+--------------------------------
+to_cublas
+--------------------------------
+
+【签名】
+    to_cublas(trans: TransposeType) -> cublasOperation_t
+
+【算法】
+    match trans:
+        NoTranspose -> CUBLAS_OP_N
+        Transpose -> CUBLAS_OP_T
+        ConjTranspose -> CUBLAS_OP_C
+
+--------------------------------
+get_device_pointers
+--------------------------------
+
+【签名】
+    get_device_pointers<scalar_t>(input: Tensor[B, M, N]) -> Tensor[B, int64]
+
+    约束:
+    - input 是连续张量
+
+【算法】
+    input_data = input.data_ptr<scalar_t>()
+    matrix_stride = matrixStride(input)
+    batch_size = batchCount(input)
+
+    # 生成指向每个矩阵的指针数组（存储为 int64）
+    start = reinterpret_cast<int64>(input_data)
+    end = reinterpret_cast<int64>(input_data + batch_size * matrix_stride)
+    step = max(matrix_stride, 1) * sizeof(scalar_t)
+
+    return at::arange(start, end, step, dtype=kLong)
+
+【备注】
+    - cuBLAS/cuSOLVER 批量 API 需要设备端指针数组
+    - 返回的 Tensor 元素是指针值（以 int64 存储）
+
+---
+
+## LDL 分解
+
+--------------------------------
+apply_ldl_factor_cusolver
+--------------------------------
+
+【签名】
+    @host→device
+    apply_ldl_factor_cusolver<scalar_t>(
+        A: Tensor[*B, N, N],      # 输入/输出：对称矩阵 -> LDL 分解
+        pivots: Tensor[*B, N, int],
+        info: Tensor[*B, int],
+        upper: bool
+    )
+
+【算法】
+    batch_size = batchCount(A)
+    n = A.size(-2)
+    lda = A.stride(-1)
+    uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER
+
+    handle = at::cuda::getCurrentCUDASolverDnHandle()
+
+    # 查询工作空间大小
+    lwork = at::cuda::solver::sytrf_bufferSize(handle, n, A_data, lda)
+    work = allocate(sizeof(scalar_t) * lwork)
+
+    # 逐批处理
+    for i in range(batch_size):
+        A_ptr = A_data + i * A.stride(-3)
+        pivots_ptr = pivots_data + i * pivots.stride(-2)
+        info_ptr = info_data + i
+
+        at::cuda::solver::sytrf(
+            handle, uplo, n,
+            A_ptr, lda,
+            pivots_ptr,
+            work, lwork,
+            info_ptr
+        )
+
+【备注】
+    - sytrf: 对称矩阵 Bunch-Kaufman 分解（实对称或复对称）
+    - 仅在 USE_LINALG_SOLVER 定义时可用
+
+--------------------------------
+apply_ldl_solve_cusolver
+--------------------------------
+
+【签名】
+    @host→device
+    apply_ldl_solve_cusolver<scalar_t>(
+        A: Tensor[*B, N, N],       # LDL 分解结果
+        pivots: Tensor[*B, N, int64],
+        B: Tensor[*B, N, NRHS],    # 输入/输出：右侧向量 -> 解
+        upper: bool
+    )
+
+【算法】
+    batch_size = batchCount(B)
+    n = A.size(-2)
+    nrhs = B.size(-1)
+    uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER
+
+    # 需要设备同步以支持并行测试
+    c10::cuda::device_synchronize()
+
+    handle = at::cuda::getCurrentCUDASolverDnHandle()
+    datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>()
+
+    # 查询工作空间大小
+    cusolverDnXsytrs_bufferSize(
+        handle, uplo, n, nrhs, datatype,
+        A_data, lda, pivots_data, datatype,
+        B_data, ldb,
+        &worksize_device, &worksize_host
+    )
+
+    workdata_device = allocate(worksize_device)
+    workdata_host = allocate_cpu(worksize_host)
+
+    info = at::zeros({}, dtype=kInt)
+
+    for i in range(batch_size):
+        A_ptr = A_data + i * A.stride(-3)
+        B_ptr = B_data + i * B.stride(-3)
+        pivots_ptr = pivots_data + i * pivots.stride(-2)
+
+        cusolverDnXsytrs(
+            handle, uplo, n, nrhs, datatype,
+            A_ptr, lda, pivots_ptr, datatype,
+            B_ptr, ldb,
+            workdata_device, worksize_device,
+            workdata_host, worksize_host,
+            info_data
+        )
+
+【备注】
+    - 需要 cuSOLVER >= 11.1.2 (CUDA >= 11.3.1)
+    - info 仅检查参数错误，不检查奇异性
+
+--------------------------------
+ldl_factor_cusolver / ldl_solve_cusolver
+--------------------------------
+
+【签名】
+    ldl_factor_cusolver(
+        LD: Tensor[*B, N, N],
+        pivots: Tensor[*B, N],
+        info: Tensor[*B],
+        upper: bool,
+        hermitian: bool
+    )
+
+    ldl_solve_cusolver(
+        LD: Tensor[*B, N, N],
+        pivots: Tensor[*B, N],
+        B: Tensor[*B, N, NRHS],
+        upper: bool
+    )
+
+【算法】
+    # ldl_factor_cusolver
+    if LD.is_complex() and hermitian:
+        raise Error("cuSOLVER 不支持复数 Hermite 矩阵的 LDL")
+
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        apply_ldl_factor_cusolver<scalar_t>(LD, pivots, info, upper)
+
+    # ldl_solve_cusolver
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        apply_ldl_solve_cusolver<scalar_t>(LD, pivots, B, upper)
+
+---
+
+## SVD（奇异值分解）
+
+--------------------------------
+apply_svd_cusolver_gesvd
+--------------------------------
+
+【签名】
+    @host→device
+    apply_svd_cusolver_gesvd<scalar_t>(
+        A: Tensor[*B, M, N],         # 输入：待分解矩阵（列主序）
+        U: Tensor[*B, M, K],         # 输出：左奇异向量
+        S: Tensor[*B, K, value_t],   # 输出：奇异值
+        V: Tensor[*B, N, K],         # 输出：右奇异向量（V 非 V^H）
+        infos: Tensor[*B, int],
+        full_matrices: bool,
+        compute_uv: bool,
+        calculate_all_batches: bool = true,
+        batches: vector<int64> = {}  # 若 calculate_all_batches=false，指定需计算的批次
+    )
+
+    约束:
+    - M >= N（gesvd 限制）
+
+【算法】
+    m = A.size(-2)
+    n = A.size(-1)
+    k = min(m, n)
+    lda = max(1, m)
+    ldvh = max(1, n)
+
+    job = compute_uv ? (full_matrices ? 'A' : 'S') : 'N'
+    handle = at::cuda::getCurrentCUDASolverDnHandle()
+
+    # 查询工作空间
+    lwork = at::cuda::solver::gesvd_buffersize<scalar_t>(handle, m, n)
+    work = allocate(sizeof(scalar_t) * lwork)
+    rwork = allocate(sizeof(value_t) * min(m, n))
+
+    # V 是 F-contig，需辅助张量存储 V^H 的共轭
+    Vh_workspace = empty({n, full_matrices ? n : k}, F-contig).conj()
+
+    batchsize = calculate_all_batches ? batchCount(A) : batches.size()
+
+    for _i in range(batchsize):
+        i = calculate_all_batches ? _i : batches[_i]
+
+        at::cuda::solver::gesvd<scalar_t>(
+            handle, job, job, m, n,
+            A_data + i * A_stride, lda,
+            S_data + i * S_stride,
+            compute_uv ? U_data + i * U_stride : nullptr, lda,
+            compute_uv ? Vh_workspace.data_ptr() : nullptr, ldvh,
+            work, lwork,
+            rwork,
+            infos_data + i
+        )
+
+        if compute_uv:
+            V[i].copy_(Vh_workspace)  # 拷贝 V^H 的共轭到 V
+
+【备注】
+    - gesvd 仅支持 M >= N，需要时需转置
+    - ROCm 需要特殊处理 V 的内存布局
+
+--------------------------------
+svd_cusolver_gesvd
+--------------------------------
+
+【签名】
+    svd_cusolver_gesvd(
+        A: Tensor[*B, M, N],
+        U, S, V: Tensor,
+        infos: Tensor[*B, int],
+        full_matrices: bool,
+        compute_uv: bool,
+        calculate_all_batches: bool = true,
+        batches: vector<int64> = {}
+    )
+
+【算法】
+    # 处理 M < N 的情况：转置
+    not_A_H = A.size(-2) >= A.size(-1)
+    Vcopy = V
+
+    # ROCm 需要额外拷贝处理 V
+    if USE_ROCM and not not_A_H:
+        Vcopy = empty_like(V.mT(), F-contig).mT()
+
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        A_input = cloneBatchedColumnMajor(not_A_H ? A : A.mH())
+        apply_svd_cusolver_gesvd<scalar_t>(
+            A_input,
+            not_A_H ? U : Vcopy,
+            S,
+            not_A_H ? Vcopy : U,
+            infos, full_matrices, compute_uv,
+            calculate_all_batches, batches
+        )
+
+    if USE_ROCM and not not_A_H:
+        V.copy_(Vcopy)
+
+【备注】
+    - 自动处理 M < N：转置 A 并交换 U/V
+
+--------------------------------
+apply_svd_cusolver_gesvdj
+--------------------------------
+
+【签名】
+    @host→device
+    apply_svd_cusolver_gesvdj<scalar_t>(
+        A: Tensor[*B, M, N],
+        U, S, V, infos: Tensor,
+        full_matrices: bool,
+        compute_uv: bool
+    )
+
+【算法】
+    m = A.size(-2)
+    n = A.size(-1)
+    k = min(m, n)
+    batch_size = batchCount(A)
+
+    # 若不计算 UV，仍需分配占位内存
+    if not compute_uv:
+        dataPtr_U = allocate(sizeof(scalar_t) * m * k)
+        dataPtr_V = allocate(sizeof(scalar_t) * n * k)
+        U_data = dataPtr_U.get()
+        V_data = dataPtr_V.get()
+    else:
+        U_data = U.data_ptr()
+        V_data = V.data_ptr()
+
+    handle = at::cuda::getCurrentCUDASolverDnHandle()
+    jobz = compute_uv ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR
+    econ = full_matrices ? 0 : 1
+
+    # 配置 gesvdj 参数
+    gesvdjInfo_t gesvdj_params
+    cusolverDnCreateGesvdjInfo(&gesvdj_params)
+    cusolverDnXgesvdjSetTolerance(gesvdj_params, epsilon<scalar_t>)
+    cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 400)
+
+    # 查询工作空间
+    lwork = at::cuda::solver::gesvdj_buffersize<scalar_t>(
+        handle, jobz, econ, m, n, A_data, lda, S_data, U_data, ldu, V_data, ldv, gesvdj_params
+    )
+    work = allocate(sizeof(scalar_t) * lwork)
+
+    for i in range(batch_size):
+        at::cuda::solver::gesvdj<scalar_t>(
+            handle, jobz, econ, m, n,
+            A_data + i * A_stride, lda,
+            S_data + i * S_stride,
+            U_data + i * U_stride, ldu,
+            V_data + i * V_stride, ldv,
+            work, lwork,
+            infos_data + i,
+            gesvdj_params
+        )
+
+    cusolverDnDestroyGesvdjInfo(gesvdj_params)
+
+【备注】
+    - gesvdj 使用 Jacobi 迭代，支持任意 M/N
+    - 最大迭代次数 400，容差设为机器精度
+
+--------------------------------
+apply_svd_cusolver_gesvdjBatched
+--------------------------------
+
+【签名】
+    @host→device
+    apply_svd_cusolver_gesvdjBatched<scalar_t>(
+        A: Tensor[*B, M, N],
+        U, S, V, infos: Tensor,
+        compute_uv: bool
+    )
+
+    约束:
+    - M <= 32 且 N <= 32
+
+【算法】
+    m = A.size(-2)
+    n = A.size(-1)
+    batch_size = batchCount(A)
+
+    assert m <= 32 and n <= 32
+
+    # 若不计算 UV，分配占位内存
+    if not compute_uv:
+        dataPtr_U = allocate(sizeof(scalar_t) * batch_size * m * ldu)
+        dataPtr_V = allocate(sizeof(scalar_t) * batch_size * n * ldv)
+
+    handle = at::cuda::getCurrentCUDASolverDnHandle()
+    jobz = compute_uv ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR
+
+    # 配置参数
+    gesvdjInfo_t gesvdj_params
+    cusolverDnCreateGesvdjInfo(&gesvdj_params)
+    cusolverDnXgesvdjSetTolerance(gesvdj_params, epsilon<scalar_t>)
+    cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 400)
+    cusolverDnXgesvdjSetSortEig(gesvdj_params, 1)  # 排序奇异值
+
+    # 批量调用（单次 kernel 处理所有批次）
+    at::cuda::solver::gesvdjBatched<scalar_t>(
+        handle, jobz, m, n,
+        A_data, lda,
+        S_data,
+        U_data, ldu,
+        V_data, ldv,
+        infos_data,
+        gesvdj_params,
+        batch_size
+    )
+
+    cusolverDnDestroyGesvdjInfo(gesvdj_params)
+
+【备注】
+    - 仅支持小矩阵（M, N <= 32）
+    - 单次 kernel 调用处理所有批次，性能优于循环
+
+--------------------------------
+svd_cusolver_gesvdjBatched
+--------------------------------
+
+【签名】
+    svd_cusolver_gesvdjBatched(
+        A: Tensor[*B, M, N],
+        U, S, V, infos: Tensor,
+        full_matrices: bool,
+        compute_uv: bool
+    )
+
+【算法】
+    m = A.size(-2)
+    n = A.size(-1)
+    k = min(m, n)
+
+    # 处理 full_matrices=false 且 M != N 的情况
+    U_ = U
+    V_ = V
+
+    if compute_uv and not full_matrices:
+        if m > n:
+            # U 需要临时扩展为方阵
+            sizes = A.sizes()
+            sizes[-1] = m
+            U_ = U.new_empty(sizes).mT()
+        elif m < n:
+            # V 需要临时扩展为方阵
+            sizes = A.sizes()
+            sizes[-2] = n
+            V_ = V.new_empty(sizes).mT()
+
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        apply_svd_cusolver_gesvdjBatched<scalar_t>(A, U_, S, V_, infos, compute_uv)
+
+    # 拷贝回原始尺寸
+    if compute_uv and not full_matrices:
+        if not U_.is_alias_of(U):
+            U.copy_(U_.narrow(-1, 0, k))
+        if not V_.is_alias_of(V):
+            V.copy_(V_.narrow(-1, 0, k))
+
+【备注】
+    - gesvdjBatched 内部假设 full_matrices=true
+    - 若需要 full_matrices=false，需临时扩展后截取
+
+--------------------------------
+apply_svd_cusolver_gesvdaStridedBatched
+--------------------------------
+
+【签名】
+    @host→device
+    apply_svd_cusolver_gesvdaStridedBatched<scalar_t>(
+        A: Tensor[*B, M, N],
+        U, S, V, infos: Tensor,
+        full_matrices: bool,
+        compute_uv: bool
+    )
+
+    约束:
+    - M >= N
+
+【算法】
+    m = A.size(-2)
+    n = A.size(-1)
+    batch_size = batchCount(A)
+
+    assert m >= n
+
+    # 若不计算 UV，分配占位内存
+    if not compute_uv:
+        dataPtr_U = allocate(sizeof(scalar_t) * batch_size * m * n)
+        dataPtr_V = allocate(sizeof(scalar_t) * batch_size * n * n)
+
+    handle = at::cuda::getCurrentCUDASolverDnHandle()
+    jobz = compute_uv ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR
+
+    # 查询工作空间
+    lwork = at::cuda::solver::gesvdaStridedBatched_buffersize<scalar_t>(
+        handle, jobz, rank, m, n,
+        A_data, lda, A_stride,
+        S_data, S_stride,
+        U_data, ldu, U_stride,
+        V_data, ldv, V_stride,
+        batch_size
+    )
+    workspace = allocate(sizeof(scalar_t) * lwork)
+
+    # 批量调用（strided，单次 kernel）
+    at::cuda::solver::gesvdaStridedBatched<scalar_t>(
+        handle, jobz, rank, m, n,
+        A_data, lda, A_stride,
+        S_data, S_stride,
+        U_data, ldu, U_stride,
+        V_data, ldv, V_stride,
+        workspace, lwork,
+        infos_data,
+        nullptr,  # 不计算残差 Frobenius 范数
+        batch_size
+    )
+
+【备注】
+    - gesvdaStridedBatched 适合"瘦高"矩阵（M > N）
+    - rank = min(m, n)
+
+--------------------------------
+svd_cusolver_gesvdaStridedBatched
+--------------------------------
+
+【签名】
+    svd_cusolver_gesvdaStridedBatched(
+        A: Tensor[*B, M, N],
+        U, S, V, infos: Tensor,
+        full_matrices: bool,
+        compute_uv: bool
+    )
+
+【算法】
+    # 处理 M < N：转置
+    not_A_H = A.size(-2) >= A.size(-1)
+
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        A_input = cloneBatchedColumnMajor(not_A_H ? A : A.mH())
+        apply_svd_cusolver_gesvdaStridedBatched<scalar_t>(
+            A_input,
+            not_A_H ? U : V,
+            S,
+            not_A_H ? V : U,
+            infos, full_matrices, compute_uv
+        )
+
+【备注】
+    - 自动处理 M < N：转置并交换 U/V
+
+--------------------------------
+_check_gesvdj_convergence
+--------------------------------
+
+【签名】
+    _check_gesvdj_convergence(
+        infos: Tensor[*B, int],
+        non_converging_info: int64
+    ) -> vector<int64>
+
+【算法】
+    infos_cpu = infos.cpu()
+    res = []
+
+    for i in range(infos.numel()):
+        info_val = infos_cpu[i]
+        assert info_val >= 0  # 负值表示参数错误
+
+        if info_val == non_converging_info:
+            res.append(i)
+
+    return res
+
+【备注】
+    - 检查 gesvdj/gesvdjBatched/gesvdaStridedBatched 的收敛性
+    - 会触发设备-主机同步
+
+--------------------------------
+_format_non_converging_batches
+--------------------------------
+
+【签名】
+    _format_non_converging_batches(batches: vector<int64>) -> string
+
+【算法】
+    if batches.size() <= 5:
+        return "batches " + join(batches, ", ")
+    else:
+        first_5 = batches[:5]
+        return "batches " + join(first_5, ", ") + ", and other " + (batches.size() - 5) + " batches"
+
+【备注】
+    - 格式化未收敛批次索引，避免输出过长
+
+--------------------------------
+svd_cusolver
+--------------------------------
+
+【签名】
+    svd_cusolver(
+        A: Tensor[*B, M, N],
+        full_matrices: bool,
+        compute_uv: bool,
+        driver: Optional<"gesvd"|"gesvdj"|"gesvda"> = None,
+        U, S, V, info: Tensor
+    )
+
+【算法】
+    m = A.size(-2)
+    n = A.size(-1)
+    k = min(m, n)
+
+    # 选择驱动（默认 gesvdj，ROCm 强制 gesvdj）
+    driver_v = driver if driver else "gesvdj"
+
+    match driver_v:
+        "gesvd":
+            svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv)
+
+        "gesvdj":
+            if m <= 32 and n <= 32:
+                svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv)
+            else:
+                svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv)
+
+        "gesvda":
+            svd_cusolver_gesvdaStridedBatched(A, U, S, V, info, full_matrices, compute_uv)
+
+    # 收敛性检查（gesvd 不需要）
+    if driver_v != "gesvd":
+        non_converging_batches = _check_gesvdj_convergence(info, k + 1)
+
+        if non_converging_batches is not empty:
+            TORCH_WARN_ONCE("SVD 未收敛批次: " + _format_non_converging_batches(non_converging_batches))
+
+            # 若用户未指定驱动，用 gesvd 作为后备
+            if not driver:
+                svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv, calculate_all_batches=false, non_converging_batches)
+
+【备注】
+    - 默认启发式：
+      - M, N <= 32: gesvdjBatched
+      - 其他: gesvdj
+    - 若未收敛且用户未指定驱动，自动使用 gesvd 重算
+
+---
+
+## Cholesky 分解
+
+--------------------------------
+apply_cholesky_cusolver_potrf_looped
+--------------------------------
+
+【签名】
+    @host→device
+    apply_cholesky_cusolver_potrf_looped<scalar_t>(
+        self: Tensor[*B, N, N],    # 输入/输出：对称正定矩阵 -> Cholesky 因子
+        upper: bool,
+        infos: Tensor[*B, int]
+    )
+
+【算法】
+    handle = at::cuda::getCurrentCUDASolverDnHandle()
+    uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER
+    n = self.size(-1)
+    lda = max(1, n)
+    batch_size = batchCount(self)
+    matrix_stride = matrixStride(self)
+
+    # 查询工作空间（根据 cuSOLVER 版本）
+    if USE_CUSOLVER_64_BIT:
+        cusolverDnParams_t params
+        cusolverDnCreateParams(&params)
+        at::cuda::solver::xpotrf_buffersize(handle, params, uplo, n, datatype, nullptr, lda, datatype, &worksize_device, &worksize_host)
+
+        work_device = allocate(worksize_device * batch_size)
+        work_host = allocate_cpu(worksize_host * batch_size)
+
+        for i in range(batch_size):
+            at::cuda::solver::xpotrf(
+                handle, params, uplo, n, datatype,
+                self_data + i * matrix_stride, lda, datatype,
+                work_device + i * worksize_device, worksize_device,
+                work_host + i * worksize_host, worksize_host,
+                infos_data + i
+            )
+
+        cusolverDnDestroyParams(params)
+    else:
+        lwork = at::cuda::solver::potrf_buffersize<scalar_t>(handle, uplo, n, nullptr, lda)
+        work = allocate(sizeof(scalar_t) * lwork * batch_size)
+
+        for i in range(batch_size):
+            at::cuda::solver::potrf<scalar_t>(
+                handle, uplo, n,
+                self_data + i * matrix_stride, lda,
+                work + i * lwork, lwork,
+                infos_data + i
+            )
+
+【备注】
+    - potrf: Cholesky 分解（A = L L^T 或 A = U^T U）
+    - 64-bit 版本需要设备端和主机端工作空间
+
+--------------------------------
+apply_cholesky_cusolver_potrfBatched
+--------------------------------
+
+【签名】
+    @host→device
+    apply_cholesky_cusolver_potrfBatched<scalar_t>(
+        self: Tensor[*B, N, N],
+        upper: bool,
+        infos: Tensor[*B, int]
+    )
+
+    约束:
+    - batch_size > 0, N > 0（cuSOLVER 批量 API 限制）
+
+【算法】
+    handle = at::cuda::getCurrentCUDASolverDnHandle()
+    uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER
+    n = self.size(-1)
+    lda = max(1, n)
+    batch_size = batchCount(self)
+
+    # 构造设备端指针数组
+    self_array = get_device_pointers<scalar_t>(self)
+
+    at::cuda::solver::potrfBatched<scalar_t>(
+        handle, uplo, n,
+        reinterpret_cast<scalar_t**>(self_array.data_ptr()),
+        lda,
+        infos_data,
+        batch_size
+    )
+
+【备注】
+    - 批量 API 需要设备端指针数组
+    - 仅在 cuSOLVER >= 11.1.1 (CUDA >= 11.3) 时使用
+
+--------------------------------
+cholesky_helper_cusolver
+--------------------------------
+
+【签名】
+    cholesky_helper_cusolver(
+        input: Tensor[*B, N, N],
+        upper: bool,
+        info: Tensor[*B, int]
+    )
+
+【算法】
+    if input.numel() == 0:
+        return
+
+    if use_cusolver_potrf_batched_ and batchCount(input) > 1:
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+            apply_cholesky_cusolver_potrfBatched<scalar_t>(input, upper, info)
+    else:
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+            apply_cholesky_cusolver_potrf_looped<scalar_t>(input, upper, info)
+
+【备注】
+    - use_cusolver_potrf_batched_ = (cuSOLVER >= 11101)
+
+--------------------------------
+apply_cholesky_cusolver_potrs
+--------------------------------
+
+【签名】
+    @host→device
+    apply_cholesky_cusolver_potrs<scalar_t>(
+        self: Tensor[*B, N, NRHS],    # 输入/输出：右侧向量 -> 解
+        A: Tensor[*B, N, N],          # Cholesky 因子
+        upper: bool,
+        infos: Tensor[1, int]
+    )
+
+【算法】
+    handle = at::cuda::getCurrentCUDASolverDnHandle()
+    uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER
+    n = self.size(-2)
+    nrhs = self.size(-1)
+    batch_size = batchCount(self)
+
+    if USE_CUSOLVER_64_BIT:
+        cusolverDnParams_t params
+        cusolverDnCreateParams(&params)
+
+        for i in range(batch_size):
+            at::cuda::solver::xpotrs(
+                handle, params, uplo, n, nrhs, datatype,
+                A_data + i * A_stride, lda, datatype,
+                self_data + i * self_stride, ldb,
+                infos_data
+            )
+
+        cusolverDnDestroyParams(params)
+    else:
+        for i in range(batch_size):
+            at::cuda::solver::potrs<scalar_t>(
+                handle, uplo, n, nrhs,
+                A_data + i * A_stride, lda,
+                self_data + i * self_stride, ldb,
+                infos_data
+            )
+
+【备注】
+    - potrs: 用 Cholesky 因子求解 Ax = b
+    - infos 仅检查参数错误
+
+--------------------------------
+apply_cholesky_cusolver_potrsBatched
+--------------------------------
+
+【签名】
+    @host→device
+    apply_cholesky_cusolver_potrsBatched<scalar_t>(
+        self: Tensor[*B, N, NRHS],
+        A: Tensor[*B, N, N],
+        upper: bool,
+        infos: Tensor[1, int]
+    )
+
+    约束:
+    - NRHS == 1（cuSOLVER potrsBatched 限制）
+
+【算法】
+    handle = at::cuda::getCurrentCUDASolverDnHandle()
+    uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER
+    batch_size = batchCount(self)
+
+    self_ptr_array = get_device_pointers<scalar_t>(self)
+    A_ptr_array = get_device_pointers<scalar_t>(A)
+
+    at::cuda::solver::potrsBatched(
+        handle, uplo, n, nrhs,
+        reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr()), lda,
+        reinterpret_cast<scalar_t**>(self_ptr_array.data_ptr()), ldb,
+        infos_data,
+        batch_size
+    )
+
+【备注】
+    - 仅支持 nrhs == 1
+
+--------------------------------
+_cholesky_solve_helper_cuda_cusolver
+--------------------------------
+
+【签名】
+    _cholesky_solve_helper_cuda_cusolver(
+        self: Tensor[*B, N, NRHS],
+        A: Tensor[*B, N, N],    # Cholesky 因子
+        upper: bool
+    ) -> Tensor[*B, N, NRHS]
+
+【算法】
+    batch_size = batchCount(self)
+    nrhs = self.size(-1)
+    infos = at::zeros({1}, dtype=kInt)
+
+    self_working_copy = cloneBatchedColumnMajor(self)
+    A_column_major_copy = cloneBatchedColumnMajor(A)
+
+    if batch_size > 1 and nrhs == 1:
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+            apply_cholesky_cusolver_potrsBatched<scalar_t>(self_working_copy, A_column_major_copy, upper, infos)
+    else:
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+            apply_cholesky_cusolver_potrs<scalar_t>(self_working_copy, A_column_major_copy, upper, infos)
+
+    return self_working_copy
+
+【备注】
+    - 自动选择批量或循环 API
+
+--------------------------------
+_cholesky_inverse_cusolver_potrs_based
+--------------------------------
+
+【签名】
+    _cholesky_inverse_cusolver_potrs_based(
+        result: Tensor[*B, N, N],    # 输入/输出：工作空间 -> 逆矩阵
+        infos: Tensor[*B, int],
+        upper: bool
+    )
+
+【算法】
+    input_copy = cloneBatchedColumnMajor(result)
+    infos_gpu = at::zeros({1}, dtype=kInt)
+
+    # 设置 result = I
+    result.fill_(0)
+    result.diagonal(0, -2, -1).fill_(1)
+
+    # 求解 A X = I => X = A^{-1}
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        apply_cholesky_cusolver_potrs<scalar_t>(result, input_copy, upper, infos_gpu)
+
+【备注】
+    - 通过求解 A X = I 计算逆矩阵
+
+--------------------------------
+cholesky_inverse_kernel_impl_cusolver
+--------------------------------
+
+【签名】
+    cholesky_inverse_kernel_impl_cusolver(
+        result: Tensor[*B, N, N],
+        infos: Tensor[*B, int],
+        upper: bool
+    ) -> Tensor[*B, N, N]
+
+【算法】
+    _cholesky_inverse_cusolver_potrs_based(result, infos, upper)
+    return result
+
+---
+
+## QR 分解
+
+--------------------------------
+apply_geqrf
+--------------------------------
+
+【签名】
+    @host→device
+    apply_geqrf<scalar_t>(
+        A: Tensor[*B, M, N],         # 输入/输出：矩阵 -> R（上三角）+ 反射向量
+        tau: Tensor[*B, K]           # 输出：反射系数，K = min(M, N)
+    )
+
+【算法】
+    m = A.size(-2)
+    n = A.size(-1)
+    lda = max(1, m)
+    batch_size = batchCount(A)
+    A_stride = matrixStride(A)
+    tau_stride = tau.size(-1)
+
+    infos = at::zeros({1}, dtype=kInt)
+
+    # 查询工作空间
+    if USE_CUSOLVER_64_BIT:
+        cusolverDnParams_t params = NULL
+        at::cuda::solver::xgeqrf_bufferSize<scalar_t>(
+            handle, params, m, n, A_data, lda, tau_data,
+            &worksize_device, &worksize_host
+        )
+
+        for i in range(batch_size):
+            work_device = allocate(worksize_device)
+            work_host = allocate_cpu(worksize_host)
+
+            at::cuda::solver::xgeqrf<scalar_t>(
+                handle, params, m, n,
+                A_data + i * A_stride, lda,
+                tau_data + i * tau_stride,
+                work_device, worksize_device,
+                work_host, worksize_host,
+                infos_data
+            )
+    else:
+        lwork = at::cuda::solver::geqrf_bufferSize<scalar_t>(handle, m, n, A_data, lda)
+
+        for i in range(batch_size):
+            work = allocate(sizeof(scalar_t) * max(1, lwork))
+
+            at::cuda::solver::geqrf<scalar_t>(
+                handle, m, n,
+                A_data + i * A_stride, lda,
+                tau_data + i * tau_stride,
+                work, lwork,
+                infos_data
+            )
+
+【备注】
+    - geqrf: QR 分解，A = Q R
+    - A 被覆写为 R（上三角）和反射向量
+
+--------------------------------
+geqrf_cusolver
+--------------------------------
+
+【签名】
+    geqrf_cusolver(
+        input: Tensor[*B, M, N],
+        tau: Tensor[*B, min(M,N)]
+    )
+
+【算法】
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        apply_geqrf<scalar_t>(input, tau)
+
+--------------------------------
+apply_ormqr
+--------------------------------
+
+【签名】
+    @host→device
+    apply_ormqr<scalar_t>(
+        input: Tensor[*B, K, K],     # QR 分解结果（反射向量）
+        tau: Tensor[*B, K],
+        other: Tensor[*B, M, N],     # 输入/输出：待乘矩阵 -> Q * other 或 other * Q
+        left: bool,
+        transpose: bool
+    )
+
+【算法】
+    side = left ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT
+    trans = transpose ? (input.is_complex() ? CUBLAS_OP_C : CUBLAS_OP_T) : CUBLAS_OP_N
+
+    batch_size = batchCount(input)
+    m = other.size(-2)
+    n = other.size(-1)
+    k = tau.size(-1)
+    lda = max(1, left ? m : n)
+    ldc = max(1, m)
+
+    # 查询工作空间
+    lwork = at::cuda::solver::ormqr_bufferSize<scalar_t>(
+        handle, side, trans, m, n, k, input_data, lda, tau_data, other_data, ldc
+    )
+
+    info = at::zeros({1}, dtype=kInt)
+
+    for i in range(batch_size):
+        work = allocate(sizeof(scalar_t) * lwork)
+
+        at::cuda::solver::ormqr<scalar_t>(
+            handle, side, trans, m, n, k,
+            input_data + i * input_stride, lda,
+            tau_data + i * tau_stride,
+            other_data + i * other_stride, ldc,
+            work, lwork,
+            info_data
+        )
+
+【备注】
+    - ormqr: 计算 Q * other 或 other * Q
+    - Q 由反射向量隐式表示
+
+--------------------------------
+ormqr_cusolver
+--------------------------------
+
+【签名】
+    ormqr_cusolver(
+        input: Tensor[*B, K, K],
+        tau: Tensor[*B, K],
+        other: Tensor[*B, M, N],
+        left: bool,
+        transpose: bool
+    )
+
+【算法】
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        apply_ormqr<scalar_t>(input, tau, other, left, transpose)
+
+--------------------------------
+apply_orgqr
+--------------------------------
+
+【签名】
+    @host→device
+    apply_orgqr<scalar_t>(
+        self: Tensor[*B, M, N],      # 输入/输出：反射向量 -> Q 矩阵
+        tau: Tensor[*B, K]
+    )
+
+    约束:
+    - M >= N >= K
+
+【算法】
+    batch_size = batchCount(self)
+    m = self.size(-2)
+    n = self.size(-1)
+    k = tau.size(-1)
+    lda = max(1, m)
+
+    assert m >= n and n >= k
+
+    # cuSOLVER 不处理 k==0，手动设置为单位矩阵
+    if k == 0:
+        self.fill_(0)
+        self.diagonal(0, -2, -1).fill_(1)
+        return
+
+    # 查询工作空间
+    lwork = at::cuda::solver::orgqr_buffersize<scalar_t>(
+        handle, m, n, k, self_data, lda, tau_data
+    )
+
+    info = at::zeros({1}, dtype=kInt)
+
+    for i in range(batch_size):
+        work = allocate(sizeof(scalar_t) * lwork)
+
+        at::cuda::solver::orgqr<scalar_t>(
+            handle, m, n, k,
+            self_data + i * self_stride, lda,
+            tau_data + i * tau_stride,
+            work, lwork,
+            info_data
+        )
+
+【备注】
+    - orgqr: 从反射向量构造显式 Q 矩阵
+
+--------------------------------
+orgqr_helper_cusolver
+--------------------------------
+
+【签名】
+    orgqr_helper_cusolver(
+        result: Tensor[*B, M, N],
+        tau: Tensor[*B, K]
+    ) -> Tensor[*B, M, N]
+
+【算法】
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        apply_orgqr<scalar_t>(result, tau)
+    return result
+
+---
+
+## 特征值分解
+
+--------------------------------
+apply_syevd
+--------------------------------
+
+【签名】
+    @host→device
+    apply_syevd<scalar_t>(
+        values: Tensor[*B, N, value_t],      # 输出：特征值
+        vectors: Tensor[*B, N, N],           # 输入/输出：矩阵 -> 特征向量
+        infos: Tensor[*B, int],
+        upper: bool,
+        compute_eigenvectors: bool
+    )
+
+【算法】
+    uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER
+    jobz = compute_eigenvectors ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR
+    n = vectors.size(-1)
+    lda = max(1, n)
+    batch_size = batchCount(vectors)
+
+    # 查询工作空间
+    if USE_CUSOLVER_64_BIT:
+        cusolverDnParams_t params = NULL
+        at::cuda::solver::xsyevd_bufferSize<scalar_t>(
+            handle, params, jobz, uplo, n, vectors_data, lda, values_data,
+            &worksize_device, &worksize_host
+        )
+
+        for i in range(batch_size):
+            work_device = allocate(worksize_device)
+            work_host = allocate_cpu(worksize_host)
+
+            at::cuda::solver::xsyevd<scalar_t>(
+                handle, params, jobz, uplo, n,
+                vectors_data + i * vectors_stride, lda,
+                values_data + i * values_stride,
+                work_device, worksize_device,
+                work_host, worksize_host,
+                infos_data + i
+            )
+    else:
+        lwork = at::cuda::solver::syevd_bufferSize<scalar_t>(
+            handle, jobz, uplo, n, vectors_data, lda, values_data
+        )
+
+        for i in range(batch_size):
+            work = allocate(sizeof(scalar_t) * lwork)
+
+            at::cuda::solver::syevd<scalar_t>(
+                handle, jobz, uplo, n,
+                vectors_data + i * vectors_stride, lda,
+                values_data + i * values_stride,
+                work, lwork,
+                infos_data + i
+            )
+
+【备注】
+    - syevd: 对称（Hermite）矩阵特征值分解，使用分治法
+
+--------------------------------
+apply_syevj
+--------------------------------
+
+【签名】
+    @host→device
+    apply_syevj<scalar_t>(
+        values: Tensor[*B, N, value_t],
+        vectors: Tensor[*B, N, N],
+        infos: Tensor[*B, int],
+        upper: bool,
+        compute_eigenvectors: bool
+    )
+
+【算法】
+    uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER
+    jobz = compute_eigenvectors ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR
+    n = vectors.size(-1)
+    lda = max(1, n)
+    batch_size = batchCount(vectors)
+
+    # 配置 syevj 参数（容差、最大迭代次数）
+    syevjInfo_t syevj_params
+    cusolverDnCreateSyevjInfo(&syevj_params)
+    # 默认：容差 = 机器精度，最大迭代 = 100
+
+    # 查询工作空间
+    lwork = at::cuda::solver::syevj_bufferSize<scalar_t>(
+        handle, jobz, uplo, n, vectors_data, lda, values_data, syevj_params
+    )
+
+    for i in range(batch_size):
+        work = allocate(sizeof(scalar_t) * lwork)
+
+        at::cuda::solver::syevj<scalar_t>(
+            handle, jobz, uplo, n,
+            vectors_data + i * vectors_stride, lda,
+            values_data + i * values_stride,
+            work, lwork,
+            infos_data + i,
+            syevj_params
+        )
+
+    cusolverDnDestroySyevjInfo(syevj_params)
+
+【备注】
+    - syevj: 对称矩阵特征值分解，使用 Jacobi 迭代
+
+--------------------------------
+apply_syevj_batched
+--------------------------------
+
+【签名】
+    @host→device
+    apply_syevj_batched<scalar_t>(
+        values: Tensor[*B, N, value_t],
+        vectors: Tensor[*B, N, N],
+        infos: Tensor[*B, int],
+        upper: bool,
+        compute_eigenvectors: bool
+    )
+
+【算法】
+    uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER
+    jobz = compute_eigenvectors ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR
+    n = vectors.size(-1)
+    lda = max(1, n)
+    batch_size = batchCount(vectors)
+
+    # 配置参数
+    syevjInfo_t syevj_params
+    cusolverDnCreateSyevjInfo(&syevj_params)
+    cusolverDnXsyevjSetSortEig(syevj_params, 1)  # 排序特征值
+
+    handle = at::cuda::getCurrentCUDASolverDnHandle()
+
+    # 查询工作空间
+    lwork = at::cuda::solver::syevjBatched_bufferSize<scalar_t>(
+        handle, jobz, uplo, n, vectors_data, lda, values_data, syevj_params, batch_size
+    )
+
+    work = allocate(sizeof(scalar_t) * lwork)
+
+    # 批量调用（单次 kernel）
+    at::cuda::solver::syevjBatched<scalar_t>(
+        handle, jobz, uplo, n,
+        vectors_data, lda,
+        values_data,
+        work, lwork,
+        infos_data,
+        syevj_params,
+        batch_size
+    )
+
+    cusolverDnDestroySyevjInfo(syevj_params)
+
+【备注】
+    - 批量 API，单次 kernel 处理所有批次
+
+--------------------------------
+linalg_eigh_cusolver_syevd / syevj / syevj_batched
+--------------------------------
+
+【签名】
+    linalg_eigh_cusolver_syevd(
+        eigenvalues: Tensor[*B, N],
+        eigenvectors: Tensor[*B, N, N],
+        infos: Tensor[*B, int],
+        upper: bool,
+        compute_eigenvectors: bool
+    )
+
+【算法】
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        apply_syevd<scalar_t>(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors)
+
+    # linalg_eigh_cusolver_syevj
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        apply_syevj<scalar_t>(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors)
+
+    # linalg_eigh_cusolver_syevj_batched
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        apply_syevj_batched<scalar_t>(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors)
+
+--------------------------------
+linalg_eigh_cusolver
+--------------------------------
+
+【签名】
+    linalg_eigh_cusolver(
+        eigenvalues: Tensor[*B, N],
+        eigenvectors: Tensor[*B, N, N],
+        infos: Tensor[*B, int],
+        upper: bool,
+        compute_eigenvectors: bool
+    )
+
+【算法】
+    if USE_ROCM:
+        # ROCm 强制使用 syevd
+        linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors)
+    else:
+        if use_cusolver_syevj_batched_ and batchCount(eigenvectors) > 1 and eigenvectors.size(-1) <= 32:
+            # 批量 + 小矩阵
+            linalg_eigh_cusolver_syevj_batched(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors)
+        elif eigenvectors.scalar_type() == kFloat and 32 <= eigenvectors.size(-1) <= 512:
+            # float32 + 中等矩阵
+            linalg_eigh_cusolver_syevj(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors)
+        else:
+            # 其他情况
+            linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors)
+
+【备注】
+    - 启发式选择算法：
+      - 批量 + N <= 32: syevjBatched
+      - float32 + 32 <= N <= 512: syevj
+      - 其他: syevd
+
+---
+
+## LU 分解
+
+--------------------------------
+lu_factor_looped_cusolver
+--------------------------------
+
+【签名】
+    @host→device
+    lu_factor_looped_cusolver(
+        self: Tensor[*B, M, N],      # 输入/输出：矩阵 -> LU 分解
+        pivots: Tensor[*B, min(M,N), int],
+        infos: Tensor[*B, int],
+        get_pivots: bool
+    )
+
+【算法】
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        m = self.size(-2)
+        n = self.size(-1)
+        lda = max(1, m)
+        batch_size = batchCount(self)
+        self_stride = matrixStride(self)
+
+        pivots_data = get_pivots ? pivots.data_ptr() : nullptr
+        pivots_stride = get_pivots ? pivots.size(-1) : 0
+
+        handle = at::cuda::getCurrentCUDASolverDnHandle()
+
+        for batch in range(batch_size):
+            at::cuda::solver::getrf<scalar_t>(
+                handle, m, n,
+                self_data + batch * self_stride, lda,
+                get_pivots ? pivots_data + batch * pivots_stride : nullptr,
+                infos_data + batch
+            )
+
+    # cuSOLVER 对非主元 LU 输出 nan，需手动处理
+    if not get_pivots:
+        if self.is_complex():
+            self.copy_(at::where(self.eq(self), self, 0))
+        else:
+            at::nan_to_num_(self, 0, inf, -inf)
+
+【备注】
+    - getrf: LU 分解（带部分主元）
+    - 非主元模式下 cuSOLVER 输出 nan，需替换为 0
+
+--------------------------------
+lu_solve_looped_cusolver
+--------------------------------
+
+【签名】
+    @host→device
+    lu_solve_looped_cusolver(
+        LU: Tensor[*B_lu, N, N],
+        pivots: Tensor[*B_lu, N, int],
+        B: Tensor[*B, N, NRHS],      # 输入/输出：右侧向量 -> 解
+        transpose: TransposeType
+    )
+
+【算法】
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES:
+        trans = to_cublas(transpose)
+        n = LU.size(-2)
+        nrhs = B.size(-1)
+        batch_size = batchCount(B)
+        leading_dimension = max(1, n)
+
+        # LU 和 pivots 可广播到 B
+        lu_index = BroadcastLinearIndices(batchCount(LU), LU.batch_shape, B.batch_shape)
+
+        handle = at::cuda::getCurrentCUDASolverDnHandle()
+        info = at::zeros({1}, dtype=kInt)
+
+        for batch in range(batch_size):
+            lu_batch_idx = lu_index(batch)
+
+            at::cuda::solver::getrs<scalar_t>(
+                handle, n, nrhs,
+                lu_data + lu_batch_idx * lu_stride,
+                leading_dimension,
+                pivots_data + lu_batch_idx * pivots_stride,
+                b_data + batch * b_stride,
+                leading_dimension,
+                info_data,
+                trans
+            )
+
+【备注】
+    - getrs: 用 LU 分解求解 Ax = b
+    - 支持 LU/pivots 广播到 B
+
+---
+
+## 头文件声明摘要
+
+BatchLinearAlgebraLib.h 提供以下接口：
+
+【cuBLAS 接口】
+    geqrf_batched_cublas(input, tau)
+    triangular_solve_cublas(A, B, left, upper, transpose, unitriangular)
+    triangular_solve_batched_cublas(...)
+    gels_batched_cublas(a, b, infos)
+    lu_factor_batched_cublas(A, pivots, infos, get_pivots)
+    lu_solve_batched_cublas(LU, pivots, B, transpose)
+
+【cuSOLVER 接口（USE_LINALG_SOLVER）】
+    ldl_factor_cusolver(LD, pivots, info, upper, hermitian)
+    ldl_solve_cusolver(LD, pivots, B, upper)
+    svd_cusolver(A, full_matrices, compute_uv, driver, U, S, V, info)
+    cholesky_helper_cusolver(input, upper, info)
+    _cholesky_solve_helper_cuda_cusolver(self, A, upper)
+    cholesky_inverse_kernel_impl_cusolver(result, infos, upper)
+    geqrf_cusolver(input, tau)
+    ormqr_cusolver(input, tau, other, left, transpose)
+    orgqr_helper_cusolver(result, tau)
+    linalg_eigh_cusolver(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors)
+    lu_solve_looped_cusolver(LU, pivots, B, transpose)
+    lu_factor_looped_cusolver(self, pivots, infos, get_pivots)
+
+【常量】
+    use_cusolver_potrf_batched_ = (CUSOLVER_VERSION >= 11101)
+    use_cusolver_syevj_batched_ = (CUSOLVER_VERSION >= 11102)
+    cusolver_gesvdj_max_sweeps = 400
