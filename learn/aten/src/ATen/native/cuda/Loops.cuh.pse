@@ -1,0 +1,392 @@
+--------------------------------
+make_input_offset_calculator
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    make_input_offset_calculator<N>(iter: TensorIteratorBase) -> OffsetCalculator<N>
+
+【算法】
+    # 提取所有输入tensor的strides和element_sizes
+    for i in range(N):
+        strides[i] = iter.strides(i + iter.noutputs())
+        element_sizes[i] = iter.element_size(i + iter.noutputs())
+    
+    return OffsetCalculator<N>(iter.ndim(), iter.shape(), strides, element_sizes)
+
+【备注】
+    - N = iter.ntensors() - iter.noutputs()
+    - 用于计算输入tensor的内存偏移
+
+--------------------------------
+make_output_offset_calculator
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    make_output_offset_calculator<num_outputs>(iter: TensorIteratorBase) -> OffsetCalculator<num_outputs>
+
+【算法】
+    # 提取所有输出tensor的strides和element_sizes
+    for i in range(num_outputs):
+        strides[i] = iter.strides(i)
+        element_sizes[i] = iter.element_size(i)
+    
+    return OffsetCalculator<num_outputs>(iter.ndim(), iter.shape(), strides, element_sizes)
+
+【备注】
+    - num_outputs = iter.noutputs()
+    - 用于计算输出tensor的内存偏移
+
+--------------------------------
+elementwise_kernel_helper
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    @device
+    elementwise_kernel_helper<func_t, policy_t>(f: func_t, policy: policy_t)
+
+【算法】
+    constexpr elems_per_thread = policy_t::tws
+    idx = blockIdx.x
+    
+    # Step 1: 加载
+    args = policy.load(idx)  # args: array[elems_per_thread] of tuple
+    
+    # Step 2: 计算
+    for i in range(elems_per_thread):
+        if policy.check_inbounds(i):
+            results[i] = f(*args[i])
+    
+    # Step 3: 存储
+    policy.store(results, idx)
+
+【并行模式】
+    - blockIdx.x: 处理不同的work chunk
+    - 每个block处理 elems_per_thread 个元素
+    - policy控制加载/存储和边界检查
+
+【备注】
+    - policy_t定义了具体的内存访问模式（见MemoryAccess.cuh）
+    - 这是一个通用的elementwise kernel helper
+
+--------------------------------
+gpu_kernel_nocast
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    gpu_kernel_nocast<func_t>(iter: TensorIteratorBase, f: func_t)
+
+【算法】
+    # Step 1: 验证所有tensor都在CUDA设备上
+    for arg in range(iter.ntensors()):
+        assert iter.device(arg).is_cuda()
+    
+    # Step 2: 空tensor直接返回
+    if iter.numel() == 0:
+        return
+    
+    # Step 3: 处理大索引情况（>2^31）
+    if not iter.can_use_32bit_indexing():
+        for sub_iter in iter.with_32bit_indexing():
+            gpu_kernel_nocast(sub_iter, f)
+        return
+    
+    # Step 4: 调用实际kernel
+    gpu_kernel_impl_nocast(iter, f)
+
+【备注】
+    - 不进行类型转换的版本
+    - 自动分割大tensor以支持32位索引
+
+--------------------------------
+gpu_kernel
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    gpu_kernel<func_t>(iter: TensorIteratorBase, f: func_t)
+
+【算法】
+    # Step 1: 验证所有tensor都在CUDA设备上
+    for arg in range(iter.ntensors()):
+        assert iter.device(arg).is_cuda()
+    
+    # Step 2: 空tensor直接返回
+    if iter.numel() == 0:
+        return
+    
+    # Step 3: 处理大索引情况（>2^31）
+    if not iter.can_use_32bit_indexing():
+        for sub_iter in iter.with_32bit_indexing():
+            gpu_kernel(sub_iter, f)
+        return
+    
+    # Step 4: 调用实际kernel
+    gpu_kernel_impl(iter, f)
+
+【备注】
+    - 支持类型转换的版本（见CUDALoops.cuh）
+    - 自动分割大tensor以支持32位索引
+
+--------------------------------
+AUnaryFunctor / BUnaryFunctor
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    AUnaryFunctor<arg1_t, arg2_t, return_t, func_t>:
+        @device
+        operator()(b: arg2_t) -> return_t
+            return f(a, b)  # a是构造时捕获的标量
+    
+    BUnaryFunctor<arg1_t, arg2_t, return_t, func_t>:
+        @device
+        operator()(a: arg1_t) -> return_t
+            return f(a, b)  # b是构造时捕获的标量
+
+【备注】
+    - AUnaryFunctor: 将二元函数的第一个参数固定为标量a
+    - BUnaryFunctor: 将二元函数的第二个参数固定为标量b
+    - 标量以opmath精度存储
+
+--------------------------------
+BinaryFunctor
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    BinaryFunctor<arg1_t, arg2_t, return_t, func_t>:
+        @device
+        operator()(a: arg1_t, b: arg2_t) -> return_t
+            return f(a, b)
+
+【备注】
+    - 包装二元函数，插入类型转换
+    - 转换: arg1_t → func_t的arg0类型, arg2_t → func_t的arg1类型
+    - 转换: func_t的返回类型 → return_t
+
+--------------------------------
+opmath_gpu_kernel_with_scalars
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    opmath_gpu_kernel_with_scalars<arg1_t, arg2_t, return_t, func_t>(
+        iter: TensorIteratorBase,
+        f: func_t  # 二元函数，接受opmath_t参数
+    )
+
+    约束:
+    - iter.ntensors() == 3  # 1个输出 + 2个输入
+    - func_t.arity == 2
+
+【算法】
+    # 根据哪个输入是CPU标量选择策略
+    if iter.is_cpu_scalar(1):  # 第一个输入是标量
+        scalar_val = iter.scalar_value<opmath_arg1_t>(1)
+        iter.remove_operand(1)
+        gpu_kernel(iter, AUnaryFunctor(f, scalar_val))
+    
+    elif iter.is_cpu_scalar(2):  # 第二个输入是标量
+        scalar_val = iter.scalar_value<opmath_arg2_t>(2)
+        iter.remove_operand(2)
+        gpu_kernel(iter, BUnaryFunctor(f, scalar_val))
+    
+    else:  # 两个都是tensor
+        gpu_kernel(iter, BinaryFunctor(f))
+
+【备注】
+    - 标量以opmath精度（通常是更高精度）存储和计算
+    - tensor从内存加载时使用arg1_t/arg2_t精度，避免昂贵的高精度加载
+    - 详见: https://dev-discuss.pytorch.org/t/cuda-loops-case-study-code-generation-vs-templates/302
+
+--------------------------------
+opmath_symmetric_gpu_kernel_with_scalars
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    opmath_symmetric_gpu_kernel_with_scalars<scalar_t, return_t, func_t>(
+        iter: TensorIteratorBase,
+        f: func_t  # 对称二元函数，f(a, b) == f(b, a)
+    )
+
+    约束:
+    - iter.ntensors() == 3
+    - func_t.arity == 2
+    - func_t的两个参数类型相同
+
+【算法】
+    # 提取标量（如果有）
+    if iter.is_cpu_scalar(1):
+        scalar_val = iter.scalar_value<opmath_arg_t>(1)
+        iter.remove_operand(1)
+    elif iter.is_cpu_scalar(2):
+        scalar_val = iter.scalar_value<opmath_arg_t>(2)
+        iter.remove_operand(2)
+    
+    # 执行计算
+    if iter.ninputs() == 2:  # 两个都是tensor
+        gpu_kernel(iter, BinaryFunctor(f))
+    else:  # 一个是tensor，一个是标量
+        gpu_kernel(iter, AUnaryFunctor(f, scalar_val))
+
+【备注】
+    - 利用对称性减少kernel数量
+    - 无论哪个操作数是标量，都可以用同一个unary functor
+
+--------------------------------
+gpu_kernel_with_scalars
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    gpu_kernel_with_scalars<func_t>(iter: TensorIteratorBase, f: func_t)
+
+【算法】
+    # 从func_t推导类型
+    arg1_t = func_t::arg<0>::type
+    arg2_t = func_t::arg<1>::type
+    return_t = func_t::result_type
+    
+    # 调用opmath版本
+    opmath_gpu_kernel_with_scalars<arg1_t, arg2_t, return_t>(iter, f)
+
+【备注】
+    - 遗留版本，假设func_t的参数类型就是内存加载类型
+    - 新代码应使用opmath_gpu_kernel_with_scalars
+
+--------------------------------
+unrolled_elementwise_kernel_for_multi_outputs
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    @device
+    unrolled_elementwise_kernel_for_multi_outputs<num_outputs, func_t, array_t, inp_calc_t, out_calc_t>(
+        N: int,
+        f: func_t,
+        data: array_t,
+        ic: inp_calc_t,
+        oc: out_calc_t
+    )
+
+【算法】
+    remaining = N - block_work_size() * blockIdx.x
+    policy = memory::policies::multi_outputs_unroll<array_t, inp_calc_t, out_calc_t, num_outputs>(
+        data, remaining, ic, oc
+    )
+    elementwise_kernel_helper(f, policy)
+
+【并行模式】
+    grid: ceil(N / block_work_size())
+    block: num_threads()
+
+【备注】
+    - 用于返回多个输出的elementwise操作
+    - multi_outputs_unroll policy定义在MemoryAccess.cuh
+
+--------------------------------
+launch_unrolled_kernel_for_multi_outputs
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    launch_unrolled_kernel_for_multi_outputs<num_outputs, func_t, array_t, inp_calc_t, out_calc_t>(
+        N: int64,
+        f: func_t,
+        data: array_t,
+        ic: inp_calc_t,
+        oc: out_calc_t
+    )
+
+【算法】
+    assert 0 < N <= 2^31 - 1
+    
+    grid = ceil(N / block_work_size())
+    stream = at::cuda::getCurrentCUDAStream()
+    
+    unrolled_elementwise_kernel_for_multi_outputs<num_outputs><<<grid, num_threads(), 0, stream>>>(
+        N, f, data, ic, oc
+    )
+
+--------------------------------
+gpu_kernel_multiple_outputs_impl
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    gpu_kernel_multiple_outputs_impl<func_t>(
+        iter: TensorIteratorBase,
+        f: func_t  # 返回thrust::tuple的函数
+    )
+
+    约束:
+    - func_t::result_type 是 thrust::tuple<...>
+    - iter.ntensors() == num_outputs + num_inputs
+
+【算法】
+    num_outputs = thrust::tuple_size<output_t>::value
+    num_inputs = func_t::arity
+    
+    # 收集所有tensor指针
+    data = [iter.data_ptr(i) for i in range(num_outputs + num_inputs)]
+    numel = iter.numel()
+    
+    # 根据连续性选择offset calculator
+    if iter.is_contiguous():
+        input_calc = TrivialOffsetCalculator<num_inputs>()
+        output_calc = TrivialOffsetCalculator<num_outputs>()
+    else:
+        input_calc = make_input_offset_calculator<num_inputs>(iter)
+        output_calc = make_output_offset_calculator<num_outputs>(iter)
+    
+    launch_unrolled_kernel_for_multi_outputs<num_outputs>(numel, f, data, input_calc, output_calc)
+
+【备注】
+    - 要求返回类型是thrust::tuple，不是std::tuple
+    - 连续tensor使用更快的TrivialOffsetCalculator
+
+--------------------------------
+gpu_kernel_multiple_outputs
+来源: aten/src/ATen/native/cuda/Loops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    gpu_kernel_multiple_outputs<func_t>(
+        iter: TensorIteratorBase,
+        f: func_t  # 返回thrust::tuple的函数
+    )
+
+【算法】
+    # Step 1: 验证所有tensor都在CUDA设备上
+    for arg in range(iter.ntensors()):
+        assert iter.device(arg).is_cuda()
+    
+    # Step 2: 空tensor直接返回
+    if iter.numel() == 0:
+        return
+    
+    # Step 3: 处理大索引情况（>2^31）
+    if not iter.can_use_32bit_indexing():
+        for sub_iter in iter.with_32bit_indexing():
+            gpu_kernel_multiple_outputs(sub_iter, f)
+        return
+    
+    # Step 4: 调用实际kernel
+    gpu_kernel_multiple_outputs_impl(iter, f)
+
+【备注】
+    - 用于返回多个输出的elementwise操作
+    - 自动分割大tensor以支持32位索引

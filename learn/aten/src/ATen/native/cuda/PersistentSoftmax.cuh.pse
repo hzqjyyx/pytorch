@@ -1,0 +1,397 @@
+--------------------------------
+log2_ceil
+来源: aten/src/ATen/native/cuda/PersistentSoftmax.cuh
+--------------------------------
+
+【签名】
+    log2_ceil(value: int) -> int
+
+【算法】
+    log2_value = 0
+    while (1 << log2_value) < value:
+        log2_value += 1
+    return log2_value
+
+--------------------------------
+Add
+来源: aten/src/ATen/native/cuda/PersistentSoftmax.cuh
+--------------------------------
+
+【签名】
+    @device
+    Add<T>::operator()(a: T, b: T) -> T
+
+【算法】
+    return a + b
+
+--------------------------------
+Max
+来源: aten/src/ATen/native/cuda/PersistentSoftmax.cuh
+--------------------------------
+
+【签名】
+    @device
+    Max<T>::operator()(a: T, b: T) -> T
+
+【算法】
+    return a < b ? b : a
+
+--------------------------------
+warp_reduce
+来源: aten/src/ATen/native/cuda/PersistentSoftmax.cuh
+--------------------------------
+
+【签名】
+    @device
+    warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, ReduceOp>(sum: acc_t[WARP_BATCH])
+
+【算法】
+    r = ReduceOp<acc_t>()
+    
+    for offset in [WARP_SIZE/2, WARP_SIZE/4, ..., 1]:  # 迭代减半
+        for i in range(WARP_BATCH):
+            b = WARP_SHFL_XOR(sum[i], offset, WARP_SIZE)
+            sum[i] = r(sum[i], b)
+
+【并行模式】
+    warp_reduce(op)
+    使用 warp shuffle 指令跨线程归约
+
+--------------------------------
+softmax_warp_forward
+来源: aten/src/ATen/native/cuda/PersistentSoftmax.cuh
+--------------------------------
+
+【签名】
+    @device
+    softmax_warp_forward<input_t, output_t, acc_t, log2_elements, is_log_softmax, is_masked>(
+        dst: output_t*,
+        src: input_t*,
+        batch_size: int,
+        stride: int,
+        element_count: int,
+        mask: bool* = nullptr,
+        head_chunk_size: int = -1,
+        is_transformer_mask: bool = false
+    )
+
+    约束:
+    - element_count <= 1024
+    - next_power_of_two = 1 << log2_elements
+    - WARP_SIZE = min(next_power_of_two, C10_WARP_SIZE)
+    - WARP_ITERATIONS = next_power_of_two / WARP_SIZE
+    - WARP_BATCH = 2 if next_power_of_two <= 128 else 1
+
+【算法】
+    # Step 1: 确定本warp处理的batch范围
+    first_batch = (blockDim.y * blockIdx.x + threadIdx.y) * WARP_BATCH
+    local_batches = min(batch_size - first_batch, WARP_BATCH)
+    
+    local_idx = threadIdx.x
+    idx_offset = first_batch * stride + local_idx
+    
+    # Step 2: 调整mask指针
+    if is_transformer_mask:
+        mask_offset = ((first_batch * stride) / head_chunk_size) * stride + local_idx
+    else:
+        mask_offset = idx_offset
+    
+    # Step 3: 加载数据到寄存器
+    elements[WARP_BATCH][WARP_ITERATIONS]: acc_t
+    
+    for i in range(WARP_BATCH):
+        batch_element_count = element_count if i < local_batches else 0
+        for it in range(WARP_ITERATIONS):
+            element_index = local_idx + it * WARP_SIZE
+            if element_index < batch_element_count:
+                elements[i][it] = src[i*element_count + it*WARP_SIZE]
+            else:
+                elements[i][it] = -∞
+    
+    # Step 4: 计算最大值 (数值稳定性)
+    max_value[WARP_BATCH]: acc_t
+    
+    for i in range(WARP_BATCH):
+        batch_element_count = element_count if i < local_batches else 0
+        is_meaningful_max = false
+        max_value[i] = elements[i][0]
+        
+        for it in range(WARP_ITERATIONS):
+            if is_masked:
+                idx = it * WARP_SIZE
+                if (idx + local_idx) < batch_element_count:
+                    if not is_transformer_mask:
+                        idx += i * element_count
+                    if not mask[idx]:
+                        max_value[i] = max(max_value[i], elements[i][it]) if is_meaningful_max else elements[i][it]
+                        is_meaningful_max = true
+            else:
+                max_value[i] = max(max_value[i], elements[i][it])
+        
+        if is_masked and not is_meaningful_max:
+            max_value[i] = -∞
+    
+    warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Max>(max_value)
+    
+    # Step 5: 计算exp和sum
+    sum[WARP_BATCH]: acc_t = {0.0f}
+    
+    for i in range(WARP_BATCH):
+        batch_element_count = element_count if i < local_batches else 0
+        
+        for it in range(WARP_ITERATIONS):
+            if not is_masked:
+                if is_log_softmax:
+                    sum[i] += exp(elements[i][it] - max_value[i])
+                else:
+                    elements[i][it] = exp(elements[i][it] - max_value[i])
+                    sum[i] += elements[i][it]
+            else:
+                idx = it * WARP_SIZE
+                valid = (idx + local_idx) < batch_element_count
+                if not is_transformer_mask:
+                    idx += i * element_count
+                
+                if valid:
+                    if not mask[idx]:
+                        if is_log_softmax:
+                            sum[i] += exp(elements[i][it] - max_value[i])
+                        else:
+                            elements[i][it] = exp(elements[i][it] - max_value[i])
+                            sum[i] += elements[i][it]
+                    else:
+                        if not is_log_softmax:
+                            elements[i][it] = 0
+                else:
+                    if not is_log_softmax:
+                        elements[i][it] = 0
+    
+    warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Add>(sum)
+    
+    # Step 6: 归一化并写回
+    for i in range(WARP_BATCH):
+        if i >= local_batches:
+            break
+        
+        if is_log_softmax:
+            sum[i] = log(sum[i])
+        
+        for it in range(WARP_ITERATIONS):
+            element_index = local_idx + it * WARP_SIZE
+            if element_index < element_count:
+                if is_log_softmax:
+                    dst[i*element_count + it*WARP_SIZE] = elements[i][it] - max_value[i] - sum[i]
+                else if sum[i] == 0:
+                    dst[i*element_count + it*WARP_SIZE] = NaN
+                else:
+                    dst[i*element_count + it*WARP_SIZE] = elements[i][it] / sum[i]
+            else:
+                break
+
+【并行模式】
+    grid: (ceil(batch_size / (warps_per_block * WARP_BATCH)),)
+    block: (WARP_SIZE, warps_per_block, 1)
+    
+    - 每个warp处理 WARP_BATCH 个样本
+    - 每个样本的 element_count 个元素由 WARP_SIZE 个线程协作处理
+    - 使用 warp_reduce 进行线程内归约 (max, sum)
+
+【备注】
+    - WARP_BATCH: 小样本时 (<=128元素) 每warp处理2个样本，否则1个
+    - is_log_softmax: true 计算 log_softmax，false 计算 softmax
+    - is_masked: 支持掩码，被掩码的位置视为 -∞
+    - is_transformer_mask: transformer专用掩码索引方式
+    - 使用 acc_t 进行累加以保持精度
+
+--------------------------------
+softmax_warp_backward
+来源: aten/src/ATen/native/cuda/PersistentSoftmax.cuh
+--------------------------------
+
+【签名】
+    @device
+    softmax_warp_backward<input_t, output_t, acc_t, log2_elements, is_log_softmax, is_masked>(
+        gradInput: output_t*,
+        grad: input_t*,
+        output: input_t*,
+        batch_size: int,
+        stride: int,
+        element_count: int,
+        mask: bool* = nullptr
+    )
+
+    约束:
+    - element_count <= 1024
+    - 模板常量同 softmax_warp_forward
+
+【算法】
+    # Step 1: 确定本warp处理的batch范围
+    first_batch = (blockDim.y * blockIdx.x + threadIdx.y) * WARP_BATCH
+    local_batches = min(batch_size - first_batch, WARP_BATCH)
+    
+    local_idx = threadIdx.x % WARP_SIZE
+    thread_offset = first_batch * stride + local_idx
+    
+    # Step 2: 加载grad和output到寄存器
+    grad_reg[WARP_BATCH][WARP_ITERATIONS]: acc_t
+    output_reg[WARP_BATCH][WARP_ITERATIONS]: acc_t
+    
+    for i in range(WARP_BATCH):
+        batch_element_count = element_count if i < local_batches else 0
+        for it in range(WARP_ITERATIONS):
+            element_index = local_idx + it * WARP_SIZE
+            if element_index < batch_element_count:
+                grad_reg[i][it] = grad[i*element_count + it*WARP_SIZE]
+                output_reg[i][it] = output[i*element_count + it*WARP_SIZE]
+            else:
+                grad_reg[i][it] = 0
+                output_reg[i][it] = 0
+    
+    # Step 3: 计算梯度和
+    sum[WARP_BATCH]: acc_t = {0.0f}
+    
+    for i in range(WARP_BATCH):
+        for it in range(WARP_ITERATIONS):
+            if not is_masked or not mask[i*element_count + it*WARP_SIZE]:
+                sum[i] += grad_reg[i][it]
+    
+    warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Add>(sum)
+    
+    # Step 4: 计算输入梯度
+    for i in range(WARP_BATCH):
+        if i >= local_batches:
+            break
+        
+        for it in range(WARP_ITERATIONS):
+            element_index = local_idx + it * WARP_SIZE
+            if element_index < element_count:
+                if is_masked and mask[i*element_count + it*WARP_SIZE]:
+                    gradInput[i*element_count + it*WARP_SIZE] = 0
+                else if is_log_softmax:
+                    gradInput[i*element_count + it*WARP_SIZE] = grad_reg[i][it] - exp(output_reg[i][it]) * sum[i]
+                else:
+                    gradInput[i*element_count + it*WARP_SIZE] = grad_reg[i][it] - output_reg[i][it] * sum[i]
+
+【并行模式】
+    grid: (ceil(batch_size / (warps_per_block * WARP_BATCH)),)
+    block: (WARP_SIZE, warps_per_block, 1)
+    
+    同 softmax_warp_forward
+
+【备注】
+    - log_softmax反向: ∂L/∂x = ∂L/∂y - exp(y) * sum(∂L/∂y)
+    - softmax反向: ∂L/∂x = ∂L/∂y - y * sum(∂L/∂y)
+
+--------------------------------
+dispatch_softmax_forward
+来源: aten/src/ATen/native/cuda/PersistentSoftmax.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    dispatch_softmax_forward<input_t, output_t, acc_t, is_log_softmax, is_masked>(
+        dst: output_t*,
+        src: input_t*,
+        softmax_elements: int,
+        softmax_elements_stride: int,
+        batch_count: int,
+        mask: bool* = nullptr,
+        chunk_size: int = -1,
+        is_transformer_mask: bool = false
+    )
+
+    约束:
+    - 0 <= softmax_elements <= 2048
+
+【算法】
+    if softmax_elements == 0:
+        return
+    
+    # Step 1: 计算kernel配置参数
+    log2_elements = log2_ceil(softmax_elements)
+    next_power_of_two = 1 << log2_elements
+    
+    warp_size = at::cuda::warp_size()
+    warp_size = min(next_power_of_two, warp_size)
+    
+    batches_per_warp = 2 if next_power_of_two <= 128 else 1
+    
+    threads_per_block = 128
+    warps_per_block = threads_per_block / warp_size
+    batches_per_block = warps_per_block * batches_per_warp
+    blocks = ceil(batch_count / batches_per_block)
+    
+    threads = dim3(warp_size, warps_per_block, 1)
+    
+    # Step 2: 根据log2_elements分发到对应kernel
+    switch log2_elements:
+        case 0:  # 1 element
+            softmax_warp_forward<input_t, output_t, acc_t, 0, is_log_softmax, is_masked>
+                <<<blocks, threads>>>(dst, src, batch_count, softmax_elements_stride, 
+                                      softmax_elements, mask, chunk_size, is_transformer_mask)
+        case 1:  # 2 elements
+            softmax_warp_forward<..., 1, ...><<<...>>>
+        ...
+        case 11: # 2048 elements
+            softmax_warp_forward<..., 11, ...><<<...>>>
+
+【备注】
+    - 支持 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048 个元素
+    - 通过模板参数 log2_elements 避免运行时分支
+    - threads_per_block 固定为 128 以最大化GPU利用率
+
+--------------------------------
+dispatch_softmax_backward
+来源: aten/src/ATen/native/cuda/PersistentSoftmax.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    dispatch_softmax_backward<input_t, output_t, acc_t, is_log_softmax, is_masked>(
+        grad_input: output_t*,
+        grad: input_t*,
+        output: input_t*,
+        softmax_elements: int,
+        softmax_elements_stride: int,
+        batch_count: int,
+        mask: bool* = nullptr
+    )
+
+    约束:
+    - 0 <= softmax_elements <= 1024
+
+【算法】
+    if softmax_elements == 0:
+        return
+    
+    # Step 1: 计算kernel配置参数 (同dispatch_softmax_forward)
+    log2_elements = log2_ceil(softmax_elements)
+    next_power_of_two = 1 << log2_elements
+    
+    warp_size = at::cuda::warp_size()
+    warp_size = min(next_power_of_two, warp_size)
+    
+    batches_per_warp = 2 if next_power_of_two <= 128 else 1
+    
+    threads_per_block = 128
+    warps_per_block = threads_per_block / warp_size
+    batches_per_block = warps_per_block * batches_per_warp
+    blocks = ceil(batch_count / batches_per_block)
+    
+    threads = dim3(warp_size, warps_per_block, 1)
+    
+    # Step 2: 根据log2_elements分发到对应kernel
+    switch log2_elements:
+        case 0:  # 1 element
+            softmax_warp_backward<input_t, output_t, acc_t, 0, is_log_softmax, is_masked>
+                <<<blocks, threads>>>(grad_input, grad, output, batch_count, 
+                                      softmax_elements_stride, softmax_elements, mask)
+        case 1:  # 2 elements
+            softmax_warp_backward<..., 1, ...><<<...>>>
+        ...
+        case 10: # 1024 elements
+            softmax_warp_backward<..., 10, ...><<<...>>>
+
+【备注】
+    - backward最大支持 1024 个元素 (forward支持到2048)
+    - 其余配置逻辑与 dispatch_softmax_forward 一致

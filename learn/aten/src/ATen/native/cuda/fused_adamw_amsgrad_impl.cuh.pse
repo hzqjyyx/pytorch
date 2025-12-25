@@ -1,0 +1,59 @@
+--------------------------------
+fused_adamw_amsgrad (重载1 - scalar lr)
+来源: aten/src/ATen/native/cuda/fused_adamw_amsgrad_impl.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    _fused_adamw_amsgrad_cuda_impl_(
+        params: TensorList[N],
+        grads: TensorList[N],
+        exp_avgs: TensorList[N],
+        exp_avg_sqs: TensorList[N],
+        max_exp_avg_sqs: TensorList[N],
+        state_steps: TensorList[N],
+        lr: float,
+        beta1: float,
+        beta2: float,
+        weight_decay: float,
+        eps: float,
+        maximize: bool,
+        grad_scale: Optional[Tensor],
+        found_inf: Optional[Tensor]
+    )
+
+    约束:
+    - params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps 长度相同
+
+
+--------------------------------
+fused_adamw_amsgrad (重载2 - tensor lr)
+来源: aten/src/ATen/native/cuda/fused_adamw_amsgrad_impl.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    _fused_adamw_amsgrad_cuda_impl_(
+        params: TensorList[N],
+        grads: TensorList[N],
+        exp_avgs: TensorList[N],
+        exp_avg_sqs: TensorList[N],
+        max_exp_avg_sqs: TensorList[N],
+        state_steps: TensorList[N],
+        lr: Tensor,
+        beta1: float,
+        beta2: float,
+        weight_decay: float,
+        eps: float,
+        maximize: bool,
+        grad_scale: Optional[Tensor],
+        found_inf: Optional[Tensor]
+    )
+
+    约束:
+    - params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps 长度相同
+
+【备注】
+    - 两个重载的区别: lr 参数类型 (double vs Tensor)
+    - AMSGrad 变体: 使用 max_exp_avg_sqs 跟踪二阶动量的最大值
+    - 实现细节在对应的 .cu 文件中

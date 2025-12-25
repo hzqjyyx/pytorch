@@ -1,0 +1,229 @@
+--------------------------------
+vol2col_kernel
+来源: aten/src/ATen/native/cuda/vol2col.cuh
+--------------------------------
+
+【签名】
+    @device
+    vol2col_kernel(
+        n: int64,                          # 总工作项数
+        data_vol: Tensor[C, D, H, W, T],   # 输入volume
+        depth, height, width: int,         # 输入空间维度
+        ksize_t, ksize_h, ksize_w: int,    # 卷积核尺寸
+        pad_t, pad_h, pad_w: int,          # padding
+        stride_t, stride_h, stride_w: int, # stride
+        dilation_t, dilation_h, dilation_w: int, # dilation
+        depth_col, height_col, width_col: int,   # 输出空间维度
+        data_col: Tensor[C*Kt*Kh*Kw, D_col, H_col, W_col, T]  # 输出
+    )
+
+【算法】
+    parallel_for index in range(n):
+        # 解码输出坐标
+        w_out = index % width_col
+        index /= width_col
+        h_out = index % height_col
+        index /= height_col
+        t_out = index % depth_col
+        channel_in = index / depth_col
+        
+        # 计算输入坐标（考虑stride和padding）
+        channel_out = channel_in * ksize_t * ksize_h * ksize_w
+        t_in = t_out * stride_t - pad_t
+        h_in = h_out * stride_h - pad_h
+        w_in = w_out * stride_w - pad_w
+        
+        # 定位输出和输入指针
+        data_col += ((channel_out * depth_col + t_out) * height_col + h_out) * width_col + w_out
+        data_vol += ((channel_in * depth + t_in) * height + h_in) * width + w_in
+        
+        # 遍历卷积核窗口
+        for i in range(ksize_t):
+            for j in range(ksize_h):
+                for k in range(ksize_w):
+                    t = t_in + i * dilation_t
+                    h = h_in + j * dilation_h
+                    w = w_in + k * dilation_w
+                    
+                    # 边界检查并拷贝
+                    if t >= 0 and h >= 0 and w >= 0 and t < depth and h < height and w < width:
+                        *data_col = data_vol[i * dilation_t * height * width + 
+                                            j * dilation_h * width + 
+                                            k * dilation_w]
+                    else:
+                        *data_col = 0
+                    
+                    data_col += depth_col * height_col * width_col
+
+【并行模式】
+    grid: GET_BLOCKS(channels * depth_col * height_col * width_col)
+    block: CUDA_NUM_THREADS
+    
+    - 每个线程处理一个输出位置的所有卷积核窗口
+
+【备注】
+    - 3D卷积的im2col操作（volume to column）
+    - 将3D卷积转换为矩阵乘法，展开卷积核窗口
+
+
+--------------------------------
+vol2col
+来源: aten/src/ATen/native/cuda/vol2col.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    vol2col(
+        stream: cudaStream_t,
+        data_vol: Tensor[C, D, H, W, T],
+        channels, depth, height, width: int,
+        depth_col, height_col, width_col: int,
+        ksize_t, ksize_h, ksize_w: int,
+        pad_t, pad_h, pad_w: int,
+        stride_t, stride_h, stride_w: int,
+        dilation_t, dilation_h, dilation_w: int,
+        data_col: Tensor[C*Kt*Kh*Kw, D_col, H_col, W_col, T]
+    )
+
+【算法】
+    num_kernels = channels * depth_col * height_col * width_col
+    
+    vol2col_kernel<<<GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream>>>(
+        num_kernels,
+        data_vol,
+        depth, height, width,
+        ksize_t, ksize_h, ksize_w,
+        pad_t, pad_h, pad_w,
+        stride_t, stride_h, stride_w,
+        dilation_t, dilation_h, dilation_w,
+        depth_col, height_col, width_col,
+        data_col
+    )
+    
+    C10_CUDA_KERNEL_LAUNCH_CHECK()
+
+【备注】
+    - 启动channels个单通道grid的kernel
+
+
+--------------------------------
+vol2im_kernel
+来源: aten/src/ATen/native/cuda/vol2col.cuh
+--------------------------------
+
+【签名】
+    @device
+    vol2im_kernel(
+        n: int64,                          # 总工作项数
+        data_col: Tensor[C*Kt*Kh*Kw, D_col, H_col, W_col, T],
+        depth, height, width: unsigned,
+        channels: unsigned,
+        kernel_t, kernel_h, kernel_w: unsigned,
+        pad_t, pad_h, pad_w: unsigned,
+        stride_t, stride_h, stride_w: unsigned,
+        dilation_t, dilation_h, dilation_w: unsigned,
+        depth_col, height_col, width_col: unsigned,
+        data_vol: Tensor[C, D, H, W, T]
+    )
+
+【算法】
+    parallel_for index in range(n):
+        val: accT = 0
+        
+        # 解码输出volume坐标（加上padding）
+        w_im = index % width + pad_w
+        h_im = (index / width) % height + pad_h
+        t_im = (index / width / height) % depth + pad_t
+        c_im = index / (width * height * depth)
+        
+        # 计算卷积核覆盖范围
+        kernel_extent_w = (kernel_w - 1) * dilation_w + 1
+        kernel_extent_h = (kernel_h - 1) * dilation_h + 1
+        kernel_extent_t = (kernel_t - 1) * dilation_t + 1
+        
+        # 计算能覆盖当前位置的输出范围
+        w_col_start = max(0, (w_im - kernel_extent_w) / stride_w + 1)
+        w_col_end = min(w_im / stride_w + 1, width_col)
+        h_col_start = max(0, (h_im - kernel_extent_h) / stride_h + 1)
+        h_col_end = min(h_im / stride_h + 1, height_col)
+        t_col_start = max(0, (t_im - kernel_extent_t) / stride_t + 1)
+        t_col_end = min(t_im / stride_t + 1, depth_col)
+        
+        # 遍历所有能覆盖当前位置的输出位置
+        for t_col in range(t_col_start, t_col_end):
+            for h_col in range(h_col_start, h_col_end):
+                for w_col in range(w_col_start, w_col_end):
+                    t_k = t_im - t_col * stride_t
+                    h_k = h_im - h_col * stride_h
+                    w_k = w_im - w_col * stride_w
+                    
+                    # 检查是否对齐到dilation网格
+                    if t_k % dilation_t == 0 and h_k % dilation_h == 0 and w_k % dilation_w == 0:
+                        t_k /= dilation_t
+                        h_k /= dilation_h
+                        w_k /= dilation_w
+                        
+                        # 计算对应的data_col索引
+                        idx_k = ((c_im * kernel_t + t_k) * kernel_h + h_k) * kernel_w + w_k
+                        data_col_index = ((idx_k * depth_col + t_col) * height_col + h_col) * width_col + w_col
+                        
+                        val += data_col[data_col_index]
+        
+        data_vol[index] = val
+
+【并行模式】
+    grid: GET_BLOCKS(channels * depth * height * width)
+    block: CUDA_NUM_THREADS
+    
+    - 每个线程处理输出volume的一个元素，累加所有贡献
+
+【备注】
+    - col2vol（vol2col的反向操作）
+    - 避免atomic操作：每个输出元素由一个线程独立累加
+    - TODO: 使用stride和dilation的最小公倍数优化循环
+
+
+--------------------------------
+col2vol
+来源: aten/src/ATen/native/cuda/vol2col.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    col2vol(
+        stream: cudaStream_t,
+        data_col: Tensor[C*Kt*Kh*Kw, D_col, H_col, W_col, T],
+        channels, depth, height, width: int64,
+        output_depth, output_height, output_width: int64,
+        patch_t, patch_h, patch_w: int64,
+        pad_t, pad_h, pad_w: int64,
+        stride_t, stride_h, stride_w: int64,
+        dilation_t, dilation_h, dilation_w: int64,
+        data_vol: Tensor[C, D, H, W, T]
+    )
+
+【算法】
+    num_kernels = channels * depth * height * width
+    
+    # 安全检查：确保参数适配unsigned类型
+    check_fits_in_unsigned(num_kernels, "input size")
+    check_fits_in_unsigned(channels * patch_t * patch_h * patch_w, "channels x kernel size")
+    
+    vol2im_kernel<T, accT><<<GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream>>>(
+        num_kernels,
+        data_col,
+        depth, height, width,
+        channels,
+        patch_t, patch_h, patch_w,
+        pad_t, pad_h, pad_w,
+        stride_t, stride_h, stride_w,
+        dilation_t, dilation_h, dilation_w,
+        output_depth, output_height, output_width,
+        data_vol
+    )
+    
+    C10_CUDA_KERNEL_LAUNCH_CHECK()
+
+【备注】
+    - 每个输出volume元素对应一个kernel，避免原子操作
+    - 参数验证确保不超过32位unsigned范围

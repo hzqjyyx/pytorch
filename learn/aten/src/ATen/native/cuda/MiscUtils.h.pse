@@ -1,0 +1,19 @@
+--------------------------------
+CUDA 工具函数
+来源: aten/src/ATen/native/cuda/MiscUtils.h
+--------------------------------
+
+【函数】
+    cuda_int_cast(value: int64, varname: str) -> int
+        参数: value=待转换的64位整数, varname=变量名（用于错误信息）
+        用途: 安全地将 int64 转换为 int32，溢出时抛出异常
+        调用: TORCH_CHECK
+
+    pin_memory<T>(size: int64) -> Storage
+        参数: T=元素类型, size=元素个数
+        用途: 创建固定内存（pinned memory）的 Storage，大小为 size*sizeof(T) 字节
+        调用: cuda::getPinnedMemoryAllocator()
+
+【依赖】
+    TORCH_CHECK                           # 错误检查
+    cuda::getPinnedMemoryAllocator()      # 获取固定内存分配器

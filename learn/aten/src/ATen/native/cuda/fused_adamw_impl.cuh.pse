@@ -1,0 +1,65 @@
+--------------------------------
+_fused_adamw_cuda_impl_ (scalar lr)
+来源: aten/src/ATen/native/cuda/fused_adamw_impl.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    _fused_adamw_cuda_impl_(
+        params: TensorList,              # 模型参数列表
+        grads: TensorList,                # 梯度列表
+        exp_avgs: TensorList,             # 一阶矩估计列表
+        exp_avg_sqs: TensorList,          # 二阶矩估计列表
+        state_steps: TensorList,          # 每个参数的步数
+        lr: float,                        # 学习率
+        beta1: float,                     # 一阶矩衰减率
+        beta2: float,                     # 二阶矩衰减率
+        weight_decay: float,              # 权重衰减系数
+        eps: float,                       # 数值稳定性常数
+        maximize: bool,                   # 是否最大化目标
+        grad_scale: Optional[Tensor],     # 梯度缩放因子
+        found_inf: Optional[Tensor]       # 是否发现inf/nan
+    )
+
+【算法】
+    # 调用底层实现，lr传入double类型
+    _fused_adamw_cuda_impl_(params, grads, exp_avgs, exp_avg_sqs, state_steps, 
+                            lr, beta1, beta2, weight_decay, eps, maximize, 
+                            grad_scale, found_inf)
+
+【备注】
+    - 这是标量学习率版本的包装函数
+    - 实际实现委托给同名重载函数
+
+--------------------------------
+_fused_adamw_cuda_impl_ (tensor lr)
+来源: aten/src/ATen/native/cuda/fused_adamw_impl.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    _fused_adamw_cuda_impl_(
+        params: TensorList,
+        grads: TensorList,
+        exp_avgs: TensorList,
+        exp_avg_sqs: TensorList,
+        state_steps: TensorList,
+        lr: Tensor,                       # 张量形式的学习率
+        beta1: float,
+        beta2: float,
+        weight_decay: float,
+        eps: float,
+        maximize: bool,
+        grad_scale: Optional[Tensor],
+        found_inf: Optional[Tensor]
+    )
+
+【算法】
+    # 调用底层实现，lr以Tensor形式传入
+    _fused_adamw_cuda_impl_(params, grads, exp_avgs, exp_avg_sqs, state_steps,
+                            lr, beta1, beta2, weight_decay, eps, maximize,
+                            grad_scale, found_inf)
+
+【备注】
+    - 这是张量学习率版本，支持per-parameter学习率
+    - 声明在头文件中，实际实现在对应.cu文件

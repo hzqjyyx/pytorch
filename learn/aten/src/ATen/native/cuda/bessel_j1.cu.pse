@@ -1,0 +1,30 @@
+--------------------------------
+bessel_j1_kernel_cuda
+来源: aten/src/ATen/native/cuda/bessel_j1.cu
+--------------------------------
+
+【签名】
+    @host→device
+    bessel_j1_kernel_cuda(iterator: TensorIteratorBase)
+    
+    约束:
+    - iterator.common_dtype() in [float, double]
+
+【算法】
+    if AT_USE_JITERATOR():
+        # JIT编译版本
+        jitted_gpu_kernel<bessel_j1_name, scalar_t, scalar_t, 1>(iterator, bessel_j1_string)
+    else:
+        # 预编译版本
+        gpu_kernel(iterator, λ(a: scalar_t) -> scalar_t {
+            return bessel_j1_forward(a)
+        })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - bessel_j1_forward: 第一类贝塞尔函数J1的前向计算，定义在 Math.cuh
+    - bessel_j1_string: JIT编译用的字符串表示，定义在 jit_utils.h
+    - bessel_j1_name: 常量 "bessel_j1_forward"，用于JIT kernel命名
+    - 注册到 special_bessel_j1_stub 分发表

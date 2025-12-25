@@ -1,0 +1,10 @@
+- **文件用途**：定义了一个 `TransposeType` 枚举，用于在不同的 BLAS/LAPACK 库之间进行接口转换
+- **枚举定义**：包含三种矩阵转置类型：
+  - `NoTranspose` - 不转置
+  - `Transpose` - 普通转置
+  - `ConjTranspose` - 共轭转置
+- **转换函数**：`to_blas()` 函数将 `TransposeType` 枚举值转换为 BLAS/LAPACK 格式的字符表示：
+  - `NoTranspose` → `'N'`
+  - `Transpose` → `'T'`
+  - `ConjTranspose` → `'C'`
+- **位置**：属于 `at::native` 命名空间，为线性代数操作提供统一的接口抽象

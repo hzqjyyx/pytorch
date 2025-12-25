@@ -1,0 +1,107 @@
+--------------------------------
+maximum_kernel_cuda
+来源: aten/src/ATen/native/cuda/MaxMinElementwiseKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    maximum_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    match iter.dtype():
+        ScalarType::Bool:
+            opmath_symmetric_gpu_kernel_with_scalars<bool>(
+                iter, λ(a, b) -> a || b
+            )
+        
+        IntegralTypes (int8, int16, int32, int64, uint8):
+            opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
+                iter, λ(a, b) -> ::max(a, b)
+            )
+        
+        FloatingTypes (float, double, half, bfloat16):
+            opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
+                iter, λ(a, b) -> 
+                    if a != a: return a      # a是NaN
+                    elif b != b: return b    # b是NaN
+                    else: return ::max(a, b)
+            )
+
+【备注】
+    - NaN传播: 浮点类型优先返回NaN值
+    - Bool类型: maximum等价于逻辑OR
+
+--------------------------------
+minimum_kernel_cuda
+来源: aten/src/ATen/native/cuda/MaxMinElementwiseKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    minimum_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    match iter.dtype():
+        ScalarType::Bool:
+            opmath_symmetric_gpu_kernel_with_scalars<bool>(
+                iter, λ(a, b) -> a && b
+            )
+        
+        IntegralTypes (int8, int16, int32, int64, uint8):
+            opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
+                iter, λ(a, b) -> ::min(a, b)
+            )
+        
+        FloatingTypes (float, double, half, bfloat16):
+            opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
+                iter, λ(a, b) -> 
+                    if a != a: return a      # a是NaN
+                    elif b != b: return b    # b是NaN
+                    else: return ::min(a, b)
+            )
+
+【备注】
+    - NaN传播: 浮点类型优先返回NaN值
+    - Bool类型: minimum等价于逻辑AND
+
+--------------------------------
+fmax_kernel_cuda
+来源: aten/src/ATen/native/cuda/MaxMinElementwiseKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    fmax_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    if isFloatingType(iter.common_dtype()):
+        opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
+            iter, λ(a, b) -> ::fmax(a, b)
+        )
+    else:
+        maximum_kernel_cuda(iter)
+
+【备注】
+    - ::fmax: C标准库函数，NaN处理不同于::max (返回非NaN值)
+    - 非浮点类型回退到maximum_kernel_cuda
+
+--------------------------------
+fmin_kernel_cuda
+来源: aten/src/ATen/native/cuda/MaxMinElementwiseKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    fmin_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    if isFloatingType(iter.common_dtype()):
+        opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
+            iter, λ(a, b) -> ::fmin(a, b)
+        )
+    else:
+        minimum_kernel_cuda(iter)
+
+【备注】
+    - ::fmin: C标准库函数，NaN处理不同于::min (返回非NaN值)
+    - 非浮点类型回退到minimum_kernel_cuda

@@ -1,0 +1,9 @@
+- **文件用途**: 为 CPU 环境提供复合随机访问器的实现
+- **主要组件**:
+  - `TupleInfoCPU`: 包装 std::tuple 相关操作，提供 `tuple` 类型别名和 `tie` 方法
+  - `CompositeRandomAccessorCPU`: 类型别名，基于 `CompositeRandomAccessor` 模板，用 `TupleInfoCPU` 作为策略类
+- **辅助函数**:
+  - `swap()`: 交换两个 `references_holder` 对象的数据
+  - `get()`: 从 `references_holder` 中获取指定位置的元素，支持编译期索引
+- **设计模式**: 策略模式 - 通过 `TupleInfoCPU` 抽象化不同平台对元组的处理差异
+- **依赖**: 继承自 `CompositeRandomAccessorCommon.h` 中定义的基础结构

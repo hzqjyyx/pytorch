@@ -1,0 +1,347 @@
+--------------------------------
+常量定义
+来源: aten/src/ATen/native/cuda/MultiTensorApply.cuh
+--------------------------------
+
+kILP = 4                    # Instruction Level Parallelism，向量化加载粒度
+kChunkSize = 65536          # 每个chunk处理的元素数
+kBlockSize = 512            # 每个CUDA block的线程数
+
+# TensorListMetadata大小限制（必须 < 4KB，CUDA kernel参数限制）
+depth_to_max_tensors = [110, 64, 48, 36, 30]              # depth 1~5
+depth_to_max_blocks = [320, 320, 320, 320, 320]
+depth_to_max_tensors_scalarlist = [96, 64, 48, 36, 30]
+depth_to_max_tensors_scalarlist_of_complex_double = [72, 60]  # depth 1~2
+
+
+--------------------------------
+辅助函数
+来源: aten/src/ATen/native/cuda/MultiTensorApply.cuh
+--------------------------------
+
+【函数】
+    @device
+    is_aligned(p: T*) -> bool
+        用途: 检查指针是否按 kILP*sizeof(T) 对齐
+
+    @device
+    load_store(dst: T*, src: T*, dst_offset: int64, src_offset: int64)
+        用途: 向量化加载/存储，一次处理 kILP 个元素
+        实现: ((aligned_vector<T, kILP>*)dst)[dst_offset] = ((aligned_vector<T, kILP>*)src)[src_offset]
+
+
+--------------------------------
+TensorListMetadata<n>
+来源: aten/src/ATen/native/cuda/MultiTensorApply.cuh
+--------------------------------
+
+【状态】
+    addresses[n][max_tensors]: void*     # n个tensor列表的数据指针
+    numel_for_tensor[max_tensors]: int64 # 每个tensor的元素数
+    block_to_tensor[max_blocks]: uchar   # block -> tensor索引映射
+    block_to_chunk[max_blocks]: int      # block -> chunk索引映射
+    start_tensor_this_launch: int        # 本次kernel启动的起始tensor索引
+
+【约束】
+    max_tensors = depth_to_max_tensors[n-1]
+    max_blocks = depth_to_max_blocks[n-1]
+
+
+--------------------------------
+TensorListScalarListMetadata<scalar_vals_t, n>
+来源: aten/src/ATen/native/cuda/MultiTensorApply.cuh
+--------------------------------
+
+【状态】
+    addresses[n][max_tensors]: void*         # n个tensor列表的数据指针
+    numel_for_tensor[max_tensors]: int64     # 每个tensor的元素数
+    scalar_vals[max_tensors]: scalar_vals_t  # 每个tensor对应的标量值
+    block_to_tensor[max_blocks]: uchar       # block -> tensor索引映射
+    block_to_chunk[max_blocks]: int          # block -> chunk索引映射
+
+【约束】
+    max_tensors = depth_to_max_tensors_scalarlist[n-1]
+    max_blocks = depth_to_max_blocks[n-1]
+
+【特化】
+    scalar_vals_t = c10::complex<double> 且 n in [1,2]:
+        max_tensors = depth_to_max_tensors_scalarlist_of_complex_double[n-1]
+
+
+--------------------------------
+FusedOptimizerTensorListMetadata<n>
+来源: aten/src/ATen/native/cuda/MultiTensorApply.cuh
+--------------------------------
+
+【状态】
+    addresses[n][max_tensors]: void*              # n个tensor列表的数据指针
+    numel_for_tensor[max_tensors]: int64          # 每个tensor的元素数
+    state_steps_addresses[max_tensors]: void*     # 每个tensor的step计数器指针
+    block_to_tensor[max_blocks]: uchar            # block -> tensor索引映射
+    block_to_chunk[max_blocks]: int               # block -> chunk索引映射
+    start_tensor_this_launch: int                 # 本次kernel启动的起始tensor索引
+
+【约束】
+    max_tensors = depth_to_max_tensors[n-1]
+    max_blocks = depth_to_max_blocks[n-1]
+
+
+--------------------------------
+multi_tensor_apply_kernel
+来源: aten/src/ATen/native/cuda/MultiTensorApply.cuh
+--------------------------------
+
+【签名】
+    @device
+    multi_tensor_apply_kernel(
+        tensorListMeta: TensorListMetadata<n> | TensorListScalarListMetadata<scalar_t, n> | FusedOptimizerTensorListMetadata<n>,
+        callable: Callable,
+        args: ...
+    )
+
+【算法】
+    callable(kChunkSize, tensorListMeta, args...)
+
+【备注】
+    - 实际计算由callable执行，kernel只负责传递元数据
+    - C10_LAUNCH_BOUNDS_1(kBlockSize)优化
+
+
+--------------------------------
+multi_tensor_apply (带标量列表版本)
+来源: aten/src/ATen/native/cuda/MultiTensorApply.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    multi_tensor_apply<depth, scalar_T, T, ...ArgTypes>(
+        tensor_lists: vector<vector<Tensor>>[depth],  # depth个tensor列表，每个列表n_tensors个tensor
+        scalars: ArrayRef<Scalar>[n_tensors],         # 每个tensor对应一个标量
+        callable: T,
+        args: ArgTypes...
+    )
+
+    约束:
+    - tensor_lists.size() == depth
+    - 所有列表中tensor数量相同
+
+【算法】
+    # 初始化
+    n_tensors = tensor_lists[0].size()
+    tensorListMeta = TensorListScalarListMetadata<opmath_t, depth>()
+    loc_block_info = 0
+    loc_tensor_info = 0
+
+    # 遍历所有tensor
+    for t in range(n_tensors):
+        if tensor_lists[0][t].numel() == 0:
+            continue  # 跳过空tensor
+
+        # 填充元数据
+        tensorListMeta.scalar_vals[loc_tensor_info] = scalars[t].to<scalar_T>()
+        tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][t].numel()
+        for d in range(depth):
+            tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].data_ptr()
+        loc_tensor_info++
+
+        # 分块处理当前tensor
+        numel = tensor_lists[0][t].numel()
+        chunks = ceil(numel / kChunkSize)
+        for chunk in range(chunks):
+            tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1
+            tensorListMeta.block_to_chunk[loc_block_info] = chunk
+            loc_block_info++
+
+            # 检查是否需要启动kernel
+            tensors_full = (loc_tensor_info == max_tensors and chunk == chunks - 1)
+            blocks_full = (loc_block_info == max_blocks)
+
+            if tensors_full or blocks_full:
+                # 启动kernel
+                multi_tensor_apply_kernel<<<loc_block_info, kBlockSize, 0, getCurrentCUDAStream()>>>(
+                    tensorListMeta, callable, args...
+                )
+
+                # 重置元数据
+                loc_block_info = 0
+                if chunk == chunks - 1:
+                    loc_tensor_info = 0  # 所有chunk已处理
+                else:
+                    # block满但tensor未处理完，复制当前tensor到位置0
+                    tensorListMeta.numel_for_tensor[0] = tensorListMeta.numel_for_tensor[loc_tensor_info - 1]
+                    tensorListMeta.scalar_vals[0] = tensorListMeta.scalar_vals[loc_tensor_info - 1]
+                    for d in range(depth):
+                        tensorListMeta.addresses[d][0] = tensorListMeta.addresses[d][loc_tensor_info - 1]
+                    loc_tensor_info = 1
+
+    # 处理剩余工作
+    if loc_block_info != 0:
+        multi_tensor_apply_kernel<<<loc_block_info, kBlockSize, 0, getCurrentCUDAStream()>>>(
+            tensorListMeta, callable, args...
+        )
+
+【并行模式】
+    grid: (loc_block_info,)
+    block: (kBlockSize,)
+
+【备注】
+    - 水平融合: 将多个tensor的操作合并到少量kernel启动
+    - 分块策略: 每个tensor按 kChunkSize 分块，每个block处理一个chunk
+    - 启动条件: tensors满 或 blocks满
+
+
+--------------------------------
+multi_tensor_apply (纯tensor列表版本)
+来源: aten/src/ATen/native/cuda/MultiTensorApply.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    multi_tensor_apply<depth, T, ...ArgTypes>(
+        tensor_lists: vector<vector<Tensor>>[depth],
+        callable: T,
+        args: ArgTypes...
+    )
+
+    约束:
+    - tensor_lists.size() == depth
+
+【算法】
+    # 初始化
+    n_tensors = tensor_lists[0].size()
+    tensorListMeta = TensorListMetadata<depth>()
+    tensorListMeta.start_tensor_this_launch = 0
+    loc_block_info = 0
+    loc_tensor_info = 0
+    processed = 0
+
+    # 遍历所有tensor
+    for t in range(n_tensors):
+        if tensor_lists[0][t].numel() == 0:
+            continue
+        processed++
+
+        # 填充元数据
+        tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][t].numel()
+        for d in range(depth):
+            tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].data_ptr()
+        loc_tensor_info++
+
+        # 分块处理
+        numel = tensor_lists[0][t].numel()
+        chunks = ceil(numel / kChunkSize)
+        for chunk in range(chunks):
+            tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1
+            tensorListMeta.block_to_chunk[loc_block_info] = chunk
+            loc_block_info++
+
+            tensors_full = (loc_tensor_info == max_tensors and chunk == chunks - 1)
+            blocks_full = (loc_block_info == max_blocks)
+
+            if tensors_full or blocks_full:
+                multi_tensor_apply_kernel<<<loc_block_info, kBlockSize, 0, getCurrentCUDAStream()>>>(
+                    tensorListMeta, callable, args...
+                )
+
+                loc_block_info = 0
+                if chunk == chunks - 1:
+                    loc_tensor_info = 0
+                    tensorListMeta.start_tensor_this_launch = processed
+                else:
+                    tensorListMeta.numel_for_tensor[0] = tensorListMeta.numel_for_tensor[loc_tensor_info - 1]
+                    for d in range(depth):
+                        tensorListMeta.addresses[d][0] = tensorListMeta.addresses[d][loc_tensor_info - 1]
+                    loc_tensor_info = 1
+                    tensorListMeta.start_tensor_this_launch = processed - 1
+
+    # 处理剩余工作
+    if loc_block_info != 0:
+        multi_tensor_apply_kernel<<<loc_block_info, kBlockSize, 0, getCurrentCUDAStream()>>>(
+            tensorListMeta, callable, args...
+        )
+
+【并行模式】
+    grid: (loc_block_info,)
+    block: (kBlockSize,)
+
+【备注】
+    - 与标量列表版本类似，但不包含scalar_vals
+    - start_tensor_this_launch: 跟踪已处理的tensor数量
+
+
+--------------------------------
+multi_tensor_apply_for_fused_optimizer
+来源: aten/src/ATen/native/cuda/MultiTensorApply.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    multi_tensor_apply_for_fused_optimizer<depth, T, ...ArgTypes>(
+        tensor_lists: vector<vector<Tensor>>[depth],
+        state_steps: TensorList[n_tensors],           # 每个tensor的step计数器
+        callable: T,
+        args: ArgTypes...
+    )
+
+    约束:
+    - tensor_lists.size() == depth
+    - state_steps.size() == tensor_lists[0].size()
+
+【算法】
+    # 初始化
+    num_tensors = tensor_lists[0].size()
+    tensorListMeta = FusedOptimizerTensorListMetadata<depth>()
+    loc_block_info = 0
+    loc_tensor_info = 0
+
+    # 遍历所有tensor
+    for tensor_index in range(num_tensors):
+        if tensor_lists[0][tensor_index].numel() == 0:
+            continue
+
+        # 填充元数据（包含state_steps）
+        tensorListMeta.state_steps_addresses[loc_tensor_info] = state_steps[tensor_index].data_ptr()
+        tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][tensor_index].numel()
+        for d in range(depth):
+            tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][tensor_index].data_ptr()
+        loc_tensor_info++
+
+        # 分块处理
+        numel = tensor_lists[0][tensor_index].numel()
+        chunks = ceil(numel / kChunkSize)
+        for chunk in range(chunks):
+            tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1
+            tensorListMeta.block_to_chunk[loc_block_info] = chunk
+            loc_block_info++
+
+            tensor_full = (loc_tensor_info == max_tensors and chunk == chunks - 1)
+            blocks_full = (loc_block_info == max_blocks)
+
+            if tensor_full or blocks_full:
+                multi_tensor_apply_kernel<<<loc_block_info, kBlockSize, 0, getCurrentCUDAStream()>>>(
+                    tensorListMeta, callable, args...
+                )
+
+                loc_block_info = 0
+                if chunk == chunks - 1:
+                    loc_tensor_info = 0
+                else:
+                    tensorListMeta.numel_for_tensor[0] = tensorListMeta.numel_for_tensor[loc_tensor_info - 1]
+                    tensorListMeta.state_steps_addresses[0] = tensorListMeta.state_steps_addresses[loc_tensor_info - 1]
+                    for d in range(depth):
+                        tensorListMeta.addresses[d][0] = tensorListMeta.addresses[d][loc_tensor_info - 1]
+                    loc_tensor_info = 1
+
+    # 处理剩余工作
+    if loc_block_info != 0:
+        multi_tensor_apply_kernel<<<loc_block_info, kBlockSize, 0, getCurrentCUDAStream()>>>(
+            tensorListMeta, callable, args...
+        )
+
+【并行模式】
+    grid: (loc_block_info,)
+    block: (kBlockSize,)
+
+【备注】
+    - 专为融合优化器设计（如 FusedAdam, FusedSGD）
+    - state_steps_addresses: 存储每个参数的step计数器指针

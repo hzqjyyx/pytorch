@@ -1,0 +1,191 @@
+--------------------------------
+fused_adam_utils (Adam/AdamW 优化器核心计算)
+来源: aten/src/ATen/native/cuda/fused_adam_utils.cuh
+--------------------------------
+
+【常量定义】
+    ADAM_MODE::ORIGINAL = 0    # 原始 Adam
+    ADAM_MODE::ADAMW = 1       # AdamW (解耦权重衰减)
+    
+    kParamIdx = 0              # 参数索引
+    kGradIdx = 1               # 梯度索引
+    kExpAvgIdx = 2             # 一阶动量索引
+    kExpAvgSqIdx = 3           # 二阶动量索引
+    kMaxExpAvgSqIdx = 4        # AMSGrad 最大二阶动量索引
+
+--------------------------------
+adam_math (单个参数的 Adam 更新)
+来源: aten/src/ATen/native/cuda/fused_adam_utils.cuh
+--------------------------------
+
+【签名】
+    @device
+    adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
+        r_args: Array[depth][kILP],           # 寄存器数组，存储 [param, grad, exp_avg, exp_avg_sq, (max_exp_avg_sq)]
+        lr: float,                            # 学习率
+        beta1: float,                         # 一阶动量系数
+        beta2: float,                         # 二阶动量系数
+        weight_decay: float,                  # 权重衰减
+        eps: float,                           # 数值稳定性常数
+        maximize: bool,                       # 是否最大化目标
+        grad_scale_ptr: float*,               # 梯度缩放因子 (AMP)
+        found_inf_ptr: float*,                # 无穷大检测标志
+        bias_correction1: opmath_t,           # 一阶偏差修正
+        bias_correction2_sqrt: opmath_t       # 二阶偏差修正平方根
+    )
+    
+    约束:
+    - depth == 4 (Adam) 或 5 (AMSGrad)
+    - r_args[0] = param, r_args[1] = grad, r_args[2] = exp_avg, r_args[3] = exp_avg_sq
+    - 若 amsgrad=true, r_args[4] = max_exp_avg_sq
+
+【算法】
+    # ILP 展开，同时处理 kILP 个元素
+    for ii in range(kILP):
+        # Step 1: 加载并转换为计算类型
+        param = opmath_t(r_args[kParamIdx][ii])
+        grad = opmath_t(r_args[kGradIdx][ii])
+        
+        # Step 2: 梯度反缩放 (AMP)
+        if grad_scale_ptr:
+            grad /= grad_scale_ptr[0]
+        grad_to_store = grad
+        
+        # Step 3: 最大化目标 (梯度取反)
+        if maximize:
+            grad = -grad
+        
+        # Step 4: 加载动量
+        exp_avg = opmath_t(r_args[kExpAvgIdx][ii])
+        exp_avg_sq = opmath_t(r_args[kExpAvgSqIdx][ii])
+        if amsgrad:
+            max_exp_avg_sq = opmath_t(r_args[kMaxExpAvgSqIdx][ii])
+        
+        # Step 5: 权重衰减
+        if weight_decay != 0:
+            if adam_mode == ADAM_MODE::ORIGINAL:
+                grad += param * weight_decay              # L2 正则化
+            else if adam_mode == ADAM_MODE::ADAMW:
+                param -= lr * weight_decay * param        # 解耦权重衰减
+        
+        # Step 6: 更新一阶和二阶动量
+        exp_avg = beta1 * exp_avg + (1 - beta1) * grad
+        exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad
+        
+        # Step 7: 计算步长和分母
+        step_size = lr / bias_correction1
+        if amsgrad:
+            max_exp_avg_sq = max(max_exp_avg_sq, exp_avg_sq)
+            denom = (sqrt(max_exp_avg_sq) / bias_correction2_sqrt) + eps
+        else:
+            denom = (sqrt(exp_avg_sq) / bias_correction2_sqrt) + eps
+        
+        # Step 8: 更新参数
+        param -= step_size * exp_avg / denom
+        
+        # Step 9: 写回结果
+        r_args[kParamIdx][ii] = param
+        if grad_scale_ptr:
+            r_args[kGradIdx][ii] = grad_to_store          # 仅在 AMP 模式写回梯度
+        r_args[kExpAvgIdx][ii] = exp_avg
+        r_args[kExpAvgSqIdx][ii] = exp_avg_sq
+        if amsgrad:
+            r_args[kMaxExpAvgSqIdx][ii] = max_exp_avg_sq
+
+【并行模式】
+    elementwise，通过 kILP 实现指令级并行
+
+【备注】
+    - opmath_t: 计算类型 (FP16/BF16 -> FP32)
+    - kILP: 指令级并行展开因子，定义在 ForeachFunctors.cuh
+    - 条件梯度写回: 见 [note: Conditional Gradient Store when optimizer.step is called by GradScaler]
+
+--------------------------------
+FusedAdamMathFunctor (多 Tensor Adam 融合 Kernel)
+来源: aten/src/ATen/native/cuda/fused_adam_utils.cuh
+--------------------------------
+
+【签名】
+    @device
+    FusedAdamMathFunctor<scalar_type, depth, adam_mode, amsgrad>::operator()(
+        chunk_size: int,
+        tl: FusedOptimizerTensorListMetadata<depth>,    # 多 Tensor 元数据
+        lr_ptr: float*,                                  # 可选的 Tensor 形式学习率
+        lr: float,                                       # 标量学习率
+        beta1: float,
+        beta2: float,
+        weight_decay: float,
+        eps: float,
+        maximize: bool,
+        grad_scale_ptr: float*,
+        found_inf_ptr: float*
+    )
+    
+    约束:
+    - depth == 4 (Adam) 或 5 (AMSGrad)
+
+【算法】
+    # Step 0: 获取当前 block 处理的 Tensor 和 chunk
+    tensor_loc = tl.block_to_tensor[blockIdx.x]
+    chunk_idx = tl.block_to_chunk[blockIdx.x]
+    lr_double = lr_ptr ? lr_ptr[0] : lr
+    
+    # Step 1: 检查无穷大标志 (AMP)
+    if found_inf_ptr and found_inf_ptr[0] == 1:
+        return
+    
+    # Step 2: 计算偏差修正
+    step_count = tl.state_steps_addresses[tensor_loc][0]
+    bias_correction1 = 1 - pow(beta1, step_count)
+    bias_correction2 = 1 - pow(beta2, step_count)
+    bias_correction2_sqrt = sqrt(bias_correction2)
+    
+    # Step 3: 初始化指针和寄存器
+    args: Array[depth] of scalar_type*
+    r_args: Array[depth][kILP]
+    n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+    all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+    
+    # Step 4: 向量化路径 (对齐且整除 kILP)
+    if (n % kILP == 0) and (chunk_size % kILP == 0) and all_aligned:
+        for i_start in parallel_range(0, n, kILP, stride=blockDim.x):
+            # 加载 kILP 个元素到寄存器
+            for i in range(depth):
+                load_store(r_args[i], args[i], 0, i_start)
+            
+            # 调用核心计算
+            adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
+                r_args, lr_double, beta1, beta2, weight_decay, eps, maximize,
+                grad_scale_ptr, found_inf_ptr, bias_correction1, bias_correction2_sqrt)
+            
+            # 写回结果 (梯度仅在 grad_scale_ptr 存在时写回)
+            for i in range(depth):
+                if i != kGradIdx or grad_scale_ptr:
+                    load_store(args[i], r_args[i], i_start, 0)
+    
+    # Step 5: 标量路径 (未对齐或不整除)
+    else:
+        for i_start in range(0, n, blockDim.x * kILP):
+            load_args<depth>(r_args, args, i_start, chunk_size, n)
+            
+            adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
+                r_args, lr_double, beta1, beta2, weight_decay, eps, maximize,
+                grad_scale_ptr, found_inf_ptr, bias_correction1, bias_correction2_sqrt)
+            
+            for i in range(depth):
+                if i != kGradIdx or grad_scale_ptr:
+                    store_args(args[i], r_args[i], i_start, chunk_size, n)
+
+【并行模式】
+    grid: (total_blocks)    # 每个 block 处理一个 (tensor, chunk) 对
+    block: (256)            # 典型值
+    
+    优化:
+    - 向量化加载/存储 (128-bit)
+    - ILP 展开 (kILP=4)
+    - 条件梯度写回 (AMP)
+
+【备注】
+    - tl: FusedOptimizerTensorListMetadata，管理多 Tensor 的地址和元数据
+    - init_args/load_store/load_args/store_args: 定义在 ForeachFunctors.cuh
+    - 条件梯度写回: 仅在 grad_scale_ptr != nullptr 时写回梯度，避免 AMP 中的设备同步

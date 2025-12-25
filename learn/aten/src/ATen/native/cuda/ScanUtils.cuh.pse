@@ -1,0 +1,571 @@
+--------------------------------
+ceil_div
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    ceil_div(n: integer, m: integer) -> integer
+
+【算法】
+    return (n + m - 1) / m
+
+--------------------------------
+get_log_num_threads_x_inner_scan
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    get_log_num_threads_x_inner_scan(num_rows: integer, row_size: integer) -> integer
+
+【算法】
+    # 计算需要的线程数（取log2）
+    log_num_threads_x = 0
+    log_num_threads_y = 0
+    
+    while (1 << log_num_threads_x) < row_size:
+        log_num_threads_x += 1
+    
+    while (1 << log_num_threads_y) < num_rows:
+        log_num_threads_y += 1
+    
+    # 保持 x/y 线程比例与 row_size/num_rows 比例相近
+    # 总线程数约为 512 (log2(512) = 9)
+    diff = log_num_threads_x - log_num_threads_y
+    log_num_threads_x = (9 + diff) / 2
+    
+    # 限制范围: [4, 9] (即线程数范围 [16, 512])
+    return clamp(log_num_threads_x, 4, 9)
+
+--------------------------------
+binary_op_update
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    @device
+    binary_op_update(
+        lhs: scalar_t, 
+        rhs: scalar_t&, 
+        lhs_idx: idx_t, 
+        rhs_idx: idx_t&, 
+        binary_op: BinaryOperation
+    )
+
+【算法】
+    # 使用 binary_op 比较并更新 rhs 和 rhs_idx
+    # NaN 处理: NaN 总是被选中，非NaN 用 binary_op 比较
+    if !isnan(rhs) and (isnan(lhs) or !binary_op(rhs, lhs)):
+        rhs = lhs
+        rhs_idx = lhs_idx
+
+【备注】
+    - 用于同时追踪值和索引的扫描操作
+    - NaN 语义: NaN 优先级最高
+
+--------------------------------
+tensor_kernel_scan_innermost_dim_with_indices
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    @device
+    tensor_kernel_scan_innermost_dim_with_indices(
+        self_: Tensor[num_rows, row_size, scalar_t],
+        values_: Tensor[num_rows, row_size, scalar_t],      # output
+        indices_: Tensor[num_rows, row_size, int64],        # output
+        num_rows: int,
+        row_size: int,
+        num_threads: uint32 = 512,
+        log_num_threads_x: uint32,
+        init: scalar_t,
+        binary_op: BinaryFunction
+    )
+
+【算法】
+    # 将输入视为 (num_rows, row_size) 二维矩阵
+    # 沿最内层维度 (row_size) 进行 inclusive scan
+    
+    # Shared memory 布局
+    vbuf = shared_memory[0 : num_threads*2]              # 值缓冲
+    ibuf = shared_memory[num_threads*2 : num_threads*4]  # 索引缓冲
+    
+    num_threads_x = 1 << log_num_threads_x
+    row_buf = vbuf[2 * num_threads_x * threadIdx.y : ...]
+    row_idx_buf = ibuf[2 * num_threads_x * threadIdx.y : ...]
+    
+    for block_row in range(blockIdx.x * blockDim.y, num_rows, blockDim.y * gridDim.x):
+        row = block_row + threadIdx.y
+        if row >= num_rows:
+            continue
+        
+        block_total = init
+        block_idx_final = 0
+        
+        # 每次处理 2*num_threads_x 个元素
+        for block_col in range(0, row_size, 2 * num_threads_x):
+            col1 = block_col + threadIdx.x
+            col2 = block_col + num_threads_x + threadIdx.x
+            
+            # Step 1: 加载数据到 shared memory (每线程2个值)
+            if col1 < row_size:
+                row_buf[threadIdx.x] = self_[row, col1]
+                row_idx_buf[threadIdx.x] = col1
+            else:
+                row_buf[threadIdx.x] = init
+            
+            if col2 < row_size:
+                row_buf[num_threads_x + threadIdx.x] = self_[row, col2]
+                row_idx_buf[num_threads_x + threadIdx.x] = col2
+            else:
+                row_buf[num_threads_x + threadIdx.x] = init
+            
+            # Step 2: 加上前面所有块的累积值
+            if threadIdx.x == 0:
+                binary_op_update(block_total, row_buf[0], block_idx_final, row_idx_buf[0], binary_op)
+            
+            __syncthreads()
+            
+            # Step 3: Sklansky 并行前缀扫描
+            for s in [1, 2, 4, ..., num_threads_x]:
+                a = (threadIdx.x / s) * (2 * s) + s
+                ti = a + (threadIdx.x % s)
+                si = a - 1
+                binary_op_update(row_buf[si], row_buf[ti], row_idx_buf[si], row_idx_buf[ti], binary_op)
+                __syncthreads()
+            
+            # Step 4: 写回输出
+            if col1 < row_size:
+                values_[row, col1] = row_buf[threadIdx.x]
+                indices_[row, col1] = row_idx_buf[threadIdx.x]
+            
+            if col2 < row_size:
+                values_[row, col2] = row_buf[num_threads_x + threadIdx.x]
+                indices_[row, col2] = row_idx_buf[num_threads_x + threadIdx.x]
+            
+            # 保存当前块的累积结果
+            block_total = row_buf[2 * num_threads_x - 1]
+            block_idx_final = row_idx_buf[2 * num_threads_x - 1]
+            __syncthreads()
+
+【并行模式】
+    grid: (ceil(num_rows / blockDim.y), 1)
+    block: (num_threads_x, num_threads_y)
+    shared_memory: num_threads * 2 * (sizeof(scalar_t) + sizeof(int64))
+    
+    - 每个 threadIdx.y 处理一行
+    - 每个 threadIdx.x 在 Sklansky 扫描中并行
+    - 使用 shared memory 暂存每块的中间结果
+
+【备注】
+    - Sklansky 方法: 单遍并行前缀扫描，参考论文
+      https://research.nvidia.com/publication/single-pass-parallel-prefix-scan-decoupled-look-back
+
+--------------------------------
+tensor_kernel_scan_outer_dim_with_indices
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    @device
+    tensor_kernel_scan_outer_dim_with_indices(
+        self_: Tensor[num_orows, row_size, num_irows, scalar_t],
+        values_: Tensor[num_orows, row_size, num_irows, scalar_t],   # output
+        indices_: Tensor[num_orows, row_size, num_irows, int64],     # output
+        num_orows: uint32,
+        num_irows: uint32,
+        row_size: uint32,
+        init: scalar_t,
+        binary_op: BinaryFunction
+    )
+
+【算法】
+    # 将输入视为 (num_orows, row_size, num_irows) 三维张量
+    # 沿中间维度 (row_size) 进行 inclusive scan
+    
+    for orow in range(blockIdx.x, num_orows, gridDim.x):
+        for irow in range(blockIdx.y * blockDim.x + threadIdx.x, num_irows, gridDim.y * blockDim.x):
+            
+            out = init
+            out_idx = 0
+            
+            # 顺序扫描 row_size 维度
+            for col in range(row_size):
+                val = self_[orow, col, irow]
+                
+                # 更新累积值和索引
+                if isnan(val) or (!isnan(out) and binary_op(val, out)):
+                    out = val
+                    out_idx = col
+                
+                values_[orow, col, irow] = out
+                indices_[orow, col, irow] = out_idx
+
+【并行模式】
+    grid: (min(maxGridDim, num_orows), min(maxGridDim, ceil(num_irows / block_size)))
+    block: (min(512, num_irows))
+    
+    - 每个线程处理一条 inner row
+    - outer rows 和 inner rows 二维并行
+    - row_size 维度顺序扫描
+
+--------------------------------
+check_fits_in_unsigned
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    check_fits_in_unsigned(val: int64, name: const char*)
+
+【算法】
+    assert val >= 0 and val <= UINT32_MAX, f"{name} must fit in a 32-bit uint32_t value"
+
+--------------------------------
+scan_outer_dim_with_indices
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    scan_outer_dim_with_indices(
+        self: Tensor[*outer, row_size, *inner, scalar_t],
+        values: Tensor[*outer, row_size, *inner, scalar_t],     # output
+        indices: Tensor[*outer, row_size, *inner, int64],       # output
+        dim: int,
+        init: scalar_t,
+        binary_op: BinaryFunction
+    )
+
+【算法】
+    row_size = self.size(dim)
+    num_orows = prod(self.shape[:dim])
+    num_irows = prod(self.shape[dim+1:])
+    
+    check_fits_in_unsigned(num_irows, "num_irows")
+    check_fits_in_unsigned(num_orows, "num_orows")
+    check_fits_in_unsigned(row_size, "row_size")
+    
+    threads = (min(512, num_irows))
+    maxGridDim = getCurrentDeviceProperties()->maxGridSize[1]
+    grid = (min(maxGridDim, num_orows), min(maxGridDim, ceil_div(num_irows, threads.x)))
+    
+    tensor_kernel_scan_outer_dim_with_indices<<<grid, threads>>>(
+        self.data_ptr(), values.data_ptr(), indices.data_ptr(),
+        num_orows, num_irows, row_size, init, binary_op
+    )
+
+【备注】
+    - 将外层维度 (dim之前) 展平为 num_orows
+    - 将内层维度 (dim之后) 展平为 num_irows
+
+--------------------------------
+scan_innermost_dim_with_indices
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    scan_innermost_dim_with_indices(
+        self: Tensor[*outer, row_size, scalar_t],
+        values: Tensor[*outer, row_size, scalar_t],      # output
+        indices: Tensor[*outer, row_size, int64],        # output
+        init: scalar_t,
+        binary_op: BinaryFunction
+    )
+
+【算法】
+    row_size = self.size(-1)
+    num_rows = self.numel() / row_size
+    
+    num_threads = 512
+    log_num_threads_x = get_log_num_threads_x_inner_scan(num_rows, row_size)
+    num_threads_x = 1 << log_num_threads_x
+    num_threads_y = num_threads / num_threads_x
+    
+    threads = (num_threads_x, num_threads_y)
+    grid = (min(maxGridSize[0], ceil_div(num_rows, threads.y)))
+    
+    mem_size = 2 * num_threads * (sizeof(scalar_t) + sizeof(int64))
+    
+    tensor_kernel_scan_innermost_dim_with_indices<<<grid, threads, mem_size>>>(
+        self.data_ptr(), values.data_ptr(), indices.data_ptr(),
+        num_rows, row_size, num_threads, log_num_threads_x, init, binary_op
+    )
+
+【备注】
+    - 将外层维度展平为 num_rows
+
+--------------------------------
+scan_dim_with_indices
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    scan_dim_with_indices(
+        self: Tensor[*D, scalar_t],
+        values: Tensor[*D, scalar_t],      # output
+        indices: Tensor[*D, int64],        # output
+        dim: int64,
+        init: scalar_t,
+        binary_op: BinaryFunction
+    )
+
+【算法】
+    self_ = self.expect_contiguous()
+    assert values.is_contiguous() and indices.is_contiguous()
+    
+    if dim == self.dim() - 1:
+        scan_innermost_dim_with_indices(*self_, values, indices, init, binary_op)
+    else:
+        scan_outer_dim_with_indices(*self_, values, indices, dim, init, binary_op)
+
+【备注】
+    - 根据 dim 位置选择不同的 kernel 实现
+
+--------------------------------
+tensor_kernel_scan_outer_dim
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    @device
+    tensor_kernel_scan_outer_dim(
+        tgt_: Tensor[num_orows, row_size, num_irows, scalar_t],    # output
+        src_: Tensor[num_orows, row_size, num_irows, scalar_t],
+        num_orows: uint32,
+        num_irows: uint32,
+        row_size: uint32,
+        init: scalar_t,
+        binary_op: BinaryOp
+    )
+
+【算法】
+    for orow in range(blockIdx.x, num_orows, gridDim.x):
+        for irow in range(blockIdx.y * blockDim.x + threadIdx.x, num_irows, gridDim.y * blockDim.x):
+            
+            acc = init
+            
+            for col in range(row_size):
+                acc = binary_op(acc, src_[orow, col, irow])
+                tgt_[orow, col, irow] = acc
+
+【并行模式】
+    grid: (min(maxGridDim, num_orows), min(maxGridDim, ceil(num_irows / block_size)))
+    block: (min(512, num_irows))
+    
+    - 每个线程处理一条 inner row
+    - row_size 维度顺序扫描
+
+--------------------------------
+tensor_kernel_scan_innermost_dim_impl
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    @device
+    tensor_kernel_scan_innermost_dim_impl(
+        row_buf: T*,                           # shared memory
+        tgt_: Tensor[num_rows, row_size, T],   # output
+        src_: Tensor[num_rows, row_size, T],
+        num_rows: uint32,
+        row_size: uint32,
+        log_num_threads_x: uint32,
+        init: T,
+        binary_op: BinaryFunction
+    )
+
+【算法】
+    num_threads_x = 1 << log_num_threads_x
+    
+    for block_row in range(blockIdx.x * blockDim.y, num_rows, blockDim.y * gridDim.x):
+        row = block_row + threadIdx.y
+        if row >= num_rows:
+            continue
+        
+        block_total = init
+        
+        # 每次处理 2*num_threads_x 个元素
+        for block_col in range(0, row_size, 2 * num_threads_x):
+            col1 = block_col + threadIdx.x
+            col2 = block_col + num_threads_x + threadIdx.x
+            
+            # Step 1: 加载到 shared memory
+            if col1 < row_size:
+                row_buf[threadIdx.x] = src_[row, col1]
+            else:
+                row_buf[threadIdx.x] = init
+            
+            if col2 < row_size:
+                row_buf[num_threads_x + threadIdx.x] = src_[row, col2]
+            else:
+                row_buf[num_threads_x + threadIdx.x] = init
+            
+            # Step 2: 加上前面块的累积
+            if threadIdx.x == 0:
+                row_buf[0] = binary_op(row_buf[0], block_total)
+            
+            __syncthreads()
+            
+            # Step 3: Sklansky 并行前缀扫描
+            for m in range(log_num_threads_x + 1):
+                s = 1 << m
+                a = ((threadIdx.x >> m) << (m + 1)) | s
+                ti = a + (threadIdx.x % s)
+                si = a - 1
+                row_buf[ti] = binary_op(row_buf[ti], row_buf[si])
+                __syncthreads()
+            
+            # Step 4: 写回输出
+            if col1 < row_size:
+                tgt_[row, col1] = row_buf[threadIdx.x]
+            if col2 < row_size:
+                tgt_[row, col2] = row_buf[num_threads_x + threadIdx.x]
+            
+            block_total = row_buf[2 * num_threads_x - 1]
+            __syncthreads()
+
+【并行模式】
+    - 每个 threadIdx.y 处理一行
+    - 每个 threadIdx.x 在 Sklansky 扫描中并行
+
+--------------------------------
+tensor_kernel_scan_innermost_dim
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    @device
+    tensor_kernel_scan_innermost_dim(
+        tgt_: Tensor[num_rows, row_size, T],   # output
+        src_: Tensor[num_rows, row_size, T],
+        num_rows: uint32,
+        row_size: uint32,
+        log_num_threads_x: uint32,
+        init: T,
+        binary_op: BinaryFunction
+    )
+
+【算法】
+    sbuf = shared_memory
+    num_threads_x = 1 << log_num_threads_x
+    row_buf = sbuf[num_threads_x * 2 * threadIdx.y : ...]
+    
+    if num_rows * row_size <= UINT_MAX:
+        tensor_kernel_scan_innermost_dim_impl<T, uint32>(
+            row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op
+        )
+    else:
+        tensor_kernel_scan_innermost_dim_impl<T, size_t>(
+            row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op
+        )
+
+【备注】
+    - 根据总元素数选择索引类型 (uint32 vs size_t)
+
+--------------------------------
+scan_outer_dim
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    scan_outer_dim(
+        self: Tensor[*outer, row_size, *inner, scalar_t],
+        result: Tensor[*outer, row_size, *inner, scalar_t],  # output
+        dim: int,
+        init: scalar_t,
+        binary_op: BinaryFunction
+    )
+
+【算法】
+    row_size = self.size(dim)
+    num_orows = prod(self.shape[:dim])
+    num_irows = prod(self.shape[dim+1:])
+    
+    threads = (min(512, num_irows))
+    maxGridDim = getCurrentDeviceProperties()->maxGridSize[1]
+    grid = (min(maxGridDim, num_orows), min(maxGridDim, ceil_div(num_irows, threads.x)))
+    
+    check_fits_in_unsigned(num_irows, "num_irows")
+    check_fits_in_unsigned(num_orows, "num_orows")
+    check_fits_in_unsigned(row_size, "row_size")
+    
+    tensor_kernel_scan_outer_dim<<<grid, threads>>>(
+        result.data_ptr(), self.data_ptr(),
+        num_orows, num_irows, row_size, init, binary_op
+    )
+
+--------------------------------
+scan_innermost_dim
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    scan_innermost_dim(
+        self: Tensor[*outer, row_size, scalar_t],
+        result: Tensor[*outer, row_size, scalar_t],  # output
+        init: scalar_t,
+        binary_op: BinaryFunction
+    )
+
+【算法】
+    row_size = self.size(-1)
+    num_rows = self.numel() / row_size
+    
+    num_threads = 512
+    log_num_threads_x = get_log_num_threads_x_inner_scan(num_rows, row_size)
+    num_threads_x = 1 << log_num_threads_x
+    num_threads_y = num_threads / num_threads_x
+    
+    threads = (num_threads_x, num_threads_y)
+    maxGridDim = getCurrentDeviceProperties()->maxGridSize[0]
+    grid = (min(maxGridDim, ceil_div(num_rows, threads.y)))
+    
+    check_fits_in_unsigned(num_rows, "Number of rows (self.numel()/self.size(self.dim()-1))")
+    check_fits_in_unsigned(row_size, "row_size")
+    
+    tensor_kernel_scan_innermost_dim<<<grid, threads, num_threads * 2 * sizeof(scalar_t)>>>(
+        result.data_ptr(), self.data_ptr(),
+        num_rows, row_size, log_num_threads_x, init, binary_op
+    )
+
+--------------------------------
+scan_dim
+来源: aten/src/ATen/native/cuda/ScanUtils.cuh
+--------------------------------
+
+【签名】
+    scan_dim(
+        self: Tensor[*D, scalar_t],
+        result: Tensor[*D, scalar_t],      # output
+        dim: int64,
+        init: scalar_t,
+        binary_op: BinaryFunction
+    )
+
+【算法】
+    self_ = self.expect_contiguous()
+    assert result.is_contiguous()
+    
+    # 特殊情况: 扫描维度就是唯一维度
+    if self.numel() == self.size(dim):
+        if binary_op == std::plus and deterministicAlgorithms() and (self.is_floating_point() or self.is_complex()):
+            # 确定性加法扫描
+            if CUDA_VERSION > 11040 or USE_ROCM:
+                cuda::cub::inclusive_deterministic_scan(self_.data_ptr(), result.data_ptr(), binary_op, self.numel())
+            else:
+                alert("cumsum_cuda_kernel not deterministic")
+                cuda::cub::inclusive_scan(self_.data_ptr(), result.data_ptr(), binary_op, self.numel())
+        else:
+            cuda::cub::inclusive_scan(self_.data_ptr(), result.data_ptr(), binary_op, self.numel())
+    
+    elif dim == self.dim() - 1:
+        scan_innermost_dim(*self_, result, init, binary_op)
+    
+    else:
+        scan_outer_dim(*self_, result, dim, init, binary_op)
+
+【备注】
+    - 对于 1D cumsum，优先使用 CuB 库
+    - 确定性算法: CUDA 11.4+ 或 ROCm 支持确定性扫描
+    - 其他情况根据 dim 位置选择 kernel

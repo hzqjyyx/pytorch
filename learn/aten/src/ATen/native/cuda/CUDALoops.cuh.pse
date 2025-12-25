@@ -1,0 +1,471 @@
+--------------------------------
+sum_of_sizes
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    sum_of_sizes(args: ArgsTuple, indices: index_sequence<Is...>) -> int
+        模板参数: args_t (函数参数类型元组)
+
+【算法】
+    if sizeof...(Is) == 0:
+        return 0
+    else:
+        return sum(sizeof(tuple_element<Is, args_t>) for Is in indices)
+
+【备注】
+    编译期计算参数类型大小总和
+
+--------------------------------
+elems_per_thread
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    elems_per_thread() -> int
+        模板参数: io_sizes (输入输出数据大小总和)
+
+【算法】
+    ROCm:
+        if io_sizes == 1: return 16
+        elif io_sizes < 4: return 8
+        else: return 4
+
+    CUDA:
+        if io_sizes == 1: return 16
+        else: return 8
+
+【备注】
+    根据数据大小决定每线程处理元素数，用于向量化加载
+
+--------------------------------
+elementwise_thread_work_size / elementwise_block_work_size
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    elementwise_thread_work_size() -> int = 4
+    elementwise_block_work_size() -> int = 4 * num_threads()
+
+【备注】
+    CUDA特定：线程粒度为4以避免性能退化
+
+--------------------------------
+io_block_work_size
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    io_block_work_size() -> int
+        模板参数: io_sizes
+
+【算法】
+    return num_threads() * elems_per_thread<io_sizes>()
+
+--------------------------------
+input_size (ROCm)
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    input_size(args: ArgsTuple, indices: index_sequence<Is...>) -> int
+
+【算法】
+    if sizeof...(Is) == 0:
+        return 0
+    else:
+        return sizeof(tuple_element<0, args_t>)
+
+【备注】
+    仅ROCm使用，返回第一个参数大小
+
+--------------------------------
+calc_optimal_vec_size (ROCm)
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    calc_optimal_vec_size() -> int
+        模板参数: vec_size (最大向量化大小), io_size (数据大小)
+
+【算法】
+    assert vec_size != 0 and io_size != 0
+
+    if io_size == 1 and vec_size >= 16: return 16
+    elif io_size <= 2 and vec_size >= 8: return 8
+    elif io_size <= 4 and vec_size >= 4: return 4
+    elif vec_size >= 4: return 4
+    elif vec_size >= 2: return 2
+    else: return 1
+
+【备注】
+    ROCm特定：根据数据大小调整向量化长度
+
+--------------------------------
+calc_io_size
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    calc_io_size() -> int
+        模板参数: func_t (kernel函数类型)
+
+【算法】
+    traits = function_traits<func_t>
+    args_t = traits::ArgsTuple
+    output_size = sizeof(traits::result_type)
+
+    ROCm:
+        input_size = size_of_first_arg(args_t)
+        return min(input_size, output_size) if input_size > 0 else output_size
+
+    CUDA:
+        input_size = sum_of_all_args_sizes(args_t)
+        return input_size + output_size
+
+【备注】
+    CUDA按总IO量，ROCm按单输入与输出最小值
+
+--------------------------------
+vectorized_elementwise_kernel (CUDA)
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    @device
+    vectorized_elementwise_kernel(N: int, f: func_t, data: array_t)
+        模板参数: vec_size, func_t, array_t
+
+【算法】
+    traits = function_traits<func_t>
+    io_size = calc_io_size<func_t>()
+    remaining = N - io_block_work_size<io_size>() * blockIdx.x
+
+    if remaining < io_block_work_size<io_size>():
+        # 剩余数据不足一个block，用unroll策略
+        input_calc = TrivialOffsetCalculator<traits::arity>()
+        output_calc = TrivialOffsetCalculator<1>()
+        loader = LoadWithoutCast()
+        storer = StoreWithoutCast()
+        policy = memory::policies::unroll<array_t, ..., elems_per_thread<io_size>()>(
+            data, remaining, input_calc, output_calc, loader, storer)
+        elementwise_kernel_helper(f, policy)
+    else:
+        # 完整block，用向量化加载
+        elementwise_kernel_helper(
+            f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data))
+
+【并行模式】
+    grid: ceil(N / io_block_work_size<io_size>())
+    block: num_threads()
+
+【备注】
+    - vec_size=8仅在sm90/sm100上编译
+    - 剩余块退化为非向量化unroll
+
+--------------------------------
+vectorized_elementwise_kernel (ROCm)
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    @device
+    vectorized_elementwise_kernel(N: int, f: func_t, data: array_t)
+        模板参数: vec_size, func_t, array_t
+
+【算法】
+    traits = function_traits<func_t>
+    io_size = calc_io_size<func_t>()
+    remaining = N - io_block_work_size<io_size>() * blockIdx.x
+
+    if remaining < io_block_work_size<io_size>():
+        # 剩余数据，unroll策略
+        policy = memory::policies::unroll<..., elems_per_thread<io_size>()>(
+            data, remaining, input_calc, output_calc, loader, storer)
+        elementwise_kernel_helper(f, policy)
+    else:
+        # 完整block，根据io_size动态调整向量化长度
+        optimal_vec_size = calc_optimal_vec_size<vec_size, io_size>()
+        elementwise_kernel_helper(
+            f, memory::policies::vectorized<optimal_vec_size, array_t, elems_per_thread<io_size>()>(data))
+
+【备注】
+    ROCm支持vec16，且根据io_size动态选择向量化长度
+
+--------------------------------
+unrolled_elementwise_kernel
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    @device
+    unrolled_elementwise_kernel(
+        N: int, f: func_t, data: array_t,
+        ic: input_calc_t, oc: output_calc_t,
+        l: loader_t, s: storer_t)
+
+【算法】
+    remaining = N - elems_per_thread * num_threads() * blockIdx.x
+    policy = memory::policies::unroll<array_t, ..., elems_per_thread>(
+        data, remaining, ic, oc, l, s)
+    elementwise_kernel_helper(f, policy)
+
+【并行模式】
+    grid: ceil(N / (elems_per_thread * num_threads()))
+    block: num_threads()
+
+【备注】
+    非向量化的展开循环kernel，用于非连续或需要类型转换的情况
+
+--------------------------------
+launch_vectorized_kernel
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    launch_vectorized_kernel(N: int64, f: func_t, data: array_t)
+
+【算法】
+    assert 0 < N <= int32_max
+    io_size = calc_io_size<func_t>()
+    grid = ceil(N / io_block_work_size<io_size>())
+    stream = getCurrentCUDAStream()
+
+    # 决定向量化长度
+    ROCm:
+        vec_size = memory::can_vectorize_up_to<func_t>(data)
+
+    CUDA:
+        max_vec_size = memory::can_vectorize_up_to<func_t>(data)
+        vec_size = min(16 / sizeof(result_type), max_vec_size)
+
+        # sm90/sm100支持vec8，其他架构最多vec4
+        compute_capability = get_device_compute_capability()
+        if compute_capability not in [90, 100]:
+            vec_size = min(vec_size, 4)
+
+        # 1字节类型最多vec4（NVCC bug workaround）
+        if sizeof(result_type) < 2:
+            vec_size = min(vec_size, 4)
+
+    # 启动对应向量化kernel
+    match vec_size:
+        16 (ROCm only): vectorized_elementwise_kernel<16><<<grid, num_threads(), 0, stream>>>(N, f, data)
+        8: vectorized_elementwise_kernel<8><<<grid, num_threads(), 0, stream>>>(N, f, data)
+        4: vectorized_elementwise_kernel<4><<<grid, num_threads(), 0, stream>>>(N, f, data)
+        2: vectorized_elementwise_kernel<2><<<grid, num_threads(), 0, stream>>>(N, f, data)
+        1:
+            input_calc = TrivialOffsetCalculator<arity>()
+            output_calc = TrivialOffsetCalculator<1>()
+            loader = LoadWithoutCast()
+            storer = StoreWithoutCast()
+            unrolled_elementwise_kernel<..., elems_per_thread<io_size>()>
+                <<<grid, num_threads(), 0, stream>>>(N, f, data, input_calc, output_calc, loader, storer)
+
+【备注】
+    - 连续内存且无需类型转换时调用
+    - 根据对齐和架构选择最优向量化长度
+
+--------------------------------
+launch_unrolled_kernel
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    launch_unrolled_kernel(
+        N: int64, f: func_t, data: array_t,
+        ic: input_calc_t, oc: output_calc_t,
+        l: loader_t, s: storer_t)
+
+【算法】
+    assert 0 < N <= int32_max
+    grid = ceil(N / elementwise_block_work_size())
+    stream = getCurrentCUDAStream()
+    unrolled_elementwise_kernel<func_t, array_t, elementwise_thread_work_size()>
+        <<<grid, num_threads(), 0, stream>>>(N, f, data, ic, oc, l, s)
+
+【备注】
+    用于需要类型转换或offset计算的情况
+
+--------------------------------
+elementwise_kernel
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    @device
+    elementwise_kernel(N: int, f: func_t)
+
+【算法】
+    tid = threadIdx.x
+    nv = nt * vt
+    idx = nv * blockIdx.x + tid
+
+    for i in range(vt):
+        if idx < N:
+            f(idx)
+            idx += nt
+
+【并行模式】
+    grid: ceil(N / (nt * vt))
+    block: nt
+
+【备注】
+    legacy kernel，每线程处理vt个元素
+
+--------------------------------
+launch_legacy_kernel
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    launch_legacy_kernel(N: int64, f: func_t)
+        模板参数: nt (threads per block), vt (values per thread)
+
+【算法】
+    if N == 0: return
+    assert 0 <= N <= int32_max
+    grid = ceil(N / (nt * vt))
+    stream = getCurrentCUDAStream()
+    elementwise_kernel<nt, vt, func_t><<<grid, nt, 0, stream>>>(N, f)
+
+【备注】
+    旧版kernel启动器，用于非连续或自定义索引逻辑
+
+--------------------------------
+invoke (without cast)
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    @host @device
+    invoke(f: func_t, data: char*[], strides: index_t[], i: int) -> result_type
+
+【算法】
+    # 加载参数并调用函数
+    arg0 = c10::load<arg<0>::type>(data[0] + i * strides[0])
+    arg1 = c10::load<arg<1>::type>(data[1] + i * strides[1])
+    ...
+    return f(arg0, arg1, ...)
+
+【备注】
+    无类型转换版本，直接load原始类型
+
+--------------------------------
+invoke (with cast)
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    @host @device
+    invoke(f: func_t, data: char*[], strides: index_t[], dtypes: ScalarType[], i: int) -> result_type
+
+【算法】
+    # 动态类型转换后加载参数
+    arg0 = c10::fetch_and_cast<arg<0>::type>(dtypes[0], data[0] + i * strides[0])
+    arg1 = c10::fetch_and_cast<arg<1>::type>(dtypes[1], data[1] + i * strides[1])
+    ...
+    return f(arg0, arg1, ...)
+
+【备注】
+    需要类型转换时使用，根据dtypes动态cast
+
+--------------------------------
+gpu_kernel_impl_nocast
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    gpu_kernel_impl_nocast(iter: TensorIteratorBase, f: func_t)
+
+【算法】
+    traits = function_traits<func_t>
+    result_type = traits::result_type
+    ntensors = traits::arity + 1
+
+    assert iter.can_use_32bit_indexing()
+    assert iter.ninputs() == traits::arity
+    assert iter.noutputs() == 1
+    assert not needs_dynamic_casting<func_t>(iter)
+
+    # 收集数据指针
+    data = [iter.data_ptr(i) for i in range(ntensors)]
+    numel = iter.numel()
+
+    if iter.is_contiguous():
+        # 连续内存，用向量化kernel
+        launch_vectorized_kernel(numel, f, data)
+    else:
+        # 非连续，用legacy kernel + offset计算
+        offset_calc = make_offset_calculator<ntensors>(iter)
+        unroll_factor = 2 if sizeof(result_type) >= 4 else 4
+
+        launch_legacy_kernel<128, unroll_factor>(numel, [=] GPU_LAMBDA(idx):
+            offsets = offset_calc.get(idx)
+            out = (result_type*)(data[0] + offsets[0])
+            *out = invoke(f, &data[1], &offsets[1], 1)
+        )
+
+【备注】
+    无需类型转换时的快速路径
+
+--------------------------------
+gpu_kernel_impl
+来源: aten/src/ATen/native/cuda/CUDALoops.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    gpu_kernel_impl(iter: TensorIteratorBase, f: func_t)
+
+【算法】
+    if not needs_dynamic_casting<func_t>(iter):
+        return gpu_kernel_impl_nocast(iter, f)
+
+    traits = function_traits<func_t>
+    result_type = traits::result_type
+    ntensors = traits::arity + 1
+
+    assert iter.can_use_32bit_indexing()
+    assert iter.ninputs() == traits::arity
+    assert iter.noutputs() == 1
+
+    data = [iter.data_ptr(i) for i in range(ntensors)]
+    numel = iter.numel()
+
+    if iter.is_contiguous():
+        ROCm:
+            # 使用legacy kernel + cast
+            dtypes = [iter.dtype(i) for i in range(ntensors)]
+            inner_strides = iter.get_inner_strides()
+            launch_legacy_kernel<512, 1>(numel, [=] GPU_LAMBDA(idx):
+                out = data[0] + strides[0] * idx
+                result = invoke(f, &data[1], &strides[1], &dtypes[1], idx)
+                c10::cast_and_store<result_type>(dtypes[0], out, result)
+            )
+
+        CUDA:
+            # 使用unrolled kernel + LoadWithCast/StoreWithCast
+            loader = memory::LoadWithCast<arity>(iter)
+            storer = memory::StoreWithCast<1>(iter)
+            input_calc = TrivialOffsetCalculator<arity>()
+            output_calc = TrivialOffsetCalculator<1>()
+            launch_unrolled_kernel(numel, f, data, input_calc, output_calc, loader, storer)
+    else:
+        # 非连续 + cast
+        dtypes = [iter.dtype(i) for i in range(ntensors)]
+        offset_calc = make_offset_calculator<ntensors>(iter)
+        launch_legacy_kernel<128, 4>(numel, [=] GPU_LAMBDA(idx):
+            offsets = offset_calc.get(idx)
+            out = data[0] + offsets[0]
+            result = invoke(f, &data[1], &offsets[1], &dtypes[1], 1)
+            c10::cast_and_store<result_type>(dtypes[0], out, result)
+        )
+
+【备注】
+    - 需要类型转换时调用
+    - ROCm和CUDA在连续情况下策略不同

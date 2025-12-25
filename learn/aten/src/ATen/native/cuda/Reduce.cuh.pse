@@ -1,0 +1,1027 @@
+# 文件：aten/src/ATen/native/cuda/Reduce.cuh
+
+## 工具函数
+
+--------------------------------
+div_up (向上取整除法):
+来源: aten/src/ATen/native/cuda/Reduce.cuh:24
+--------------------------------
+
+【签名】
+    div_up(a: int64, b: int64) -> int64
+
+【算法】
+    return (a + b - 1) / b
+
+--------------------------------
+last_pow2 (最大不超过n的2的幂):
+来源: aten/src/ATen/native/cuda/Reduce.cuh:29
+--------------------------------
+
+【签名】
+    last_pow2(n: int) -> int
+
+【算法】
+    # 计算 floor(log2(n)) 对应的 2 的幂
+    n |= (n >> 1)
+    n |= (n >> 2)
+    n |= (n >> 4)
+    n |= (n >> 8)
+    n |= (n >> 16)
+    return max(1, n - (n >> 1))
+
+--------------------------------
+reduce_fraction (最简分数):
+来源: aten/src/ATen/native/cuda/Reduce.cuh:39
+--------------------------------
+
+【签名】
+    @host @device
+    reduce_fraction(numerator: size_t&, denominator: size_t&)
+
+【算法】
+    # 欧几里得算法求最大公约数
+    a = denominator
+    b = numerator
+    while b != 0:
+        a %= b
+        swap(a, b)
+    
+    # a 现在是 GCD
+    numerator /= a
+    denominator /= a
+
+--------------------------------
+max_reduce_threads (最大归约线程数):
+来源: aten/src/ATen/native/cuda/Reduce.cuh:68
+--------------------------------
+
+【签名】
+    max_reduce_threads(type: ScalarType) -> int
+
+【算法】
+    return 256 if type == kComplexDouble else 512
+
+【备注】
+    - complex<double> 类型由于寄存器压力限制为 256 线程
+    - 其他类型使用 512 线程
+
+## 配置类
+
+--------------------------------
+ReduceConfig (归约配置):
+来源: aten/src/ATen/native/cuda/Reduce.cuh:72
+--------------------------------
+
+【状态】
+    element_size_bytes: int       # 元素大小（字节）
+    num_inputs: int               # 输入元素总数
+    num_outputs: int              # 输出元素总数
+    step_input: int = 1           # 输入步长
+    step_output: int = 1          # 输出步长
+    ctas_per_output: int = 1      # 每个输出的 CTA 数量
+    input_mult[3]: int = {0,0,0}  # 输入索引乘数 [BLOCK_X, BLOCK_Y, CTA]
+    output_mult[2]: int = {0,0}   # 输出索引乘数 [BLOCK_X, BLOCK_Y]
+    block_width: int              # block 的 x 维度
+    block_height: int             # block 的 y 维度
+    num_threads: int              # 每个 block 的线程数
+    vectorize_input: bool = false # 是否向量化输入
+    output_vec_size: int = 1      # 输出向量大小
+
+【接口】
+    set_block_dimension<T>(dim0: int64, dim1: int64)
+        用途: 设置 block 的宽度和高度
+        算法:
+            max_num_threads = MAX_NUM_THREADS<T> / output_vec_size
+            dim0_pow2 = min(last_pow2(dim0), max_num_threads)
+            dim1_pow2 = min(last_pow2(dim1), max_num_threads)
+            block_width = min(dim0_pow2, warp_size)
+            block_height = min(dim1_pow2, max_num_threads / block_width)
+            block_width = min(dim0_pow2, max_num_threads / block_height)
+            num_threads = block_width * block_height
+
+    split_input(parallelism: int) -> int
+        用途: 增加输入并行度
+        算法:
+            step = step_input
+            step_input *= parallelism
+            return step
+
+    split_output(parallelism: int) -> int
+        用途: 增加输出并行度
+        算法:
+            step = step_output
+            step_output *= parallelism
+            return step
+
+    block() -> dim3
+        用途: 返回 CUDA block 维度
+        算法: return dim3(block_width, block_height)
+
+    grid() -> dim3
+        用途: 返回 CUDA grid 维度
+        算法: return dim3(div_up(num_outputs / output_vec_size, step_output), ctas_per_output)
+
+    should_block_x_reduce() -> bool
+        @host @device
+        用途: 是否需要 block x 方向归约
+        算法: return input_mult[BLOCK_X] != 0
+
+    should_block_y_reduce() -> bool
+        @host @device
+        用途: 是否需要 block y 方向归约
+        算法: return input_mult[BLOCK_Y] != 0
+
+    should_global_reduce() -> bool
+        @host @device
+        用途: 是否需要全局归约
+        算法: return input_mult[CTA] != 0
+
+    should_store(output_idx: int) -> bool
+        @device
+        用途: 判断当前线程是否应该存储结果
+        算法:
+            return output_idx < num_outputs &&
+                   (!should_block_x_reduce() || threadIdx.x == 0) &&
+                   (!should_block_y_reduce() || threadIdx.y == 0)
+
+    should_reduce_tail() -> bool
+        @device
+        用途: 判断当前线程是否应该处理尾部元素
+        算法:
+            return (!should_block_y_reduce() || threadIdx.y == 0) &&
+                   (!should_global_reduce() || blockIdx.y == 0)
+
+    input_idx() -> int
+        @host @device
+        用途: 计算当前线程对应的输入索引
+        算法:
+            lane = threadIdx.x
+            warp = threadIdx.y
+            cta2 = blockIdx.y
+            return lane * input_mult[BLOCK_X] +
+                   warp * input_mult[BLOCK_Y] +
+                   cta2 * input_mult[CTA]
+
+    output_idx<output_vec_size>() -> int
+        @host @device
+        用途: 计算当前线程对应的输出索引
+        算法:
+            lane = threadIdx.x
+            warp = threadIdx.y
+            cta1 = blockIdx.x
+            return (lane * output_mult[BLOCK_X] +
+                    warp * output_mult[BLOCK_Y] +
+                    cta1 * step_output) * output_vec_size
+
+    shared_memory_offset(offset: int) -> int
+        @device
+        用途: 计算 shared memory 偏移
+        算法: return threadIdx.x + (threadIdx.y + offset) * blockDim.x
+
+    staging_memory_offset(cta2: int) -> int
+        @device
+        用途: 计算全局归约暂存区偏移
+        算法:
+            offset = cta2 + blockIdx.x * gridDim.y
+            if !should_block_x_reduce():
+                offset = threadIdx.x + offset * blockDim.x
+            return offset
+
+    shared_memory_size() -> int
+        用途: 计算所需 shared memory 大小
+        算法:
+            if !should_block_y_reduce() &&
+               (!should_block_x_reduce() || block_width <= warp_size):
+                return 0
+            return element_size_bytes * num_threads * output_vec_size
+
+    global_memory_size() -> int64
+        用途: 计算全局归约所需内存
+        算法:
+            if !should_global_reduce():
+                return 0
+            size = element_size_bytes * num_outputs * ctas_per_output
+            if !should_block_x_reduce():
+                size *= block_width * output_vec_size
+            return size
+
+    semaphore_size() -> int
+        用途: 计算信号量数组大小
+        算法:
+            if !should_global_reduce():
+                return 0
+            return sizeof(int) * grid().x
+
+    values_per_thread() -> int
+        用途: 计算每个线程处理的元素数
+        算法: return div_up(num_inputs, step_input)
+
+## 归约操作类
+
+--------------------------------
+ReduceOp (归约操作):
+来源: aten/src/ATen/native/cuda/Reduce.cuh:336
+--------------------------------
+
+【类型参数】
+    scalar_t: 输入数据类型
+    ops_t: 归约操作函数对象
+    index_t: 索引类型
+    out_scalar_t: 输出数据类型（默认 = scalar_t）
+    vt0: 每线程处理向量数（默认 = 4）
+    input_vec_size: 输入向量化大小（默认 = vt0）
+
+【状态】
+    ops: ops_t                           # 归约操作函数对象
+    ident: arg_t                         # 归约单位元
+    config: ReduceConfig                 # 归约配置
+    input_calc: OffsetCalculator<1>      # 输入偏移计算器
+    output_calc: OffsetCalculator<2>     # 输出偏移计算器
+    src: void*                           # 输入数据指针
+    dst[2]: char*                        # 输出数据指针（最多2个）
+    acc_buf: void*                       # 累加缓冲区
+    cta_buf: void*                       # CTA 间归约缓冲区
+    semaphores: int*                     # 信号量数组
+    base_idx: int64                      # 基础索引
+    accumulate: bool                     # 是否累加到现有输出
+    final_output: bool                   # 是否最终输出
+    noutputs: int                        # 输出数量
+
+【接口】
+    run<output_vec_size>()
+        @device
+        用途: 归约主函数
+        算法:
+            output_idx = config.output_idx<output_vec_size>()
+            input_idx = config.input_idx()
+            
+            # Step 1: 线程级归约
+            if output_idx < num_outputs && input_idx < num_inputs:
+                input_slice = (scalar_t*)src + base_offsets
+                value = thread_reduce<output_vec_size>(input_slice)
+            
+            # Step 2: Block Y 方向归约
+            if config.should_block_y_reduce():
+                value = block_y_reduce<output_vec_size>(value, shared_memory)
+            
+            # Step 3: Block X 方向归约
+            if config.should_block_x_reduce():
+                value = block_x_reduce<output_vec_size>(value, shared_memory)
+            
+            # Step 4: 全局归约或存储结果
+            if config.should_global_reduce():
+                value = global_reduce<output_vec_size>(value, acc, shared_memory)
+            else if config.should_store(output_idx):
+                if accumulate:
+                    value = ops.translate_idx(value, base_idx)
+                
+                if acc == nullptr:
+                    if accumulate:
+                        value = accumulate_in_output<output_vec_size>(out, value)
+                    if final_output:
+                        set_results_to_output<output_vec_size>(value, base_offsets)
+                    else:
+                        out[i] = value[i]
+                else:
+                    if accumulate:
+                        value[i] = ops.combine(acc[i], value[i])
+                    if final_output:
+                        set_results_to_output<output_vec_size>(value, base_offsets)
+                    else:
+                        *acc = value
+
+    thread_reduce<output_vec_size>(data: scalar_t*) -> array<arg_t, output_vec_size>
+        @device
+        用途: 单线程归约
+        算法:
+            if config.vectorize_input:
+                return input_vectorized_thread_reduce_impl(data)
+            else:
+                element_stride = input_calc.strides[0][0] / sizeof(scalar_t)
+                is_contiguous = (input_calc.dims == 1 && element_stride == 1)
+                
+                if is_contiguous:
+                    return thread_reduce_impl<output_vec_size>(data, idx => idx)
+                else if input_calc.dims == 1:
+                    return thread_reduce_impl<output_vec_size>(data, idx => idx * element_stride)
+                else:
+                    return thread_reduce_impl<output_vec_size>(data, idx => input_calc.get(idx)[0] / sizeof(scalar_t))
+
+    input_vectorized_thread_reduce_impl(data: scalar_t*) -> arg_t
+        @device
+        用途: 向量化输入归约
+        算法:
+            end = config.num_inputs
+            value = ident
+            
+            # 处理未对齐的头部
+            align_elements = align_bytes / sizeof(scalar_t)
+            shift = ((uint64_t)data) % align_bytes / sizeof(scalar_t)
+            if shift > 0:
+                data -= shift
+                end += shift
+                if threadIdx.x >= shift && threadIdx.x < align_elements && should_reduce_tail():
+                    value = ops.reduce(value, data[threadIdx.x], threadIdx.x - shift)
+                end -= align_elements
+                data += align_elements
+                shift = align_elements - shift
+            
+            # 向量化归约主体
+            idx = config.input_idx()
+            stride = config.step_input
+            
+            value_list[input_vec_size] = {value, ident, ...}
+            
+            while idx * input_vec_size + input_vec_size - 1 < end:
+                values_vec = memory::load_vector<input_vec_size>(data, idx)
+                for i in range(input_vec_size):
+                    value_list[i] = ops.reduce(value_list[i], values_vec.val[i], shift + idx * input_vec_size + i)
+                idx += stride
+            
+            # 处理尾部
+            tail_start = end - end % input_vec_size
+            if should_reduce_tail():
+                idx = tail_start + threadIdx.x
+                if idx < end:
+                    value_list[0] = ops.reduce(value_list[0], data[idx], idx + shift)
+            
+            # 合并累加器
+            for i in range(1, input_vec_size):
+                value_list[0] = ops.combine(value_list[0], value_list[i])
+            
+            return value_list[0]
+
+    thread_reduce_impl<output_vec_size>(data: scalar_t*, calc: offset_calc_t) -> array<arg_t, output_vec_size>
+        @device
+        用途: 通用线程归约实现
+        算法:
+            idx = config.input_idx()
+            end = config.num_inputs
+            stride = config.step_input
+            
+            # 多累加器消除依赖
+            value_list[vt0][output_vec_size] = ident
+            
+            # 主循环：每次处理 vt0 个元素
+            while idx + (vt0 - 1) * stride < end:
+                for i in range(vt0):
+                    offset = calc(idx + i * stride) / output_vec_size
+                    values[i] = memory::load_vector<output_vec_size>(data, offset)
+                
+                for i in range(vt0):
+                    for j in range(output_vec_size):
+                        value_list[i][j] = ops.reduce(value_list[i][j], values[i].val[j], idx + i * stride)
+                
+                idx += stride * vt0
+            
+            # 尾部处理
+            for i in range(vt0):
+                if idx >= end: break
+                offset = calc(idx) / output_vec_size
+                values[i] = memory::load_vector<output_vec_size>(data, offset)
+                idx += stride
+            
+            idx = idx_
+            for i in range(vt0):
+                if idx >= end: break
+                for j in range(output_vec_size):
+                    value_list[i][j] = ops.reduce(value_list[i][j], values[i].val[j], idx)
+                idx += stride
+            
+            # 合并累加器
+            for i in range(1, vt0):
+                for j in range(output_vec_size):
+                    value_list[0][j] = ops.combine(value_list[0][j], value_list[i][j])
+            
+            return value_list[0]
+
+    block_x_reduce<output_vec_size>(value: array<arg_t, output_vec_size>, shared_memory: char*) -> array<arg_t, output_vec_size>
+        @device
+        用途: Block X 方向归约
+        算法:
+            dim_x = blockDim.x
+            shared = (array<arg_t, output_vec_size>*)shared_memory
+            
+            # 如果 dim_x > warpSize，先用 shared memory 归约到 warpSize
+            if dim_x > warpSize:
+                address_base = threadIdx.x + threadIdx.y * blockDim.x
+                shared[address_base] = value
+                
+                for offset in [dim_x/2, dim_x/4, ..., warpSize]:
+                    __syncthreads()
+                    if threadIdx.x < offset && threadIdx.x + offset < blockDim.x:
+                        other = shared[address_base + offset]
+                        for i in range(output_vec_size):
+                            value[i] = ops.combine(value[i], other[i])
+                        shared[address_base] = value
+                
+                dim_x = warpSize
+            
+            __syncthreads()
+            
+            # Warp 内归约
+            for offset in [1, 2, 4, ..., dim_x/2]:
+                for i in range(output_vec_size):
+                    other = ops.warp_shfl_down(value[i], offset)
+                    value[i] = ops.combine(value[i], other)
+            
+            return value
+
+    block_y_reduce<output_vec_size>(value: array<arg_t, output_vec_size>, shared_memory: char*) -> array<arg_t, output_vec_size>
+        @device
+        用途: Block Y 方向归约
+        算法:
+            shared = (array<arg_t, output_vec_size>*)shared_memory
+            shared[config.shared_memory_offset(0)] = value
+            
+            for offset in [blockDim.y/2, blockDim.y/4, ..., 1]:
+                __syncthreads()
+                if threadIdx.y < offset && threadIdx.y + offset < blockDim.y:
+                    other = shared[config.shared_memory_offset(offset)]
+                    for i in range(output_vec_size):
+                        value[i] = ops.combine(value[i], other[i])
+                    shared[config.shared_memory_offset(0)] = value
+            
+            return value
+
+    mark_block_finished() -> bool
+        @device
+        用途: 标记当前 block 完成，判断是否是最后一个完成的 block
+        算法:
+            __shared__ is_last_block_done_shared
+            
+            __syncthreads()
+            if threadIdx.x == 0 && threadIdx.y == 0:
+                prev_blocks_finished = atomicAdd(&semaphores[blockIdx.x], 1)
+                is_last_block_done_shared = (prev_blocks_finished == gridDim.y - 1)
+            
+            __syncthreads()
+            
+            return is_last_block_done_shared
+
+    global_reduce<output_vec_size>(value: array<arg_t, output_vec_size>, acc: array<arg_t, output_vec_size>*, shared_memory: char*) -> array<arg_t, output_vec_size>
+        @device
+        用途: 全局归约（跨多个 CTA）
+        算法:
+            reduce_buffer = (array<arg_t, output_vec_size>*)cta_buf
+            output_idx = config.output_idx<output_vec_size>()
+            
+            # Step 1: 写入暂存区
+            should_store = config.should_store(output_idx)
+            if should_store:
+                offset = config.staging_memory_offset(blockIdx.y)
+                reduce_buffer[offset] = value
+            
+            __threadfence()
+            __syncthreads()
+            
+            # Step 2: 等待所有 block 完成
+            is_last_block_done = mark_block_finished()
+            
+            # Step 3: 最后一个 block 完成最终归约
+            if is_last_block_done:
+                __threadfence()
+                
+                value = ident
+                
+                # 从暂存区读取并归约
+                if config.should_block_x_reduce():
+                    input_offset = threadIdx.x + threadIdx.y * blockDim.x
+                    step = blockDim.x * blockDim.y
+                else:
+                    input_offset = threadIdx.y
+                    step = blockDim.y
+                
+                for ; input_offset < config.ctas_per_output; input_offset += step:
+                    idx = config.staging_memory_offset(input_offset)
+                    next = reduce_buffer[idx]
+                    for i in range(output_vec_size):
+                        value[i] = ops.combine(value[i], next[i])
+                
+                # Block 内归约
+                value = block_y_reduce<output_vec_size>(value, shared_memory)
+                if config.should_block_x_reduce():
+                    value = block_x_reduce<output_vec_size>(value, shared_memory)
+                
+                # 存储最终结果
+                if should_store:
+                    if accumulate:
+                        for i in range(output_vec_size):
+                            value[i] = ops.translate_idx(value[i], base_idx)
+                    
+                    if acc == nullptr:
+                        if accumulate:
+                            value = accumulate_in_output<output_vec_size>(out, value)
+                        if final_output:
+                            set_results_to_output<output_vec_size>(value, base_offsets)
+                        else:
+                            for i in range(output_vec_size):
+                                out[i] = value[i]
+                    else:
+                        if accumulate:
+                            for i in range(output_vec_size):
+                                value[i] = ops.combine(acc[i], value[i])
+                        if final_output:
+                            set_results_to_output<output_vec_size>(value, base_offsets)
+                        else:
+                            *acc = value
+            
+            return value
+
+    set_results(x: T, base_offset: index_t)
+        @device
+        用途: 存储单个输出结果
+        算法:
+            res = (out_scalar_t*)((char*)dst[0] + base_offset)
+            *res = x
+
+    set_results(x: thrust::pair<T1, T2>, base_offset: index_t)
+        @device
+        用途: 存储两个输出结果（如 min/max with indices）
+        算法:
+            if noutputs >= 1:
+                res0 = (T1*)((char*)dst[0] + base_offset)
+                *res0 = x.first
+            if noutputs >= 2:
+                res1 = (T2*)((char*)dst[1] + base_offset / sizeof(T1) * sizeof(T2))
+                *res1 = x.second
+
+    set_results_to_output<output_vec_size>(value: array<arg_t, output_vec_size>, base_offset: array<index_t, output_vec_size>)
+        @device
+        用途: 存储向量化输出
+        算法:
+            for i in range(output_vec_size):
+                set_results(ops.project(value[i]), base_offset[i])
+
+【备注】
+    - can_accumulate_in_output: 编译期常量，判断是否可以直接在输出上累加
+    - 支持最多 2 个输出（如 min 和 argmin）
+
+--------------------------------
+ReduceJitOp (JIT 归约操作):
+来源: aten/src/ATen/native/cuda/Reduce.cuh:278
+--------------------------------
+
+【说明】
+    类似 ReduceOp，但不包含 ops 函数对象，用于 JIT 编译的归约操作。
+
+【状态】
+    ident: arg_t
+    config: ReduceConfig
+    input_calc: OffsetCalculator<1, uint32_t>
+    output_calc: OffsetCalculator<2, uint32_t>
+    src: void*
+    dst[2]: char*
+    acc_buf: void*
+    cta_buf: void*
+    semaphores: int*
+    base_idx: int64
+    accumulate: bool
+    final_output: bool
+    noutputs: int
+
+【备注】
+    - arg_t 总是 opmath_type<scalar_t>
+    - 归约操作通过 JIT 编译的代码实现
+
+## 辅助类
+
+--------------------------------
+AccumulationBuffer (累加缓冲区):
+来源: aten/src/ATen/native/cuda/Reduce.cuh:932
+--------------------------------
+
+【状态】
+    acc_ptr: char*          # 累加缓冲区指针
+    out_ptr: char*          # 输出缓冲区指针
+    numerator: size_t       # 地址转换分子
+    denominator: size_t     # 地址转换分母
+    buffer: DataPtr         # 实际分配的缓冲区
+
+【接口】
+    AccumulationBuffer()
+        用途: 默认构造（空缓冲区）
+
+    AccumulationBuffer(acc_t_size: size_t, out_t_size: size_t, out_ptr: char*, size: int64)
+        用途: 创建累加缓冲区
+        算法:
+            out_ptr_ = out_ptr
+            if out_t_size >= acc_t_size:
+                # 复用输出缓冲区
+                acc_ptr_ = out_ptr
+                numerator_ = 1
+                denominator_ = 1
+            else:
+                # 分配新缓冲区
+                buffer_ = allocator.allocate(size)
+                acc_ptr_ = buffer_.get()
+                numerator_ = acc_t_size
+                denominator_ = out_t_size
+                reduce_fraction(numerator_, denominator_)
+
+    get_acc_slice(out_ptr: char*) -> char*
+        用途: 根据输出指针获取对应的累加缓冲区切片
+        算法:
+            if acc_ptr_ == nullptr:
+                return nullptr
+            return acc_ptr_ + ((out_ptr - out_ptr_) * numerator_ / denominator_)
+
+【备注】
+    - 当累加类型大于输出类型时，分配独立缓冲区
+    - 否则复用输出缓冲区
+
+## Kernel 启动函数
+
+--------------------------------
+reduce_kernel:
+来源: aten/src/ATen/native/cuda/Reduce.cuh:218
+--------------------------------
+
+【签名】
+    @device
+    reduce_kernel<nt, output_vec_size, R>(reduction: R)
+    
+    约束:
+    - nt: 每个 block 的线程数
+    - output_vec_size: 输出向量化大小
+
+【算法】
+    reduction.run<output_vec_size>()
+
+【并行模式】
+    launch_bounds(nt, 4)
+
+--------------------------------
+launch_reduce_kernel:
+来源: aten/src/ATen/native/cuda/Reduce.cuh:875
+--------------------------------
+
+【签名】
+    launch_reduce_kernel<max_threads, R>(config: ReduceConfig, reduction: R)
+
+【算法】
+    block = config.block()
+    grid = config.grid()
+    stream = at::cuda::getCurrentCUDAStream()
+    shared_memory = config.shared_memory_size()
+    
+    match config.output_vec_size:
+        4:
+            reduce_kernel<max_threads/4, 4, R><<<grid, block, shared_memory, stream>>>(reduction)
+        2:
+            reduce_kernel<max_threads/2, 2, R><<<grid, block, shared_memory, stream>>>(reduction)
+        default:
+            reduce_kernel<max_threads, 1, R><<<grid, block, shared_memory, stream>>>(reduction)
+
+--------------------------------
+launch_jitted_reduce_kernel:
+来源: aten/src/ATen/native/cuda/Reduce.cuh:897
+--------------------------------
+
+【签名】
+    launch_jitted_reduce_kernel(
+        jiterator_mutex: mutex&,
+        fn_cache: array<NvrtcFunction, 3>&,
+        desc: KernelDescriptor,
+        vt0: int,
+        config: ReduceConfig,
+        reduction: void*
+    )
+
+【算法】
+    block = config.block()
+    grid = config.grid()
+    shared_memory = config.shared_memory_size()
+    
+    # 根据 output_vec_size 选择缓存槽
+    fn_ptr = match config.output_vec_size:
+        4 => &fn_cache[0]
+        2 => &fn_cache[1]
+        _ => &fn_cache[2]
+    
+    # JIT 编译（如果尚未编译）
+    if !fn_ptr.function:
+        max_threads_codegen = max_reduce_threads(desc.f_inputs_type) / config.output_vec_size
+        code = at::cuda::jit::generate_reduction_code(desc, vt0, true, false, config.output_vec_size, max_threads_codegen)
+        *fn_ptr = at::cuda::jit::jit_pwise_function(code, "reduction_" + desc.name)
+    
+    # 启动 kernel
+    args[0] = reduction
+    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, block, shared_memory)
+
+## 配置函数
+
+--------------------------------
+get_output_vec_size:
+来源: aten/src/ATen/native/cuda/Reduce.cuh:969
+--------------------------------
+
+【签名】
+    get_output_vec_size<scalar_t>(iter: TensorIterator) -> int
+
+【算法】
+    vec_size = 4
+    
+    # 根据地址对齐调整向量大小
+    base_address = reinterpret_cast<uint64>(iter.data_ptr(iter.noutputs())) / sizeof(scalar_t)
+    while base_address % vec_size != 0:
+        vec_size /= 2
+    
+    # 根据输出维度对齐调整
+    output_index = iter.num_reduce_dims()
+    while iter.shape()[output_index] % vec_size != 0:
+        vec_size /= 2
+    
+    # 根据步长对齐调整
+    for i, stride in enumerate(iter.strides(iter.noutputs())):
+        if i != output_index:
+            while (stride / sizeof(scalar_t)) % vec_size != 0:
+                vec_size /= 2
+    
+    return vec_size
+
+--------------------------------
+setReduceConfig:
+来源: aten/src/ATen/native/cuda/Reduce.cuh:994
+--------------------------------
+
+【签名】
+    setReduceConfig<arg_t, scalar_t, vt0, input_vec_size>(iter: TensorIterator) -> ReduceConfig
+
+【算法】
+    num_outputs = iter.num_output_elements()
+    inputs_per_output = iter.numel() / num_outputs
+    input_index = iter.ntensors() - 1
+    
+    config = ReduceConfig(sizeof(arg_t), num_outputs, inputs_per_output)
+    
+    if iter.ndim() > 0:
+        # 判断是否在最快变化维度上归约
+        reduction_on_fastest_striding_dimension =
+            (iter.num_reduce_dims() == iter.ndim()) ||
+            (iter.strides(input_index)[0] < iter.strides(input_index)[iter.num_reduce_dims()])
+        
+        if reduction_on_fastest_striding_dimension:
+            dim0 = inputs_per_output
+            dim1 = num_outputs
+            fastest_moving_stride = iter.strides(input_index)[0]
+        else:
+            dim0 = num_outputs
+            dim1 = inputs_per_output
+            fastest_moving_stride = iter.strides(input_index)[iter.num_reduce_dims()]
+    else:
+        reduction_on_fastest_striding_dimension = true
+        fastest_moving_stride = sizeof(scalar_t)
+        dim0 = 1
+        dim1 = 1
+    
+    # 向量化策略
+    if fastest_moving_stride == sizeof(scalar_t):
+        if reduction_on_fastest_striding_dimension && dim0 > 128 && iter.num_reduce_dims() == 1 && vt0 >= input_vec_size:
+            # Case 1: 向量化输入
+            config.vectorize_input = true
+            dim0 /= input_vec_size
+        else if !reduction_on_fastest_striding_dimension:
+            # Case 2: 向量化输出
+            config.output_vec_size = get_output_vec_size<scalar_t>(iter)
+            dim0 /= config.output_vec_size
+    
+    # 设置 block 维度
+    config.set_block_dimension<scalar_t>(dim0, dim1)
+    
+    block_width = config.block_width
+    block_height = config.block_height
+    
+    # 分配并行维度
+    if iter.ndim() == 0 || reduction_on_fastest_striding_dimension:
+        config.input_mult[0] = config.split_input(block_width)
+    else:
+        config.output_mult[0] = config.split_output(block_width)
+    
+    # Warp 级并行
+    warp_split_threshold = min(block_height * 16, 256)
+    split_across_warps = config.values_per_thread() >= warp_split_threshold
+    
+    if split_across_warps:
+        config.input_mult[1] = config.split_input(block_height)
+    else:
+        config.output_mult[1] = config.split_output(block_height)
+    
+    # 全局并行（跨 CTA）
+    num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount
+    max_threads_per_mp = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor
+    blocks_per_sm = max_threads_per_mp / config.num_threads
+    target_grid_size = num_mp * blocks_per_sm
+    grid = config.grid().x
+    
+    if config.input_mult[1] != 0 && config.values_per_thread() >= 256 && grid <= target_grid_size:
+        ctas_per_output1 = div_up(target_grid_size, grid)
+        ctas_per_output2 = div_up(config.values_per_thread(), 16)
+        ctas_per_output3 = div_up(config.values_per_thread(), 256)
+        config.ctas_per_output = max(min(ctas_per_output1, ctas_per_output2), ctas_per_output3)
+        
+        if config.ctas_per_output > 1:
+            config.input_mult[2] = config.split_input(config.ctas_per_output)
+    
+    return config
+
+【备注】
+    - 核心策略：根据数据布局选择并行方案
+    - 三级并行：block_x (lanes), block_y (warps), gridDim.y (CTAs)
+    - 向量化：沿最快变化维度，分为"向量化输入"和"向量化输出"
+
+## 主函数
+
+--------------------------------
+gpu_reduce_kernel:
+来源: aten/src/ATen/native/cuda/Reduce.cuh:1173
+--------------------------------
+
+【签名】
+    gpu_reduce_kernel<scalar_t, out_scalar_t, vt0, input_vec_size, ops_t, ident_t>(
+        iter: TensorIterator&,
+        ops: ops_t,
+        ident: ident_t = 0,
+        acc_buf_ptr: AccumulationBuffer* = nullptr,
+        base_idx: int64 = 0
+    )
+
+【算法】
+    # Step 1: 创建累加缓冲区（如果需要）
+    if acc_buf_ptr == NULL:
+        if !can_accumulate_in_output && !can_use_32bit_indexing:
+            output_memory_size = max(iter.shape()[dim] * iter.strides(0)[dim]) / iter.element_size(0)
+            owned_buf_ptr = new AccumulationBuffer(sizeof(arg_t), sizeof(out_scalar_t), iter.data_ptr(0), output_memory_size * sizeof(arg_t))
+        else:
+            owned_buf_ptr = new AccumulationBuffer()
+        acc_buf_ptr = owned_buf_ptr.get()
+    
+    # Step 2: 递归处理 32 位索引
+    if !iter.can_use_32bit_indexing():
+        for sub_iter in iter.with_32bit_indexing():
+            sub_iter_base_idx = sub_iter.view_offsets()[0]
+            gpu_reduce_kernel<scalar_t, out_scalar_t, vt0, input_vec_size>(sub_iter, ops, ident, acc_buf_ptr, sub_iter_base_idx)
+        return
+    
+    # Step 3: 准备数据指针
+    in_data = iter.data_ptr(iter.ntensors() - 1)
+    out_data = iter.data_ptr(0)
+    out_data_extra = iter.data_ptr(1) if noutputs > 1 else nullopt
+    acc_data = acc_buf_ptr.get_acc_slice(out_data)
+    
+    # Step 4: 配置归约
+    config = setReduceConfig<arg_t, scalar_t, vt0, input_vec_size>(iter)
+    
+    # Step 5: 分配全局归约缓冲区
+    if config.should_global_reduce():
+        buffer = allocator.allocate(config.global_memory_size())
+        semaphores = allocator.allocate(config.semaphore_size())
+        cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream)
+    
+    # Step 6: 创建 ReduceOp 并启动 kernel
+    output_calc = make_output_calculator<uint32_t>(iter)
+    input_calc = make_input_calculator<uint32_t>(iter)
+    
+    reduce = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t, vt0, input_vec_size>(
+        ops, config, input_calc, output_calc,
+        in_data, out_data, out_data_extra,
+        acc_data, buffer.get(), semaphores.get(),
+        ident, noutputs, base_idx
+    )
+    reduce.accumulate = iter.should_accumulate()
+    reduce.final_output = iter.is_final_output()
+    
+    launch_reduce_kernel<MAX_NUM_THREADS<scalar_t>>(config, reduce)
+
+【备注】
+    - can_accumulate_in_output: Half/BFloat16 类型强制为 false（防止溢出/精度损失）
+    - 递归处理大于 32 位索引的情况
+
+--------------------------------
+jitted_gpu_reduce_kernel:
+来源: aten/src/ATen/native/cuda/Reduce.cuh:1279
+--------------------------------
+
+【签名】
+    jitted_gpu_reduce_kernel<name, scalar_t, out_scalar_t, vt0, ident_t>(
+        iter: TensorIterator&,
+        func: string,
+        ident: ident_t = 0,
+        acc_buf_ptr: AccumulationBuffer* = nullptr,
+        base_idx: int64 = 0
+    )
+
+【算法】
+    # 类似 gpu_reduce_kernel，但使用 ReduceJitOp
+    
+    # ...（累加缓冲区、32位索引处理同上）...
+    
+    config = setReduceConfig<arg_t, scalar_t, vt0>(iter)
+    
+    # ...（全局归约缓冲区同上）...
+    
+    reduce = ReduceJitOp<scalar_t, out_scalar_t>(
+        config, input_calc, output_calc,
+        in_data, out_data, out_data_extra,
+        acc_data, buffer.get(), semaphores.get(),
+        ident, noutputs, base_idx
+    )
+    reduce.accumulate = iter.should_accumulate()
+    reduce.final_output = iter.is_final_output()
+    
+    # JIT 编译描述符
+    desc = at::cuda::jit::make_kernel_descriptor<out_scalar_t, scalar_t>(name, func, nInputs=1, nOutputs=1)
+    
+    # 每个设备的 kernel 缓存
+    static fn_cache[device_count][3]
+    cache = fn_cache[iter.device().index()]
+    
+    launch_jitted_reduce_kernel(jiterator_mutex, cache, desc, vt0, config, &reduce)
+
+【备注】
+    - 使用 JIT 编译生成 kernel
+    - 每个设备维护独立的 kernel 缓存（output_vec_size = 1/2/4）
+
+## 工具函数
+
+--------------------------------
+make_output_calculator:
+来源: aten/src/ATen/native/cuda/Reduce.cuh:223
+--------------------------------
+
+【签名】
+    make_output_calculator<index_t>(iter: TensorIterator) -> OffsetCalculator<2, index_t>
+
+【算法】
+    num_reduce_dims = iter.num_reduce_dims()
+    num_output_dims = iter.ndim() - num_reduce_dims
+    input_index = iter.ntensors() - 1
+    output_index = 0
+    
+    strides = [
+        iter.strides(output_index).data() + num_reduce_dims,
+        iter.strides(input_index).data() + num_reduce_dims
+    ]
+    shape = iter.shape().data() + num_reduce_dims
+    
+    return OffsetCalculator<2, index_t>(num_output_dims, shape, strides)
+
+【备注】
+    - 跳过归约维度，只计算输出维度的偏移
+
+--------------------------------
+make_input_calculator:
+来源: aten/src/ATen/native/cuda/Reduce.cuh:237
+--------------------------------
+
+【签名】
+    make_input_calculator<index_t>(iter: TensorIterator) -> OffsetCalculator<1, index_t>
+
+【算法】
+    num_reduce_dims = iter.num_reduce_dims()
+    input_index = iter.ntensors() - 1
+    
+    strides = [iter.strides(input_index).data()]
+    
+    return OffsetCalculator<1, index_t>(num_reduce_dims, iter.shape().data(), strides)
+
+【备注】
+    - 只计算归约维度的偏移
+
+--------------------------------
+func_wrapper (函数包装器):
+来源: aten/src/ATen/native/cuda/Reduce.cuh:247
+--------------------------------
+
+【签名】
+    func_wrapper_t<out_scalar_t, func_t>
+
+【状态】
+    combine: func_t    # 归约组合函数
+
+【接口】
+    project(arg: arg_t) -> out_scalar_t
+        @device
+        用途: 投影到输出类型
+        算法: return (out_scalar_t)arg
+
+    warp_shfl_down(arg: arg_t, offset: int) -> arg_t
+        @device
+        用途: Warp shuffle down
+        算法: return WARP_SHFL_DOWN(arg, offset)
+
+    translate_idx(acc: arg_t, idx: int64) -> arg_t
+        @device
+        用途: 索引转换（对于不需要索引的归约，直接返回）
+        算法: return acc
+
+    reduce(acc: arg_t, val: scalar_t, idx: int64) -> arg_t
+        @device
+        用途: 归约单个元素
+        算法: return combine(acc, val)
+
+【备注】
+    - 包装普通的二元归约函数（忽略索引）
+    - arg_t: 累加类型（从 func_t 推断）
+    - scalar_t: 输入类型（从 func_t 推断）

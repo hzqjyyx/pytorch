@@ -1,0 +1,44 @@
+--------------------------------
+Fused Adam 实现接口
+来源: aten/src/ATen/native/cuda/fused_adam_impl.cuh
+--------------------------------
+
+【函数】
+    _fused_adam_cuda_impl_(
+        params: TensorList,              # 模型参数列表
+        grads: TensorList,               # 梯度列表
+        exp_avgs: TensorList,            # 一阶动量列表 (m_t)
+        exp_avg_sqs: TensorList,         # 二阶动量列表 (v_t)
+        state_steps: TensorList,         # 步数列表
+        lr: double,                      # 学习率标量
+        beta1: double,                   # 一阶动量衰减系数
+        beta2: double,                   # 二阶动量衰减系数
+        weight_decay: double,            # 权重衰减系数
+        eps: double,                     # 数值稳定性常数
+        maximize: bool,                  # 是否最大化目标（梯度取反）
+        grad_scale: Optional[Tensor],    # 梯度缩放因子（混合精度训练）
+        found_inf: Optional[Tensor]      # 是否发现inf/nan标志
+    ) -> void
+        用途: 融合版 Adam 优化器，标量学习率版本
+
+    _fused_adam_cuda_impl_(
+        params: TensorList,
+        grads: TensorList,
+        exp_avgs: TensorList,
+        exp_avg_sqs: TensorList,
+        state_steps: TensorList,
+        lr: Tensor,                      # 学习率张量（支持逐参数学习率）
+        beta1: double,
+        beta2: double,
+        weight_decay: double,
+        eps: double,
+        maximize: bool,
+        grad_scale: Optional[Tensor],
+        found_inf: Optional[Tensor]
+    ) -> void
+        用途: 融合版 Adam 优化器，张量学习率版本（支持逐参数学习率）
+
+【备注】
+    - 两个重载版本仅学习率参数类型不同（double vs Tensor）
+    - 实际实现位于对应的 .cu 文件中
+    - 融合版本在单个 kernel 中处理多个参数张量以减少 kernel 启动开销

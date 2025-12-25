@@ -1,0 +1,37 @@
+--------------------------------
+CompositeRandomAccessor CPU 特化
+来源: aten/src/ATen/native/cuda/CompositeRandomAccessor.h
+--------------------------------
+
+【类型定义】
+    TupleInfoCPU:
+        用途: CPU 侧的 tuple 操作适配器
+        
+        tuple<Types...> = thrust::tuple<Types...>
+        
+        tie(args...) -> thrust::tuple<refs...>
+            用途: 将多个左值引用绑定为 tuple
+
+    CompositeRandomAccessorCPU<KeyAccessor, ValueAccessor>:
+        用途: CPU 侧的复合随机访问器别名
+        实现: CompositeRandomAccessor<KeyAccessor, ValueAccessor, TupleInfoCPU>
+
+【函数】
+    swap(rh1: references_holder<V, R>, rh2: references_holder<V, R>)
+        用途: 交换两个 references_holder 内部数据
+        调用: thrust::swap()
+
+    get<N>(rh: references_holder<V, R>) -> decltype(thrust::get<N>(rh.data()))
+        参数: N=编译期常量索引
+        用途: 从 references_holder 提取第 N 个元素
+        调用: thrust::get<N>()
+
+【依赖】
+    thrust::tuple / thrust::tie / thrust::swap / thrust::get    # Thrust 库 tuple 操作
+    CompositeRandomAccessor                                       # 通用模板定义 (见 CompositeRandomAccessorCommon.h)
+
+【备注】
+    - 本文件是 CompositeRandomAccessor 的 CPU 特化
+    - 使用 thrust::tuple 作为底层实现
+    - references_holder 定义在 CompositeRandomAccessorCommon.h
+    - swap/get 函数使 references_holder 兼容标准库算法

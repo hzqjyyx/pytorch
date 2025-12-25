@@ -1,0 +1,48 @@
+--------------------------------
+AMSGrad优化器CUDA实现（函数声明）
+来源: aten/src/ATen/native/cuda/fused_adam_amsgrad_impl.cuh
+--------------------------------
+
+【函数】
+    _fused_adam_amsgrad_cuda_impl_(
+        params: TensorList,
+        grads: TensorList,
+        exp_avgs: TensorList,
+        exp_avg_sqs: TensorList,
+        max_exp_avg_sqs: TensorList,
+        state_steps: TensorList,
+        lr: double,
+        beta1: double,
+        beta2: double,
+        weight_decay: double,
+        eps: double,
+        maximize: bool,
+        grad_scale: Optional[Tensor],
+        found_inf: Optional[Tensor]
+    )
+        参数: lr=标量学习率
+        用途: 融合的AMSGrad优化器更新，支持混合精度训练
+
+    _fused_adam_amsgrad_cuda_impl_(
+        params: TensorList,
+        grads: TensorList,
+        exp_avgs: TensorList,
+        exp_avg_sqs: TensorList,
+        max_exp_avg_sqs: TensorList,
+        state_steps: TensorList,
+        lr: Tensor,
+        beta1: double,
+        beta2: double,
+        weight_decay: double,
+        eps: double,
+        maximize: bool,
+        grad_scale: Optional[Tensor],
+        found_inf: Optional[Tensor]
+    )
+        参数: lr=张量形式的学习率（支持per-parameter学习率）
+        用途: 融合的AMSGrad优化器更新，支持张量学习率
+
+【备注】
+    - AMSGrad是Adam的变体，使用max_exp_avg_sq维护历史最大二阶矩估计
+    - 两个重载仅学习率类型不同（标量 vs 张量）
+    - grad_scale/found_inf用于混合精度训练的梯度缩放

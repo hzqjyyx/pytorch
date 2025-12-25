@@ -1,0 +1,267 @@
+--------------------------------
+zeta (Hurwitz Zeta函数)
+来源: aten/src/ATen/native/cuda/Math.cuh
+--------------------------------
+
+【签名】
+    @device
+    zeta(x: Scalar[float], q: Scalar[float]) -> float
+
+【算法】
+    # Hurwitz Zeta 函数: ζ(x, q) = Σ(1/(k+q)^x), k=0 to ∞
+    # 使用 Euler-Maclaurin 公式逼近
+    
+    if x == 1:
+        return INFINITY
+    if q <= 0 or x < 1:
+        return NAN
+    
+    # 使用 Euler-Maclaurin 展开式
+    # 需要累加足够多项直到收敛
+    MACHEP = 1.11022302462515654042E-16
+    A = [
+        12.0, -720.0, 30240.0, -1209600.0, 
+        47900160.0, -1.8924375803183791606e9, ...  # Bernoulli数相关系数
+    ]
+    
+    sum = 0.0
+    a = q
+    b = 0.0
+    k = 0
+    s = power(a, -x)
+    
+    while (s > MACHEP or a <= 9.0) and k < 9:
+        sum += s
+        a += 1.0
+        s = power(a, -x)
+        k += 1
+    
+    w = a
+    s = s / x
+    sum += s
+    sum += 0.5 * s / w
+    
+    # 计算 Euler-Maclaurin 校正项
+    a = 1.0
+    k = 0
+    for i in range(12):
+        a *= x + k
+        b = A[i] * b / w
+        sum += b / a
+        k += 1
+        a *= x + k
+        k += 1
+        if abs(b / a) < MACHEP:
+            break
+    
+    return sum
+
+【备注】
+    - 使用 Euler-Maclaurin 公式加速收敛
+    - MACHEP: 机器精度阈值
+    - A[]: 预计算的 Bernoulli 数相关系数
+
+--------------------------------
+calc_digamma (Digamma函数)
+来源: aten/src/ATen/native/cuda/Math.cuh
+--------------------------------
+
+【签名】
+    @device
+    calc_digamma(x: Scalar[float]) -> float
+
+【算法】
+    # Digamma 函数: ψ(x) = d/dx[log(Γ(x))]
+    # 对负数使用反射公式: ψ(1-x) - ψ(x) = π*cot(π*x)
+    
+    result = 0.0
+    if x < 0:
+        # 负数反射公式
+        result = -PI / tan(PI * (1 - x))
+        x = 1 - x
+    
+    # 使用渐近展开式，需要 x >= 10
+    while x < 10:
+        result -= 1 / x
+        x += 1
+    
+    # Stirling 渐近展开
+    # ψ(x) ≈ log(x) - 1/(2x) - 1/(12x²) + 1/(120x⁴) - ...
+    if x == 10:
+        result += 2.25175258906672110764
+    else:
+        y = 0.0
+        if x < 1.0e17:
+            z = 1.0 / (x * x)
+            # Bernoulli 多项式展开
+            coeff = [
+                -1.0/12.0, 1.0/120.0, -1.0/252.0, 1.0/240.0,
+                -1.0/132.0, 691.0/32760.0, -1.0/12.0, ...
+            ]
+            y = z * polynomial(z, coeff)
+        result += log(x) - 0.5 / x + y
+    
+    return result
+
+【备注】
+    - 负数使用反射公式转换为正数计算
+    - x < 10 时递推到 x >= 10
+    - x >= 10 时使用 Stirling 渐近展开
+
+--------------------------------
+calc_trigamma (Trigamma函数)
+来源: aten/src/ATen/native/cuda/Math.cuh
+--------------------------------
+
+【签名】
+    @device
+    calc_trigamma(x: Scalar[float]) -> float
+
+【算法】
+    # Trigamma 函数: ψ'(x) = d²/dx²[log(Γ(x))]
+    # 负数反射公式: ψ'(1-x) = ψ'(x) + (π/sin(π*x))²
+    
+    sign = 1.0
+    result = 0.0
+    
+    if x < 0.5:
+        # 使用反射公式
+        sin_pi_x = sin(PI * x)
+        result = (PI / sin_pi_x)²
+        x = 1 - x
+    
+    # 递推到 x >= 10
+    while x < 10:
+        result += 1 / (x * x)
+        x += 1
+    
+    # 渐近展开: ψ'(x) ≈ 1/x + 1/(2x²) + 1/(6x³) - ...
+    if x == 10:
+        result += 0.105166394377603
+    else:
+        y = 0.0
+        if x < 1.0e17:
+            one = 1.0
+            z = one / (x * x)
+            # Bernoulli 多项式展开
+            coeff = [
+                1.0/6.0, -1.0/30.0, 1.0/42.0, -1.0/30.0,
+                5.0/66.0, -691.0/2730.0, 7.0/6.0, ...
+            ]
+            y = z * polynomial(z, coeff)
+        result += (1 + 1 / (2 * x) + y) / x
+    
+    return sign * result
+
+【备注】
+    - 负数使用反射公式
+    - x < 10 时递推
+    - x >= 10 时使用渐近展开
+
+--------------------------------
+calc_polygamma (Polygamma函数)
+来源: aten/src/ATen/native/cuda/Math.cuh
+--------------------------------
+
+【签名】
+    @device
+    calc_polygamma(x: Scalar[float], n: int) -> float
+
+【算法】
+    # Polygamma 函数: ψ^(n)(x) = d^(n+1)/dx^(n+1)[log(Γ(x))]
+    
+    # 特殊情况
+    if n == 0:
+        return calc_digamma(x)
+    if n == 1:
+        return calc_trigamma(x)
+    
+    # 负数反射公式
+    # ψ^(n)(1-x) + (-1)^(n+1) * ψ^(n)(x) = (-1)^n * π * d^n/dx^n[cot(π*x)]
+    sign = ((n % 2) == 0) ? 1.0 : -1.0
+    result = 0.0
+    
+    if x < 0.5:
+        # 计算 cot 的 n 阶导数
+        result = reflect_coeffs[n] * PI
+        z = PI * x
+        v = 0.0
+        w = cos(z)
+        for k in range(n):
+            v = w
+            w = sign * (z * v / (k + 1) + cos(z + (k + 2) * PI / 2))
+        result *= w / sin(z)
+        x = 1 - x
+    
+    # 递推到足够大
+    while x < 10:
+        result -= power(x, -(n + 1))
+        x += 1
+    
+    # 渐近展开
+    # ψ^(n)(x) ≈ (-1)^(n+1) * n! * [1/x^(n+1) + (n+1)/(2x^(n+2)) + ...]
+    if x < 1.0e17:
+        z = 1.0 / (x * x)
+        y = z * polynomial(z, bernoulli_coeffs[n])
+    else:
+        y = 0.0
+    
+    result += sign * factorial(n) * (power(x, -(n + 1)) + (n + 1) / (2.0 * x^(n + 2)) + y)
+    
+    return result
+
+【备注】
+    - n=0, 1 分别调用 digamma, trigamma
+    - 负数使用反射公式，需计算 cot 的 n 阶导数
+    - reflect_coeffs[n]: 预计算的反射系数
+    - bernoulli_coeffs[n]: Bernoulli 数相关系数
+
+--------------------------------
+calc_gcd (最大公约数)
+来源: aten/src/ATen/native/cuda/Math.cuh
+--------------------------------
+
+【签名】
+    @device
+    calc_gcd(a: int64, b: int64) -> int64
+
+【算法】
+    # Euclidean 算法
+    a = abs(a)
+    b = abs(b)
+    
+    while a != 0:
+        c = a
+        a = b % a
+        b = c
+    
+    return b
+
+【并行模式】
+    elementwise
+
+--------------------------------
+calc_lcm (最小公倍数)
+来源: aten/src/ATen/native/cuda/Math.cuh
+--------------------------------
+
+【签名】
+    @device
+    calc_lcm(a: int64, b: int64) -> int64
+
+【算法】
+    # lcm(a, b) = |a * b| / gcd(a, b)
+    
+    if a == 0 or b == 0:
+        return 0
+    
+    g = calc_gcd(a, b)
+    result = abs(a / g * b)
+    
+    return result
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 先除再乘以避免溢出

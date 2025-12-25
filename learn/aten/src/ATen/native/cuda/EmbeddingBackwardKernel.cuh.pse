@@ -1,0 +1,25 @@
+--------------------------------
+embedding_backward_cuda_kernel
+来源: aten/src/ATen/native/cuda/EmbeddingBackwardKernel.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    embedding_backward_cuda_kernel(
+        grad: Tensor[*, embedding_dim],           # 梯度输出
+        orig_indices: Tensor[N, int64],           # 原始索引
+        sorted_indices: Tensor[N, int64],         # 排序后的索引
+        count: Tensor[num_weights, int64],        # 每个权重的访问次数
+        num_weights: int64,                       # 嵌入表总行数
+        padding_idx: int = -1,                    # 填充索引（该行梯度置零）
+        mode_mean: bool = false,                  # 是否对重复索引求平均
+        offset2bag: Tensor = Tensor(),            # EmbeddingBag: offset到bag的映射
+        bag_size: Tensor = Tensor(),              # EmbeddingBag: 每个bag的大小
+        per_sample_weights: Tensor = Tensor()     # EmbeddingBag: 每个样本的权重
+    ) -> Tensor[num_weights, embedding_dim]
+
+【备注】
+    - 这是 embedding 层反向传播的 CUDA 入口函数
+    - sorted_indices 和 count 用于处理重复索引的累加
+    - EmbeddingBag 相关参数（offset2bag, bag_size, per_sample_weights）用于支持 EmbeddingBag 操作的反向传播
+    - 实际 kernel 实现未在此文件中定义

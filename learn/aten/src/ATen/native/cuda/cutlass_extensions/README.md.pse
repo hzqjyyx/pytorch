@@ -1,0 +1,55 @@
+--------------------------------
+cutlass_extensions 目录说明
+来源: aten/src/ATen/native/cuda/cutlass_extensions/README.md
+--------------------------------
+
+【来源】
+    源项目: NVIDIA FasterTransformer
+    源路径: src/fastertransformer/cutlass_extensions/include/cutlass_extensions
+    源提交: f8e42aa
+    目标: 支持混合数据类型 GEMM 实现
+
+【用途】
+    为 aten/src/ATen/native/cuda/MixedDTypesLinear.cu 提供混合精度矩阵乘法支持
+
+【文件选择】
+    仅包含必要文件，未包含:
+    - compute_occupancy.h
+    - epilogue/epilogue_quant_helper.h
+    - epilogue/threadblock/*
+    - gemm/kernel/gemm_moe_problem_visitor.h
+    - gemm/kernel/gemm_with_epilogue_visitor.h
+    - gemm/kernel/moe_cutlass_kernel.h
+    - gemm/kernel/moe_problem_visitor.h
+
+【主要修改】
+    目标: CUTLASS 2.10 → CUTLASS 3.x 适配
+
+    1. gemm/kernel/fpA_intB_gemm.h:
+       - Params 构造函数:
+         输入: args, device_sms, sm_occupancy
+         移除: grid_tiled_shape, gemm_k_size, workspace 参数
+         内部: 通过 ThreadblockSwizzle 自动计算 grid_tiled_shape 和 gemm_k_size
+       
+       - 新增接口:
+         get_workspace_size() -> size_t         # 返回 0
+         init_workspace(workspace, stream)      # 返回 Success
+         get_grid_dims() -> dim3                # 返回计算后的网格维度
+       
+       - 移除: get_extra_workspace_size() 静态方法
+       
+       - 新增: invoke(params, shared_storage) device 入口函数
+
+    2. gemm/warp/mma_tensorop_dequantizer.h:
+       - 移除: FasterTransformer 特定的 BF16 宏依赖
+       - 启用: CUDA 原生 BF16 支持 (<cuda_bf16.h>)
+       - 条件编译: __CUDA_ARCH__ >= 800 (移除 ENABLE_BF16 宏依赖)
+
+【代码差异状态】
+    警告: PyTorch lint 规则已重新格式化所有文件，当前代码与原始文件差异较大
+    追踪: 上述 diff 记录了 lint 前的语义修改
+
+【未来计划】
+    CUTLASS 官方将集成此功能后，此目录将从 PyTorch 源码树中移除
+    参考: github.com/NVIDIA/cutlass/discussions/911
+          github.com/NVIDIA/cutlass/issues/1060

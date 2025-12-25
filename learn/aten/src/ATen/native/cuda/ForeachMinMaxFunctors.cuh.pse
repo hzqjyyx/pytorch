@@ -1,0 +1,20 @@
+--------------------------------
+Foreach Min/Max 函数对象
+来源: aten/src/ATen/native/cuda/ForeachMinMaxFunctors.cuh
+--------------------------------
+
+【函数对象】
+    minimum<T>
+        签名: @device (a: T, b: T) -> T
+        算法: return (_isnan(a) || a < b) ? a : b
+        用途: 逐元素最小值，NaN优先传播
+
+    maximum<T>
+        签名: @device (a: T, b: T) -> T
+        算法: return (_isnan(a) || a > b) ? a : b
+        用途: 逐元素最大值，NaN优先传播
+
+【备注】
+    - 与 std::min/std::max 不同，这里显式处理 NaN
+    - NaN 检测优先：遇到 NaN 总是返回 NaN
+    - 用于 foreach 批量操作的 CUDA kernel

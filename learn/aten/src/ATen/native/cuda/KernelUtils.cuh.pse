@@ -1,0 +1,233 @@
+# 原子操作工具与索引辅助函数
+
+**来源**: aten/src/ATen/native/cuda/KernelUtils.cuh
+
+---
+
+## 平台特定原子操作 (ROCm 6.2.01+)
+
+--------------------------------
+preview_unsafeAtomicAdd (__hip_bfloat162)
+--------------------------------
+
+【签名】
+    @device
+    preview_unsafeAtomicAdd(address: __hip_bfloat162*, value: __hip_bfloat162) -> __hip_bfloat162
+
+【算法】
+    if 支持硬件原子操作 (__gfx942__ 且有内置函数):
+        # 直接调用 GPU 硬件原子加
+        return __builtin_amdgcn_flat_atomic_fadd_v2bf16(address, value)
+    else:
+        # 软件模拟: CAS 循环
+        old_val = atomic_load(address)
+        loop:
+            new_val = old_val + value
+            success = atomic_compare_exchange_strong(address, &old_val, new_val)
+            if not success: continue
+            break
+        return old_val
+
+【备注】
+    - 仅在 ROCm 6.2.01+ 定义
+    - 为后续统一宏 ATOMICADD 提供实现
+
+--------------------------------
+preview_unsafeAtomicAdd (__half2)
+--------------------------------
+
+【签名】
+    @device
+    preview_unsafeAtomicAdd(address: __half2*, value: __half2) -> __half2
+
+【算法】
+    if 支持硬件原子操作 (__gfx942__ 且有内置函数):
+        return __builtin_amdgcn_flat_atomic_fadd_v2f16(address, value)
+    else:
+        # 软件模拟: CAS 循环
+        old_val = atomic_load(address)
+        loop:
+            new_val = old_val + value
+            success = atomic_compare_exchange_strong(address, &old_val, new_val)
+            if not success: continue
+            break
+        return old_val
+
+【备注】
+    - 仅在 ROCm 6.2.01+ 定义
+
+---
+
+## 宏定义
+
+```
+# 根据平台选择原子操作实现
+ATOMICADD = preview_unsafeAtomicAdd  (ROCm 6.2.01+)
+          | atomicAdd                (其他平台)
+
+# BFloat16 零值表示
+NATIVE_ZERO_BF16 = __float2bfloat16(0.0f)   (ROCm 6.2.01+)
+                 | __int2bfloat16_rz(0)     (其他平台)
+```
+
+---
+
+## 索引辅助函数
+
+--------------------------------
+idx (NCHW 布局索引)
+--------------------------------
+
+【签名】
+    @device
+    idx(nc: size_t, height: size_t, width: size_t, h: size_t, w: size_t) -> size_t
+
+【算法】
+    return (nc * height + h) * width + w
+
+【备注】
+    - 用于 NCHW 布局的 2D 张量索引
+    - nc: batch * channels 的联合索引
+
+--------------------------------
+idx_cl (NHWC 布局索引)
+--------------------------------
+
+【签名】
+    @device
+    idx_cl(n: size_t, h: size_t, w: size_t, c: size_t, 
+           height: size_t, width: size_t, channel: size_t) -> size_t
+
+【算法】
+    return ((n * height + h) * width + w) * channel + c
+
+【备注】
+    - 用于 channels-last (NHWC) 布局
+
+---
+
+## 优化半精度原子操作
+
+--------------------------------
+fastSpecializedAtomicAdd (Half 特化)
+--------------------------------
+
+【签名】
+    @device
+    fastSpecializedAtomicAdd(
+        tensor: Half*, 
+        index: index_t, 
+        numel: index_t, 
+        value: Half
+    )
+
+【算法】
+    if 不支持 __half2 原子操作 (ROCm < 6.2.01 或 CUDA arch < 700):
+        gpuAtomicAddNoReturn(tensor + index, value)
+        return
+
+    # 优化路径: 尝试用 __half2 向量原子操作
+    target_addr = &tensor[index]
+    low_byte = (target_addr 是 32bit 对齐)
+
+    if low_byte and index < numel - 1:
+        # 当前元素在低位，与下一个元素组成 half2
+        value2 = (value, 0)
+        ATOMICADD((__half2*)target_addr, value2)
+
+    else if not low_byte and index > 0:
+        # 当前元素在高位，与前一个元素组成 half2
+        value2 = (0, value)
+        ATOMICADD((__half2*)(target_addr - 1), value2)
+
+    else:
+        # 边界情况: 回退到标量原子操作
+        atomicAdd(target_addr, value)
+
+【并行模式】
+    elementwise
+
+【备注】
+    - __half2 原子操作比 __half 快 6 倍 (见 PR #21879)
+    - 通过对齐检测将标量操作转换为向量操作
+    - 边界保护: 防止越界访问
+
+--------------------------------
+fastSpecializedAtomicAdd (BFloat16 特化)
+--------------------------------
+
+【签名】
+    @device
+    fastSpecializedAtomicAdd(
+        tensor: BFloat16*, 
+        index: index_t, 
+        numel: index_t, 
+        value: BFloat16
+    )
+
+【算法】
+    if 不支持 __nv_bfloat162 原子操作 (ROCm < 6.2.01 或 CUDA arch < 800):
+        gpuAtomicAddNoReturn(tensor + index, value)
+        return
+
+    # 与 Half 版本逻辑相同，使用 __nv_bfloat162
+    target_addr = &tensor[index]
+    low_byte = (target_addr 是 32bit 对齐)
+
+    if low_byte and index < numel - 1:
+        value2 = (value, NATIVE_ZERO_BF16)
+        ATOMICADD((__nv_bfloat162*)target_addr, value2)
+
+    else if not low_byte and index > 0:
+        value2 = (NATIVE_ZERO_BF16, value)
+        ATOMICADD((__nv_bfloat162*)(target_addr - 1), value2)
+
+    else:
+        atomicAdd((__nv_bfloat16*)target_addr, value)
+
+【并行模式】
+    elementwise
+
+--------------------------------
+fastSpecializedAtomicAdd (通用类型)
+--------------------------------
+
+【签名】
+    @device
+    fastSpecializedAtomicAdd(
+        tensor: scalar_t*,     # scalar_t != Half && != BFloat16
+        index: index_t, 
+        numel: index_t, 
+        value: scalar_t
+    )
+
+【算法】
+    gpuAtomicAddNoReturn(tensor + index, value)
+
+【备注】
+    - 其他类型直接使用标准原子操作
+
+--------------------------------
+fastAtomicAdd (统一接口)
+--------------------------------
+
+【签名】
+    @device
+    fastAtomicAdd(
+        tensor: scalar_t*, 
+        index: index_t, 
+        numel: index_t, 
+        value: scalar_t,
+        fast_atomics: bool
+    )
+
+【算法】
+    if fast_atomics:
+        fastSpecializedAtomicAdd(tensor, index, numel, value)
+    else:
+        gpuAtomicAddNoReturn(tensor + index, value)
+
+【备注】
+    - 运行时开关: 控制是否启用优化路径
+    - fast_atomics=true: 半精度用 __half2/__bfloat162 优化
+    - fast_atomics=false: 所有类型用标准原子操作

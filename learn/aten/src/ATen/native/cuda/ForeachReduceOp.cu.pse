@@ -1,0 +1,397 @@
+--------------------------------
+TensorListAddresses
+来源: aten/src/ATen/native/cuda/ForeachReduceOp.cu
+--------------------------------
+
+【状态】
+    addresses: void*[400]    # 存储最多400个Tensor的数据指针
+
+【用途】
+    用于 lpmax_cleanup/lpnorm_cleanup kernel，将 Tensor 指针传递给 CUDA kernel
+    相比 TensorListMetadata 更轻量，只存储地址，能容纳更多 Tensor (400 vs depth_to_max_tensors)
+
+【备注】
+    - MAX_TENSORS_PER_KERNEL = 400 (经验值，受 4KB kernel 参数限制)
+    - 需在 test_foreach.py 中测试
+
+--------------------------------
+LpMaxFunctor
+来源: aten/src/ATen/native/cuda/ForeachReduceOp.cu
+--------------------------------
+
+【签名】
+    @device
+    LpMaxFunctor<T>::operator()(
+        chunk_size: int,
+        tl: TensorListMetadata,
+        output_per_tensor_ptr: T*,
+        max_chunks_per_tensor: int
+    )
+
+【算法】
+    tensor_loc = tl.block_to_tensor[blockIdx.x]
+    chunk_idx = tl.block_to_chunk[blockIdx.x]
+    n = tl.numel_for_tensor[tensor_loc]
+    x = tl.addresses[0][tensor_loc] + chunk_idx * chunk_size
+    n = n - chunk_idx * chunk_size
+
+    # Step 1: 线程级归约 (向量化或标量)
+    vals[kILP] = T::lowest()
+    if n % kILP == 0 and chunk_size % kILP == 0 and is_aligned(x):
+        # 向量化路径
+        for i_start in range(threadIdx.x, n // kILP, blockDim.x):
+            r_x[kILP] = load_vectorized(x, i_start)
+            for ii in range(kILP):
+                vals[ii] = max_propagate_nan(vals[ii], r_x[ii])
+    else:
+        # 标量路径
+        for i_start in range(0, n, blockDim.x * kILP):
+            for ii in range(kILP):
+                i = i_start + threadIdx.x + ii * blockDim.x
+                if i < n and i < chunk_size:
+                    vals[ii] = max_propagate_nan(vals[ii], x[i])
+
+    # Step 2: Block级归约
+    val = T::lowest()
+    for i in range(kILP):
+        val = max_propagate_nan(val, vals[i])
+    final_val = at::native::cuda_utils::BlockReduceMax(val, shared_vals)
+
+    # Step 3: 写回
+    if threadIdx.x == 0:
+        output_per_tensor_ptr[(tl.start_tensor_this_launch + tensor_loc) * max_chunks_per_tensor + chunk_idx] = final_val
+
+【并行模式】
+    grid: 每个 chunk 一个 block
+    block: 512 threads
+
+    优化:
+    - kILP 向量化 (对齐时)
+    - shared_memory[512]: block_reduce 中间结果
+    - block_reduce(max): 跨 threadIdx 归约
+
+--------------------------------
+lpmax_cleanup
+来源: aten/src/ATen/native/cuda/ForeachReduceOp.cu
+--------------------------------
+
+【签名】
+    @device
+    lpmax_cleanup<T>(
+        output_per_tensor: const T*,           # [ntensors, max_chunks_per_tensor]
+        addr_struct: TensorListAddresses,
+        max_chunks_per_tensor: int
+    )
+
+【算法】
+    output_this_tensor = output_per_tensor + blockIdx.x * max_chunks_per_tensor
+
+    # Step 1: 线程级归约
+    val = T::lowest()
+    for i in range(threadIdx.x, max_chunks_per_tensor, blockDim.x):
+        val = max_propagate_nan(val, output_this_tensor[i])
+
+    # Step 2: Block级归约
+    final_val = at::native::cuda_utils::BlockReduceMax(val, shared_vals)
+
+    # Step 3: 写回结果 Tensor
+    if threadIdx.x == 0:
+        *(T*)addr_struct.addresses[blockIdx.x] = final_val
+
+【并行模式】
+    grid: ntensors (每个 tensor 一个 block)
+    block: 512 threads
+    shared_memory[512]: block_reduce 中间结果
+
+--------------------------------
+foreach_tensor_max_cuda
+来源: aten/src/ATen/native/cuda/ForeachReduceOp.cu
+--------------------------------
+
+【签名】
+    @host→device
+    foreach_tensor_max_cuda(tensors: TensorList) -> Tensor[]
+
+    约束:
+    - 所有 tensors 非空 (numel > 0)
+
+【算法】
+    check_foreach_api_restrictions(tensors)
+    if not can_use_fast_route(tensors):
+        return foreach_tensor_max_slow(tensors)
+
+    # Step 1: 计算最大 chunk 数
+    ntensors = len(tensors)
+    max_chunks_per_tensor = max(ceil(t.numel() / kChunkSize) for t in tensors)
+
+    # Step 2: 分配中间 buffer
+    output_per_tensor = at::zeros([ntensors * max_chunks_per_tensor], tensors[0].options())
+    vec_res = [at::native::empty_cuda({}, tensors[0].options()) for _ in range(ntensors)]
+
+    # Step 3: 第一阶段 kernel - 每个 chunk 计算 max
+    AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, tensors[0].scalar_type(), [&]() {
+        multi_tensor_apply<1>(
+            [tensors],
+            LpMaxFunctor<scalar_t>(),
+            output_per_tensor.mutable_data_ptr<scalar_t>(),
+            max_chunks_per_tensor
+        )
+        C10_CUDA_KERNEL_LAUNCH_CHECK()
+    })
+
+    # Step 4: 第二阶段 kernel - 归约 chunks (分批以满足 4KB 限制)
+    num_kernels = ceil(ntensors / MAX_TENSORS_PER_KERNEL)
+    for i in range(num_kernels):
+        num_tensors_this_kernel = MAX_TENSORS_PER_KERNEL if (i < num_kernels - 1 or ntensors % MAX_TENSORS_PER_KERNEL == 0) else (ntensors % MAX_TENSORS_PER_KERNEL)
+
+        addr_struct = TensorListAddresses()
+        for j in range(num_tensors_this_kernel):
+            addr_struct.addresses[j] = vec_res[i * MAX_TENSORS_PER_KERNEL + j].mutable_data_ptr<scalar_t>()
+
+        lpmax_cleanup<scalar_t><<<num_tensors_this_kernel, 512, 0, stream>>>(
+            output_per_tensor.const_data_ptr<scalar_t>() + i * MAX_TENSORS_PER_KERNEL * max_chunks_per_tensor,
+            addr_struct,
+            max_chunks_per_tensor
+        )
+        C10_CUDA_KERNEL_LAUNCH_CHECK()
+
+    # Step 5: 处理空 Tensor
+    result = []
+    i = 0
+    for t in tensors:
+        if t.numel() != 0:
+            result.append(vec_res[i])
+            i += 1
+        else:
+            result.append(at::native::empty_cuda({}, tensors[0].options()))
+
+    return result
+
+【备注】
+    - 两阶段归约: 第一阶段每个 chunk 归约，第二阶段跨 chunks 归约
+    - 分批处理: 每批最多 400 个 Tensor，避免超过 kernel 参数大小限制
+
+--------------------------------
+LpNormFunctor
+来源: aten/src/ATen/native/cuda/ForeachReduceOp.cu
+--------------------------------
+
+【签名】
+    @device
+    LpNormFunctor<T, norm_type, out_t>::operator()(
+        chunk_size: int,
+        tl: TensorListMetadata,
+        output_per_tensor_ptr: out_opmath_t*,
+        max_chunks_per_tensor: int
+    )
+
+    其中 norm_type: L1 | L2 | LInf
+
+【算法】
+    tensor_loc = tl.block_to_tensor[blockIdx.x]
+    chunk_idx = tl.block_to_chunk[blockIdx.x]
+    n = tl.numel_for_tensor[tensor_loc]
+    x = tl.addresses[0][tensor_loc] + chunk_idx * chunk_size
+    n = n - chunk_idx * chunk_size
+
+    # Step 1: 线程级归约 (向量化或标量)
+    vals[kILP] = out_opmath_t(0)
+    if n % kILP == 0 and chunk_size % kILP == 0 and is_aligned(x):
+        # 向量化路径
+        for i_start in range(threadIdx.x, n // kILP, blockDim.x):
+            r_x[kILP] = load_vectorized(x, i_start)
+            for ii in range(kILP):
+                next = out_opmath_t(r_x[ii])
+                match norm_type:
+                    L1: vals[ii] += abs(next)
+                    L2: vals[ii] += next * next
+                    LInf: vals[ii] = max_propagate_nan(vals[ii], abs(next))
+    else:
+        # 标量路径
+        for i_start in range(0, n, blockDim.x * kILP):
+            for ii in range(kILP):
+                i = i_start + threadIdx.x + ii * blockDim.x
+                if i < n and i < chunk_size:
+                    next = out_opmath_t(x[i])
+                    match norm_type:
+                        L1: vals[ii] += abs(next)
+                        L2: vals[ii] += next * next
+                        LInf: vals[ii] = max_propagate_nan(vals[ii], abs(next))
+
+    # Step 2: Block级归约
+    val = out_opmath_t(0)
+    for i in range(kILP):
+        match norm_type:
+            L1 | L2: val += vals[i]
+            LInf: val = max_propagate_nan(val, vals[i])
+
+    match norm_type:
+        L1 | L2: final_val = at::native::cuda_utils::BlockReduceSum(val, shared_vals)
+        LInf: final_val = at::native::cuda_utils::BlockReduceMax(val, shared_vals)
+
+    # Step 3: 写回
+    if threadIdx.x == 0:
+        output_per_tensor_ptr[(tl.start_tensor_this_launch + tensor_loc) * max_chunks_per_tensor + chunk_idx] = final_val
+
+【并行模式】
+    grid: 每个 chunk 一个 block
+    block: 512 threads
+
+    优化:
+    - kILP 向量化 (对齐时)
+    - shared_memory[512]: block_reduce 中间结果
+    - block_reduce: L1/L2 用 sum，LInf 用 max
+
+--------------------------------
+lpnorm_cleanup
+来源: aten/src/ATen/native/cuda/ForeachReduceOp.cu
+--------------------------------
+
+【签名】
+    @device
+    lpnorm_cleanup<T, norm_type, out_t>(
+        output_per_tensor: const out_opmath_t*,    # [ntensors, max_chunks_per_tensor]
+        addr_struct: TensorListAddresses,
+        max_chunks_per_tensor: int
+    )
+
+    其中 norm_type: L1 | L2 | LInf
+
+【算法】
+    output_this_tensor = output_per_tensor + blockIdx.x * max_chunks_per_tensor
+
+    # Step 1: 线程级归约
+    val = out_opmath_t(0)
+    for i in range(threadIdx.x, max_chunks_per_tensor, blockDim.x):
+        match norm_type:
+            L1 | L2: val += output_this_tensor[i]
+            LInf: val = max_propagate_nan(val, output_this_tensor[i])
+
+    # Step 2: Block级归约
+    match norm_type:
+        L1 | L2: final_val = at::native::cuda_utils::BlockReduceSum<out_opmath_t>(val, shared_vals)
+        LInf: final_val = at::native::cuda_utils::BlockReduceMax(val, shared_vals)
+
+    # Step 3: 写回 (L2 需要开方)
+    if threadIdx.x == 0:
+        match norm_type:
+            L1 | LInf: *(out_t*)addr_struct.addresses[blockIdx.x] = final_val
+            L2: *(out_t*)addr_struct.addresses[blockIdx.x] = sqrt(final_val)
+
+【并行模式】
+    grid: ntensors (每个 tensor 一个 block)
+    block: 512 threads
+    shared_memory[512]: block_reduce 中间结果
+
+--------------------------------
+check_foreach_norm_dtype (内部工具函数)
+来源: aten/src/ATen/native/cuda/ForeachReduceOp.cu
+--------------------------------
+
+【函数】
+    check_foreach_norm_dtype(opt_dtype: Optional[ScalarType], self_dtype: ScalarType, name: str)
+        用途: 验证 _foreach_norm 的 dtype 参数
+
+    验证规则:
+    - dtype 必须是浮点或复数
+    - dtype 和 self_dtype 的复数性必须一致
+    - self_dtype 必须能无损转换为 dtype (promoteTypes(self_dtype, dtype) == dtype)
+
+--------------------------------
+foreach_tensor_norm_cuda
+来源: aten/src/ATen/native/cuda/ForeachReduceOp.cu
+--------------------------------
+
+【签名】
+    @host→device
+    foreach_tensor_norm_cuda(
+        tensors: TensorList,
+        ord: Scalar,                          # 1, 2, 或 inf
+        dtype: Optional[ScalarType] = None
+    ) -> Tensor[]
+
+    约束:
+    - ord in {1, 2, inf}
+    - 不支持整数或复数类型 (走 slow path)
+
+【算法】
+    p = ord.to<double>()
+    check_foreach_api_restrictions(tensors)
+
+    # 检查是否需要 slow path
+    has_int_or_complex = any(t.scalar_type() is int or complex for t in tensors)
+    if not can_use_fast_route(tensors) or has_int_or_complex or p not in {1, 2, inf}:
+        return foreach_tensor_norm_slow(tensors, ord, dtype)
+
+    check_foreach_norm_dtype(dtype, tensors[0].scalar_type(), "_foreach_tensor_norm_cuda")
+
+    # Step 1: 计算最大 chunk 数
+    ntensors = len(tensors)
+    max_chunks_per_tensor = max(ceil(t.numel() / kChunkSize) for t in tensors)
+
+    # Step 2: 分配中间 buffer
+    output_dtype = dtype if dtype else tensors[0].scalar_type()
+    output_per_tensor_dtype = toOpMathType(output_dtype)
+    output_per_tensor = at::zeros(
+        [ntensors * max_chunks_per_tensor],
+        tensors[0].options().dtype(output_per_tensor_dtype)
+    )
+    vec_res = [at::native::empty_cuda({}, tensors[0].options().dtype(output_dtype)) for _ in range(ntensors)]
+
+    # Step 3: 第一阶段 kernel - 每个 chunk 计算 Lp norm 部分和
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, tensors[0].scalar_type(), [&]() {
+        AT_DISPATCH_OUT_DTYPES(output_dtype, [&]() {
+            match p:
+                1: functor = LpNormFunctor<scalar_t, NormType::L1, out_t>()
+                2: functor = LpNormFunctor<scalar_t, NormType::L2, out_t>()
+                inf: functor = LpNormFunctor<scalar_t, NormType::LInf, out_t>()
+
+            multi_tensor_apply<1>(
+                [tensors],
+                functor,
+                output_per_tensor.mutable_data_ptr<out_opmath_t>(),
+                max_chunks_per_tensor
+            )
+            C10_CUDA_KERNEL_LAUNCH_CHECK()
+        })
+    })
+
+    # Step 4: 第二阶段 kernel - 归约 chunks (分批以满足 4KB 限制)
+    num_kernels = ceil(ntensors / MAX_TENSORS_PER_KERNEL)
+    for i in range(num_kernels):
+        num_tensors_this_kernel = MAX_TENSORS_PER_KERNEL if (i < num_kernels - 1 or ntensors % MAX_TENSORS_PER_KERNEL == 0) else (ntensors % MAX_TENSORS_PER_KERNEL)
+
+        addr_struct = TensorListAddresses()
+        for j in range(num_tensors_this_kernel):
+            addr_struct.addresses[j] = vec_res[i * MAX_TENSORS_PER_KERNEL + j].mutable_data_ptr<out_t>()
+
+        match p:
+            1: kernel = lpnorm_cleanup<scalar_t, NormType::L1, out_t>
+            2: kernel = lpnorm_cleanup<scalar_t, NormType::L2, out_t>
+            inf: kernel = lpnorm_cleanup<scalar_t, NormType::LInf, out_t>
+
+        kernel<<<num_tensors_this_kernel, 512, 0, stream>>>(
+            output_per_tensor.const_data_ptr<out_opmath_t>() + i * MAX_TENSORS_PER_KERNEL * max_chunks_per_tensor,
+            addr_struct,
+            max_chunks_per_tensor
+        )
+        C10_CUDA_KERNEL_LAUNCH_CHECK()
+
+    # Step 5: 处理空 Tensor
+    result = []
+    i = 0
+    for t in tensors:
+        if t.numel() != 0:
+            result.append(vec_res[i])
+            i += 1
+        else:
+            result.append(at::zeros({}, tensors[0].options().dtype(output_dtype)))
+
+    return result
+
+【备注】
+    - 两阶段归约: 第一阶段每个 chunk 归约，第二阶段跨 chunks 归约
+    - 分批处理: 每批最多 400 个 Tensor，避免超过 kernel 参数大小限制
+    - L2 norm 在第二阶段 cleanup 中开方
+    - 不支持整数/复数类型 (走 slow path)
+    - AT_DISPATCH_OUT_DTYPES: 支持 Double, Float, Half, BFloat16 输出类型

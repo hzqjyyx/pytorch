@@ -1,0 +1,154 @@
+--------------------------------
+Jiterator (JIT编译循环)
+来源: aten/src/ATen/native/cuda/JitLoops.cuh
+--------------------------------
+
+【核心概念】
+    Jiterator: Just-In-Time编译器，动态编译CUDA kernels以减少:
+    - 编译时间
+    - 二进制大小
+    - CUDA初始上下文大小
+
+【缓存机制】
+    位置: ~/.cache/torch/kernels (非Windows系统)
+    控制变量:
+        - USE_PYTORCH_KERNEL_CACHE=0: 禁用缓存
+        - PYTORCH_KERNEL_CACHE_PATH: 自定义缓存路径
+
+【限制】
+    - 不支持复数运算
+    - 不支持带标量参数的kernels (注: 此限制已过时，见下方函数)
+
+【函数】
+    jitted_gpu_kernel<name, return_type, f_inputs_type, arity, Args...>(
+        iter: TensorIteratorBase,
+        f: string,                              # kernel函数体字符串
+        scalar_pos: BinaryFuncVariant = NoScalar,
+        scalar_val: opmath_type<f_inputs_type> = 0,
+        extra_args: tuple<Args...> = {}
+    )
+        参数:
+            - name: kernel名称 (编译时常量字符串)
+            - return_type: 输出类型
+            - f_inputs_type: 输入共同类型
+            - arity: 输入tensor数量 (1=unary, 2=binary)
+            - f: JIT编译的函数体代码字符串
+            - scalar_pos: 标量位置 (NoScalar/LhsScalar/RhsScalar)
+            - scalar_val: 标量值 (仅当scalar_pos!=NoScalar时使用)
+            - extra_args: 运行时捕获参数 (类似lambda capture)
+        
+        用途: JIT编译并执行elementwise unary/binary kernel
+        
+        约束:
+            - 所有tensor必须在CUDA设备上
+            - extra_args必须是基础C++类型
+            - extra_args必须在TensorIterator提供的参数之后
+                ✅ foo(scalar_t x, scalar_t y, int n)
+                ❌ foo(int n, scalar_t x, scalar_t y)
+                ❌ foo(scalar_t x, int n, scalar_t y)
+        
+        调用:
+            - iter.can_use_32bit_indexing(): 检查是否可用32位索引
+            - iter.with_32bit_indexing(): 拆分为32位索引子迭代器
+            - c10::CppTypeToScalarType: C++类型转ScalarType
+            - jitted_gpu_kernel_impl: 实际JIT编译执行
+
+        逻辑:
+            # Step 1: 设备检查
+            for arg in range(iter.ntensors()):
+                assert iter.device(arg).is_cuda()
+            
+            if iter.numel() == 0:
+                return
+            
+            # Step 2: 处理大索引 (>INT32_MAX)
+            if not iter.can_use_32bit_indexing():
+                for sub_iter in iter.with_32bit_indexing():
+                    jitted_gpu_kernel<...>(sub_iter, f, scalar_pos, scalar_val, extra_args)
+                return
+            
+            # Step 3: 检测是否需要动态类型转换
+            needs_dynamic_casting = false
+            
+            # 检查输出类型
+            if iter.dtype(0) != return_type:
+                needs_dynamic_casting = true
+            
+            # 检查输入类型
+            for i in range(1, arity+1):
+                if iter.dtype(i) != f_inputs_type:
+                    needs_dynamic_casting = true
+                    break
+            
+            # Step 4: 根据scalar_pos分发到具体实现
+            match scalar_pos:
+                NoScalar:
+                    jitted_gpu_kernel_impl<name, return_type, f_inputs_type, arity, NoScalar>(
+                        iter, f, needs_dynamic_casting, 0, extra_args)
+                RhsScalar:
+                    jitted_gpu_kernel_impl<name, return_type, f_inputs_type, arity, RhsScalar>(
+                        iter, f, needs_dynamic_casting, scalar_val, extra_args)
+                LhsScalar:
+                    jitted_gpu_kernel_impl<name, return_type, f_inputs_type, arity, LhsScalar>(
+                        iter, f, needs_dynamic_casting, scalar_val, extra_args)
+
+    opmath_jitted_gpu_kernel_with_scalars<name, return_type, f_inputs_type>(
+        iter: TensorIteratorBase,
+        f: string
+    )
+        参数:
+            - name: kernel名称
+            - return_type: 输出类型
+            - f_inputs_type: 输入类型
+            - f: kernel函数体字符串
+        
+        用途: 处理binary操作中有CPU标量的情况
+        
+        约束:
+            - iter.ntensors() == 3 (output + 2 inputs)
+        
+        调用:
+            - iter.is_cpu_scalar(i): 检查第i个操作数是否为CPU标量
+            - iter.scalar_value<T>(i): 提取标量值
+            - iter.remove_operand(i): 移除操作数
+            - jitted_gpu_kernel: 分发到上述函数
+        
+        逻辑:
+            assert iter.ntensors() == 3
+            
+            if iter.is_cpu_scalar(1):
+                scalar_val = iter.scalar_value<opmath_t>(1)
+                iter.remove_operand(1)
+                jitted_gpu_kernel<name, return_type, f_inputs_type, 1>(
+                    iter, f, LhsScalar, scalar_val)
+            
+            elif iter.is_cpu_scalar(2):
+                scalar_val = iter.scalar_value<opmath_t>(2)
+                iter.remove_operand(2)
+                jitted_gpu_kernel<name, return_type, f_inputs_type, 1>(
+                    iter, f, RhsScalar, scalar_val)
+            
+            else:
+                jitted_gpu_kernel<name, return_type, f_inputs_type, 2>(iter, f)
+
+【依赖】
+    AT_USE_JITERATOR(): 编译时开关
+    TensorIteratorBase: 迭代器框架
+    at::cuda::jit::BinaryFuncVariant: 标量位置枚举
+    jitted_gpu_kernel_impl: 实际JIT编译执行 (定义在 CUDAJitLoops.cuh)
+
+【使用示例】
+    # i1 kernel (符号函数)
+    jitted_gpu_kernel<"i1", float, float, 1>(
+        iter, 
+        "return x > 0 ? 1.0f : (x < 0 ? -1.0f : 0.0f);"
+    )
+    
+    # gcd kernel (带运行时参数)
+    jitted_gpu_kernel<"gcd", int64, int64, 2, int64>(
+        iter,
+        "return gcd_impl(x, y, mod);",
+        NoScalar,
+        0,
+        std::make_tuple(mod)  // extra_args
+    )

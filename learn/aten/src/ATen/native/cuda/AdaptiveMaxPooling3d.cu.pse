@@ -1,0 +1,378 @@
+--------------------------------
+start_index, end_index:
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling3d.cu
+--------------------------------
+
+【签名】
+    @device
+    start_index(a: int64, b: int64, c: int64) -> int64
+    end_index(a: int64, b: int64, c: int64) -> int64
+
+【算法】
+    start_index:
+        return (a / b) * c + ((a % b) * c) / b
+    
+    end_index:
+        return 1 + ((a + 1) * c - 1) / b
+
+【备注】
+    - 用于计算输出位置 a 在输出大小 b、输入大小 c 下对应的输入索引范围
+    - start_index: 起始索引
+    - end_index: 结束索引（不包含）
+
+--------------------------------
+adaptivemaxpool:
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling3d.cu
+--------------------------------
+
+【签名】
+    @device
+    adaptivemaxpool<T>(
+        input: T*,                    # 输入 [D, T, H, W]
+        output: T*,                   # 输出 [D, osizeT, osizeH, osizeW]
+        indices: int64*,              # argmax索引
+        isizeT, isizeH, isizeW: int,  # 输入尺寸
+        osizeT, osizeH, osizeW: int,  # 输出尺寸
+        istrideD, istrideT, istrideH, istrideW: int64,
+        offsetZ: int64                # 输出平面偏移
+    )
+
+【算法】
+    # 线程块与输出映射
+    o_plane = blockIdx.x + offsetZ
+    ot = o_plane % osizeT              # 输出时间索引
+    d = o_plane / osizeT               # 特征/切片索引
+
+    # 计算时间维度的输入范围（固定）
+    istartT = start_index(ot, osizeT, isizeT)
+    iendT = end_index(ot, osizeT, isizeT)
+    kT = iendT - istartT
+
+    # 计算输入/输出偏移
+    input_dt = input + d*istrideD + istartT*istrideT
+    output_dt = output + o_plane*osizeH*osizeW
+    indices_dt = indices + o_plane*osizeH*osizeW
+
+    # 遍历输出平面的所有(H, W)位置
+    parallel_for oh in range(osizeH):    # gridDim.y * blockDim.y 并行
+        parallel_for ow in range(osizeW):    # blockDim.x 并行
+            
+            # 计算空间维度的输入范围
+            istartH = start_index(oh, osizeH, isizeH)
+            iendH = end_index(oh, osizeH, isizeH)
+            kH = iendH - istartH
+
+            istartW = start_index(ow, osizeW, isizeW)
+            iendW = end_index(ow, osizeW, isizeW)
+            kW = iendW - istartW
+
+            # 在输入的 [kT, kH, kW] 窗口内找最大值
+            ptr_input = input_dt + istartH*istrideH + istartW*istrideW
+            max_val = -Infinity
+            argmax = istartT*isizeH*isizeW + istartH*isizeW + istartW
+
+            for it in range(kT):
+                for ih in range(kH):
+                    for iw in range(kW):
+                        val = ptr_input[ih*istrideH + iw*istrideW]
+                        if val > max_val or isnan(val):
+                            max_val = val
+                            argmax = (it+istartT)*isizeH*isizeW + (ih+istartH)*isizeW + iw+istartW
+                ptr_input += istrideT    # 下一个时间帧
+
+            output_dt[oh*osizeW + ow] = max_val
+            indices_dt[oh*osizeW + ow] = argmax
+
+【并行模式】
+    grid: (min(totalZ, 65535), blocksH)
+        - totalZ = D * osizeT (特征×输出时间帧)
+        - blocksH = max(16 / totalZ, 1)
+    
+    block: (32, 8)
+        - threadIdx.x: W 维度
+        - threadIdx.y: H 维度
+
+【备注】
+    - NaN 值会被选为最大值（NaN传播）
+    - 输入被视为5D: [B, D, T, H, W] 或 4D: [D, T, H, W]
+    - totalZ > 65535 时分批处理（CUDA grid限制）
+
+--------------------------------
+adaptivemaxpool_loop:
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling3d.cu
+--------------------------------
+
+【签名】
+    @host→device
+    adaptivemaxpool_loop<scalar_t>(
+        input_data: scalar_t*,
+        output_data: scalar_t*,
+        indices_data: int64*,
+        totalZ: int64,              # D * osizeT
+        isizeT, isizeH, isizeW: int,
+        osizeT, osizeH, osizeW: int,
+        istrideD, istrideT, istrideH, istrideW: int64
+    )
+
+【算法】
+    offsetZ = 0
+    threads = (32, 8)
+    blocksH = max(16 / totalZ, 1)
+
+    while totalZ > 0:
+        blocks = (min(totalZ, 65535), blocksH)
+        adaptivemaxpool<<<blocks, threads>>>(
+            input_data, output_data, indices_data,
+            isizeT, isizeH, isizeW, osizeT, osizeH, osizeW,
+            istrideD, istrideT, istrideH, istrideW, offsetZ
+        )
+        totalZ -= 65535
+        offsetZ += 65535
+
+【备注】
+    - 处理 totalZ > 65535 的情况，分批启动kernel
+
+--------------------------------
+adaptivemaxgradinput:
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling3d.cu
+--------------------------------
+
+【签名】
+    @device
+    adaptivemaxgradinput<T>(
+        gradInput: T*,              # 输入梯度 [D, T, H, W]
+        gradOutput: T*,             # 输出梯度 [D, osizeT, osizeH, osizeW]
+        indices: int64*,            # 前向的argmax索引
+        isizeT, isizeH, isizeW: int,
+        osizeT, osizeH, osizeW: int,
+        offsetZ: int64
+    )
+
+【算法】
+    o_plane = blockIdx.x + offsetZ
+    d = o_plane / osizeT
+
+    gradInput_d = gradInput + d*isizeT*isizeH*isizeW
+    gradOutput_dt = gradOutput + o_plane*osizeH*osizeW
+    indices_dt = indices + o_plane*osizeH*osizeW
+
+    parallel_for oh in range(osizeH):
+        parallel_for ow in range(osizeW):
+            grad_delta = gradOutput_dt[oh*osizeW + ow]
+            argmax = indices_dt[oh*osizeW + ow]
+            gradInput_d[argmax] += grad_delta
+
+【并行模式】
+    grid: (min(totalZ, 65535), blocksH)
+    block: (32, 8)
+
+【备注】
+    - 非原子版本，假设每个输入位置只被一个输出引用
+    - 要求: isizeW % osizeW == 0 且 isizeH % osizeH == 0 且 isizeT % osizeT == 0
+
+--------------------------------
+adaptivemaxgradinput_loop:
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling3d.cu
+--------------------------------
+
+【签名】
+    @host→device
+    adaptivemaxgradinput_loop<scalar_t>(
+        gradInput_data: scalar_t*,
+        gradOutput_data: scalar_t*,
+        indices_data: int64*,
+        totalZ: int64,
+        isizeT, isizeH, isizeW: int,
+        osizeT, osizeH, osizeW: int
+    )
+
+【算法】
+    offsetZ = 0
+    threads = (32, 8)
+    blocksH = max(16 / totalZ, 1)
+
+    while totalZ > 0:
+        blocks = (min(totalZ, 65535), blocksH)
+        adaptivemaxgradinput<<<blocks, threads>>>(
+            gradInput_data, gradOutput_data, indices_data,
+            isizeT, isizeH, isizeW, osizeT, osizeH, osizeW, offsetZ
+        )
+        totalZ -= 65535
+        offsetZ += 65535
+
+--------------------------------
+atomicadaptivemaxgradinput:
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling3d.cu
+--------------------------------
+
+【签名】
+    @device
+    atomicadaptivemaxgradinput<T>(
+        gradInput: T*,
+        gradOutput: T*,
+        indices: int64*,
+        isizeT, isizeH, isizeW: int,
+        osizeT, osizeH, osizeW: int,
+        offsetZ: int64
+    )
+
+【算法】
+    o_plane = blockIdx.x + offsetZ
+    d = o_plane / osizeT
+
+    gradInput_d = gradInput + d*isizeT*isizeH*isizeW
+    gradOutput_dt = gradOutput + o_plane*osizeH*osizeW
+    indices_dt = indices + o_plane*osizeH*osizeW
+
+    parallel_for oh in range(osizeH):
+        parallel_for ow in range(osizeW):
+            grad_delta = gradOutput_dt[oh*osizeW + ow]
+            argmax = indices_dt[oh*osizeW + ow]
+            gpuAtomicAddNoReturn(&gradInput_d[argmax], grad_delta)
+
+【并行模式】
+    atomic_add
+
+【备注】
+    - 原子版本，用于输入输出尺寸不整除的情况
+    - 同一输入位置可能被多个输出引用
+
+--------------------------------
+atomicadaptivemaxgradinput_loop:
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling3d.cu
+--------------------------------
+
+【签名】
+    @host→device
+    atomicadaptivemaxgradinput_loop<scalar_t>(
+        gradInput_data: scalar_t*,
+        gradOutput_data: scalar_t*,
+        indices_data: int64*,
+        totalZ: int64,
+        isizeT, isizeH, isizeW: int,
+        osizeT, osizeH, osizeW: int
+    )
+
+【算法】
+    offsetZ = 0
+    threads = (32, 8)
+    blocksH = max(16 / totalZ, 1)
+
+    while totalZ > 0:
+        blocks = (min(totalZ, 65535), blocksH)
+        atomicadaptivemaxgradinput<<<blocks, threads>>>(
+            gradInput_data, gradOutput_data, indices_data,
+            isizeT, isizeH, isizeW, osizeT, osizeH, osizeW, offsetZ
+        )
+        totalZ -= 65535
+        offsetZ += 65535
+
+--------------------------------
+adaptive_max_pool3d_out_cuda:
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling3d.cu
+--------------------------------
+
+【签名】
+    @host→device
+    adaptive_max_pool3d_out_cuda(
+        input: Tensor[B?, D, T, H, W],      # 4D或5D
+        output_size: [osizeT, osizeH, osizeW],
+        output: Tensor[B?, D, osizeT, osizeH, osizeW],
+        indices: Tensor[B?, D, osizeT, osizeH, osizeW, int64]
+    )
+
+【算法】
+    if input.numel == 0 or output.numel == 0:
+        return
+
+    input_ = input.contiguous() if input.ndim == 5 else input
+
+    if input_.ndim == 4:
+        sizeD = input_.size(0)
+        isizeT, isizeH, isizeW = input_.shape[1:4]
+        istrideD, istrideT, istrideH, istrideW = input_.stride()
+        totalZ = sizeD * osizeT
+    else:
+        sizeB, sizeD = input_.shape[0:2]
+        isizeT, isizeH, isizeW = input_.shape[2:5]
+        
+        # 展平 batch 和 channel 维度
+        istrideD = isizeT * isizeH * isizeW
+        istrideT, istrideH, istrideW = input_.stride()[2:5]
+        totalZ = sizeB * sizeD * osizeT
+
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input_.scalar_type(), [&] {
+        adaptivemaxpool_loop(
+            input_.const_data_ptr<scalar_t>(),
+            output.mutable_data_ptr<scalar_t>(),
+            indices.mutable_data_ptr<int64_t>(),
+            totalZ, isizeT, isizeH, isizeW,
+            osizeT, osizeH, osizeW,
+            istrideD, istrideT, istrideH, istrideW
+        )
+    })
+
+【备注】
+    - 支持 float, double, half, bfloat16
+    - 4D输入: [D, T, H, W]
+    - 5D输入: [B, D, T, H, W]
+
+--------------------------------
+adaptive_max_pool3d_backward_out_cuda:
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling3d.cu
+--------------------------------
+
+【签名】
+    @host→device
+    adaptive_max_pool3d_backward_out_cuda(
+        gradOutput: Tensor[B?, D, osizeT, osizeH, osizeW],
+        input: Tensor[B?, D, T, H, W],
+        indices: Tensor[B?, D, osizeT, osizeH, osizeW, int64],
+        gradInput: Tensor[B?, D, T, H, W]
+    )
+
+【算法】
+    if gradOutput.numel == 0:
+        return
+
+    gradOutput_ = gradOutput.contiguous()
+    gradInput.zero_()
+
+    if input.ndim == 4:
+        sizeD = input.size(0)
+        isizeT, isizeH, isizeW = input.shape[1:4]
+        osizeT, osizeH, osizeW = gradOutput_.shape[1:4]
+        totalZ = sizeD * osizeT
+    else:
+        sizeB, sizeD = input.shape[0:2]
+        isizeT, isizeH, isizeW = input.shape[2:5]
+        osizeT, osizeH, osizeW = gradOutput_.shape[2:5]
+        totalZ = sizeB * sizeD * osizeT
+
+    # 判断是否需要原子操作
+    atomic = (isizeW % osizeW != 0) or (isizeH % osizeH != 0) or (isizeT % osizeT != 0)
+
+    if atomic:
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), [&] {
+            atomicadaptivemaxgradinput_loop(
+                gradInput.mutable_data_ptr<scalar_t>(),
+                gradOutput_.const_data_ptr<scalar_t>(),
+                indices.const_data_ptr<int64_t>(),
+                totalZ, isizeT, isizeH, isizeW,
+                osizeT, osizeH, osizeW
+            )
+        })
+    else:
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), [&] {
+            adaptivemaxgradinput_loop(
+                gradInput.mutable_data_ptr<scalar_t>(),
+                gradOutput_.const_data_ptr<scalar_t>(),
+                indices.const_data_ptr<int64_t>(),
+                totalZ, isizeT, isizeH, isizeW,
+                osizeT, osizeH, osizeW
+            )
+        })
+
+【备注】
+    - 根据输入输出尺寸是否整除选择原子/非原子版本
+    - gradInput 先清零，再累加梯度

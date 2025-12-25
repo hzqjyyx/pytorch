@@ -1,0 +1,505 @@
+--------------------------------
+upsample::compute_output_size
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    compute_output_size(
+        input_size: IntArrayRef,
+        output_size: Optional[IntArrayRef],
+        scale_factors: Optional[ArrayRef[double]]
+    ) -> SmallVector[int64, 3]
+
+【用途】
+    计算上采样输出尺寸（声明，实现在其他文件）
+
+--------------------------------
+upsample_cuda::get_scale_value
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @host
+    get_scale_value(scales: Optional[ArrayRef[double]], idx: int) -> Optional[double]
+
+【算法】
+    if scales is None:
+        return None
+    return scales[idx]
+
+--------------------------------
+min / max (通用工具)
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    min<scalar_t>(a: scalar_t, b: scalar_t) -> scalar_t
+    max<scalar_t>(a: scalar_t, b: scalar_t) -> scalar_t
+
+【算法】
+    min: return a if a < b else b
+    max: return a if a > b else b
+
+--------------------------------
+compute_scales_value (前向缩放因子)
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @host
+    compute_scales_value<accscalar_t>(
+        scale: Optional[double],
+        src_size: int64,
+        dst_size: int64
+    ) -> accscalar_t
+
+【算法】
+    # 前向: src=输入，dst=输出，返回 dst->src 的映射比例
+    # 取倒数避免kernel中的除法
+    if scale is not None and scale > 0:
+        return 1.0 / scale
+    else:
+        return src_size / dst_size
+
+【备注】
+    参见 NOTE [Nearest neighbor upsampling kernel implementation]
+    前向时需要取倒数，因为kernel线程映射到输出，需要反向索引输入
+
+--------------------------------
+compute_scales_value_backwards (反向缩放因子)
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @host
+    compute_scales_value_backwards<accscalar_t>(
+        scale: Optional[double],
+        src_size: int64,
+        dst_size: int64
+    ) -> accscalar_t
+
+【算法】
+    # 反向: src=grad_output，dst=grad_input
+    # 此时 scale 已经是反向的，无需再取倒数
+    if scale is not None and scale > 0:
+        return scale
+    else:
+        return src_size / dst_size
+
+【备注】
+    参见 NOTE [Nearest neighbor upsampling kernel implementation]
+    反向时输入输出互换，scale已经是倒数
+
+--------------------------------
+area_pixel_compute_scale
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @host
+    area_pixel_compute_scale<accscalar_t>(
+        input_size: int,
+        output_size: int,
+        align_corners: bool,
+        scale: Optional[double]
+    ) -> accscalar_t
+
+【算法】
+    if align_corners:
+        if output_size > 1:
+            return (input_size - 1) / (output_size - 1)
+        else:
+            return 0
+    else:
+        return compute_scales_value<accscalar_t>(scale, input_size, output_size)
+
+--------------------------------
+area_pixel_compute_source_index
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    area_pixel_compute_source_index<accscalar_t>(
+        scale: accscalar_t,
+        dst_index: int,
+        align_corners: bool,
+        cubic: bool
+    ) -> accscalar_t
+
+【算法】
+    if align_corners:
+        return scale * dst_index
+    else:
+        src_idx = scale * (dst_index + 0.5) - 0.5
+        # 见 Note[Follow Opencv resize logic]
+        if not cubic and src_idx < 0:
+            return 0
+        else:
+            return src_idx
+
+--------------------------------
+nearest_neighbor_compute_source_index (legacy)
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    nearest_neighbor_compute_source_index(
+        scale: float,
+        dst_index: int,
+        input_size: int
+    ) -> int
+
+【算法】
+    # index_f32 = dst_index * scale
+    # src_index = floor(index_f32)
+    src_index = min(floor(dst_index * scale), input_size - 1)
+    return src_index
+
+【备注】
+    等同于 OpenCV INTER_NEAREST (buggy版本)
+    保留用于向后兼容，推荐使用 exact 版本
+
+--------------------------------
+nearest_neighbor_exact_compute_source_index
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    nearest_neighbor_exact_compute_source_index(
+        scale: float,
+        dst_index: int,
+        input_size: int
+    ) -> int
+
+【算法】
+    # index_f32 = (dst_index + 0.5) * scale - 0.5
+    # src_index = floor(index_f32)
+    src_index = min(floor((dst_index + 0.5) * scale), input_size - 1)
+    return src_index
+
+【备注】
+    等同于 Pillow 和 Scikit-Image/Scipy ndi.zoom
+
+--------------------------------
+nearest_neighbor_bw_compute_source_index (legacy)
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    nearest_neighbor_bw_compute_source_index(
+        scale: float,
+        dst_index: int,
+        output_size: int
+    ) -> int
+
+【算法】
+    src_index = min(ceil(dst_index * scale), output_size)
+    return src_index
+
+【备注】
+    反向传播版本，等同于 OpenCV INTER_NEAREST (buggy)
+    保留用于向后兼容
+
+--------------------------------
+nearest_neighbor_exact_bw_compute_source_index
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    nearest_neighbor_exact_bw_compute_source_index(
+        scale: float,
+        dst_index: int,
+        output_size: int
+    ) -> int
+
+【算法】
+    src_index = min(ceil(dst_index * scale - 0.5), output_size)
+    return src_index
+
+【备注】
+    反向传播版本，等同于 Pillow 和 Scikit-Image/Scipy ndi.zoom
+
+--------------------------------
+upsample_get_value_bounded
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    upsample_get_value_bounded<scalar_t>(
+        data: PackedTensorAccessor64[scalar_t, 4],
+        batch: int,
+        channel: int,
+        height: int,
+        width: int,
+        y: int,
+        x: int
+    ) -> scalar_t
+
+【算法】
+    access_y = max(min(y, height - 1), 0)
+    access_x = max(min(x, width - 1), 0)
+    return data[batch][channel][access_y][access_x]
+
+【备注】
+    用于 UpSampleBicubic2d.cu
+    边界裁剪：将越界坐标夹到 [0, size-1]
+
+--------------------------------
+upsample_increment_value_bounded
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    upsample_increment_value_bounded<scalar_t, accscalar_t>(
+        data: PackedTensorAccessor64[scalar_t, 4],
+        batch: int,
+        channel: int,
+        height: int,
+        width: int,
+        y: int,
+        x: int,
+        value: accscalar_t
+    )
+
+【算法】
+    access_y = max(min(y, height - 1), 0)
+    access_x = max(min(x, width - 1), 0)
+    gpuAtomicAddNoReturn(&data[batch][channel][access_y][access_x], scalar_t(value))
+
+【并行模式】
+    atomic_add
+
+【备注】
+    用于 UpSampleBicubic2d.cu 反向传播
+    TODO: 结果截断为 scalar_t，见 PR#19630
+
+--------------------------------
+cubic_convolution1
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    cubic_convolution1<accscalar_t>(x: accscalar_t, A: accscalar_t) -> accscalar_t
+
+【算法】
+    # Bicubic 插值权重 (|x| < 1)
+    return ((A + 2) * x - (A + 3)) * x * x + 1
+
+【备注】
+    基于 Wikipedia Bicubic interpolation
+
+--------------------------------
+cubic_convolution2
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    cubic_convolution2<accscalar_t>(x: accscalar_t, A: accscalar_t) -> accscalar_t
+
+【算法】
+    # Bicubic 插值权重 (1 <= |x| < 2)
+    return ((A * x - 5 * A) * x + 8 * A) * x - 4 * A
+
+【备注】
+    基于 Wikipedia Bicubic interpolation
+
+--------------------------------
+get_cubic_upsampling_coefficients
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    get_cubic_upsampling_coefficients<accscalar_t>(
+        coeffs: accscalar_t[4],
+        t: accscalar_t
+    )
+
+【算法】
+    A = -0.75
+
+    # 左侧两点
+    x1 = t
+    coeffs[0] = cubic_convolution2(x1 + 1.0, A)
+    coeffs[1] = cubic_convolution1(x1, A)
+
+    # 右侧两点 (对称)
+    x2 = 1.0 - t
+    coeffs[2] = cubic_convolution1(x2, A)
+    coeffs[3] = cubic_convolution2(x2 + 1.0, A)
+
+【备注】
+    t 是目标点到左相邻网格点的距离
+    4个系数对应 [-1, 0, 1, 2] 位置的权重
+
+--------------------------------
+cubic_interp1d
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    cubic_interp1d<scalar_t, accscalar_t>(
+        x0: scalar_t,
+        x1: scalar_t,
+        x2: scalar_t,
+        x3: scalar_t,
+        t: accscalar_t
+    ) -> accscalar_t
+
+【算法】
+    get_cubic_upsampling_coefficients<accscalar_t>(coeffs, t)
+    return x0 * coeffs[0] + x1 * coeffs[1] + x2 * coeffs[2] + x3 * coeffs[3]
+
+【备注】
+    一维 bicubic 插值
+    x0, x1, x2, x3 是相邻4个采样点
+
+--------------------------------
+upsample_antialias::BilinearFilterFunctor
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    operator()<accscalar_t>(x: accscalar_t) -> accscalar_t
+
+【算法】
+    x = abs(x)
+    if x < 1:
+        return 1 - x
+    else:
+        return 0
+
+【常量】
+    size = 2
+
+【备注】
+    Pillow 双线性滤波器
+    支持窗口大小为 2
+
+--------------------------------
+upsample_antialias::BicubicFilterFunctor
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    operator()<accscalar_t>(x: accscalar_t) -> accscalar_t
+
+【算法】
+    a = -0.5
+    x = abs(x)
+    if x < 1:
+        return ((a + 2) * x - (a + 3)) * x * x + 1
+    elif x < 2:
+        return (((x - 5) * x + 8) * x - 4) * a
+    else:
+        return 0
+
+【常量】
+    size = 4
+
+【备注】
+    Pillow bicubic 滤波器
+    支持窗口大小为 4
+
+--------------------------------
+upsample_antialias::_compute_weights_span
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    _compute_weights_span<accscalar_t>(
+        i: int,
+        input_size: int,
+        scale: accscalar_t,
+        support: accscalar_t,
+        xmin: int&,
+        xsize: int&,
+        center: accscalar_t&
+    )
+
+【算法】
+    # 计算输出位置 i 对应的输入采样窗口
+    center = scale * (i + 0.5)
+    xmin = max(floor(center - support + 0.5), 0)
+    xsize = min(floor(center + support + 0.5), input_size) - xmin
+
+【备注】
+    xmin: 采样窗口起始索引
+    xsize: 采样窗口大小
+    center: 输入空间的中心位置
+
+--------------------------------
+upsample_antialias::_compute_weights
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    _compute_weights<scalar_t, accscalar_t, interp_filter_t>(
+        wt_ptr: scalar_t*,
+        scale: accscalar_t,
+        interp_size: int,
+        interp_filter: interp_filter_t,
+        xmin_m_center: accscalar_t,
+        xsize: int
+    )
+
+【算法】
+    invscale = 1.0 / scale if scale >= 1.0 else 1.0
+
+    # 计算权重
+    total_w = 0
+    for j in range(xsize):
+        w = interp_filter((j + xmin_m_center + 0.5) * invscale)
+        wt_ptr[j] = w
+        total_w += w
+
+    # 归一化
+    for j in range(xsize):
+        if total_w != 0:
+            wt_ptr[j] /= total_w
+
+    # 填充0
+    for j in range(xsize, interp_size):
+        wt_ptr[j] = 0
+
+【备注】
+    interp_filter: BilinearFilterFunctor 或 BicubicFilterFunctor
+    xmin_m_center: xmin - center
+
+--------------------------------
+upsample_antialias::interpolate_aa_single_dim
+来源: aten/src/ATen/native/cuda/UpSample.cuh
+--------------------------------
+
+【签名】
+    @device
+    interpolate_aa_single_dim<scalar_t, accscalar_t>(
+        src: scalar_t*,
+        weights: scalar_t*,
+        size: int
+    ) -> accscalar_t
+
+【算法】
+    output = src[0] * weights[0]
+    for j in range(1, size):
+        output += src[j] * weights[j]
+    return output
+
+【备注】
+    一维抗锯齿插值
+    加权求和

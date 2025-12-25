@@ -1,0 +1,66 @@
+--------------------------------
+pow_
+来源: aten/src/ATen/native/cuda/Pow.cuh
+--------------------------------
+
+【签名】
+    @host @device
+    pow_(base: T, exp: T) -> T
+
+【算法】
+    # Windows MSVC 平台
+    if platform == MSVC:
+        match (base.dtype, exp.dtype):
+            (Half, Half):
+                return Half(std::pow(float(base), float(exp)))
+            
+            (BFloat16, BFloat16):
+                return BFloat16(std::pow(float(base), float(exp)))
+            
+            (float|double, float|double|int):
+                return std::pow(base, exp)
+            
+            # 其他类型组合
+            (T1, T2) where T1 != T2 and T2 != int:
+                return T1(std::pow(double(base), double(exp)))
+    
+    # 非 Windows 平台
+    else:
+        return ::pow(base, exp)
+
+【备注】
+    - MSVC 平台需要显式函数签名处理，因为 NVCC + Windows 的 SFINAE 对数学函数支持不佳
+    - 整数幂运算使用专门实现
+
+--------------------------------
+pow_ (整数特化)
+来源: aten/src/ATen/native/cuda/Pow.cuh
+--------------------------------
+
+【签名】
+    @host @device
+    pow_(base: IntType, exp: IntType) -> IntType
+    
+    约束:
+    - IntType 必须是整数类型
+
+【算法】
+    return at::native::powi(base, exp)
+
+【备注】
+    - 整数幂运算调用 ATen 的 powi 实现（见 ATen/native/Pow.h）
+
+--------------------------------
+pow_ (复数特化)
+来源: aten/src/ATen/native/cuda/Pow.cuh
+--------------------------------
+
+【签名】
+    @host @device
+    pow_(base: complex<T>, exp: complex<T>) -> complex<T>
+
+【算法】
+    return c10_complex_math::pow(base, exp)
+
+【备注】
+    - 复数幂运算使用 c10 的复数数学库

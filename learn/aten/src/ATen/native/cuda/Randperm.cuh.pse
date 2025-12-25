@@ -1,0 +1,84 @@
+--------------------------------
+randperm_handle_duplicate_keys_kernel
+来源: aten/src/ATen/native/cuda/Randperm.cuh
+--------------------------------
+
+【签名】
+    @device
+    randperm_handle_duplicate_keys_kernel(
+        keys: Tensor[n, T],              # 排序后的键
+        data: Tensor[n, scalar_t],       # 对应的数据（索引）
+        mask: T,                         # 比特掩码，决定键的有效位
+        n: int,
+        philox_args: PhiloxCudaState     # 随机数生成器状态
+    )
+
+【算法】
+    tid = threadIdx.x + blockDim.x * blockIdx.x
+    
+    # 只处理"岛屿"的起始位置
+    # "岛屿" = 连续的相同键（在mask下）的区间
+    if tid >= n - 1: return
+    if (keys[tid] & mask) != (keys[tid + 1] & mask): return  # 不在岛屿内
+    if tid != 0 and (keys[tid] & mask) == (keys[tid - 1] & mask): return  # 不是起点
+    
+    # 找到岛屿大小
+    island_size = 0
+    while (tid + island_size < n) and (keys[tid + island_size] & mask) == (keys[tid] & mask):
+        island_size++
+    
+    # 在岛屿内做随机排列（Fisher-Yates shuffle）
+    data_ptr = data + tid
+    seed, offset = at::cuda::philox::unpack(philox_args)
+    curand_init(seed, tid, offset, &state)
+    
+    for i in range(island_size - 1, 0, -1):
+        r = curand(&state) % (i + 1)
+        if i != r:
+            swap(data_ptr[i], data_ptr[r])
+
+【并行模式】
+    每个岛屿的起始线程独立处理该岛屿
+    岛屿内部顺序执行 Fisher-Yates 洗牌
+
+【备注】
+    - 用于处理 radix sort 时键冲突的情况
+    - mask 控制键的有效比特数，低位冲突形成岛屿
+    - 每个岛屿内的元素原始顺序不确定，需要随机打乱
+
+--------------------------------
+randperm_handle_duplicate_keys
+来源: aten/src/ATen/native/cuda/Randperm.cuh
+--------------------------------
+
+【签名】
+    @host→device
+    randperm_handle_duplicate_keys(
+        keys: Tensor[n, T],
+        data: Tensor[n, scalar_t],
+        bits: int,                       # 有效比特数
+        n: int64,
+        gen_: Optional[Generator]
+    )
+
+【算法】
+    gen = at::get_generator_or_default<CUDAGeneratorImpl>(gen_, default_cuda_generator())
+    
+    # 获取随机数状态（线程安全）
+    lock(gen->mutex_)
+    rng_engine_inputs = gen->philox_cuda_state(counter_offset=n)
+    unlock(gen->mutex_)
+    
+    mask = (1UL << bits) - 1
+    
+    # 启动 kernel
+    grid = (n + 511) / 512
+    block = 512
+    randperm_handle_duplicate_keys_kernel<<<grid, block, 0, current_cuda_stream()>>>(
+        keys, data, mask, n, rng_engine_inputs
+    )
+    C10_CUDA_KERNEL_LAUNCH_CHECK()
+
+【备注】
+    - 见 Algorithm of randperm 注释
+    - 用于 randperm 算法中处理低精度排序键的冲突

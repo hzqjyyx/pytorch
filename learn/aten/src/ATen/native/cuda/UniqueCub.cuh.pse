@@ -1,0 +1,36 @@
+--------------------------------
+unique_cuda_template
+来源: aten/src/ATen/native/cuda/UniqueCub.cuh
+--------------------------------
+
+【签名】
+    unique_cuda_template<scalar_t>(
+        self: Tensor[N, scalar_t],
+        consecutive: bool,
+        return_inverse: bool,
+        return_counts: bool
+    ) -> (Tensor[M, scalar_t], Tensor[N, int64]?, Tensor[M, int64]?)
+
+    返回:
+    - output: 唯一值张量 [M]
+    - inverse_indices: 原始索引到唯一值的映射 [N] (如果 return_inverse=True)
+    - counts: 每个唯一值的出现次数 [M] (如果 return_counts=True)
+
+【算法】
+    调用 CUB 库实现唯一值查找:
+    
+    if consecutive:
+        使用 cub::DeviceRunLengthEncode 查找连续相同元素
+    else:
+        使用 cub::DeviceSelect::Unique 查找所有唯一元素
+    
+    if return_inverse:
+        构建 inverse_indices 映射
+    
+    if return_counts:
+        统计每个唯一值的出现次数
+
+【备注】
+    - 这是头文件声明，具体实现在对应的 .cu 文件中
+    - CUB (CUDA Unbound) 是 NVIDIA 提供的 CUDA 原语库
+    - 模板参数 scalar_t 支持所有可哈希的标量类型

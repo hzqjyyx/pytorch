@@ -1,0 +1,12 @@
+--------------------------------
+device_sqrt (设备侧平方根工具)
+来源: aten/src/ATen/native/cuda/DeviceSqrt.cuh
+--------------------------------
+
+【函数】
+    @device
+    device_sqrt(val: scalar_t) -> scalar_t
+        用途: 在 device 侧计算平方根
+        平台特定:
+            ROCm: 调用 ::sqrtf (float) 或 ::sqrt (double)
+            CUDA: 调用 std::sqrt (通用模板)

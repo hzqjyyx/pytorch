@@ -294,7 +294,8 @@
         "DeviceSqrt.cuh": "28cab08ea3dbb82a"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "SortUtils.cuh": {
@@ -303,7 +304,8 @@
         "SortUtils.cuh": "9e711fbaa58fca75"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Indexing.cu": {
@@ -330,7 +332,8 @@
         "Randperm.cuh": "4abbbe06eb828e52"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "vol2col.cuh": {
@@ -339,7 +342,8 @@
         "vol2col.cuh": "4ed08bd8bc460b12"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "UpSample.cuh": {
@@ -348,7 +352,8 @@
         "UpSample.cuh": "b1642602d566d6ad"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Pow.cuh": {
@@ -357,7 +362,8 @@
         "Pow.cuh": "67c15acc63c3cacd"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "MemoryAccess.cuh": {
@@ -376,7 +382,8 @@
         "fused_adamw_impl.cuh": "5fc47d8afb1c5e21"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "reduction_template.cuh": {
@@ -385,7 +392,8 @@
         "reduction_template.cuh": "d5f53ba05fe6fa0a"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "SortingCommon.cuh": {
@@ -394,7 +402,8 @@
         "SortingCommon.cuh": "70e01e301e7c9066"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "cutlass_utils.cuh": {
@@ -403,7 +412,8 @@
         "cutlass_utils.cuh": "1ddeb70df1796c58"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "EmbeddingBackwardKernel.cuh": {
@@ -412,7 +422,8 @@
         "EmbeddingBackwardKernel.cuh": "fa75ca3b78a13eba"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "fused_adamw_amsgrad_impl.cuh": {
@@ -421,7 +432,8 @@
         "fused_adamw_amsgrad_impl.cuh": "8f959b7f69e667c1"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "MultiTensorApply.cuh": {
@@ -430,7 +442,8 @@
         "MultiTensorApply.cuh": "8842882c3b7bfc94"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ScanUtils.cuh": {
@@ -439,7 +452,8 @@
         "ScanUtils.cuh": "5a302518b5565428"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "fused_adam_utils.cuh": {
@@ -448,7 +462,8 @@
         "fused_adam_utils.cuh": "d924530d53613cb4"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Math.cuh": {
@@ -457,7 +472,8 @@
         "Math.cuh": "f9e314549c046f64"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "JitLoops.cuh": {
@@ -466,7 +482,8 @@
         "JitLoops.cuh": "98574e4bd0049d51"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "KernelUtils.cuh": {
@@ -475,7 +492,8 @@
         "KernelUtils.cuh": "9e446fb1967174ba"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "fused_adam_amsgrad_impl.cuh": {
@@ -484,7 +502,8 @@
         "fused_adam_amsgrad_impl.cuh": "fdafd603e5d7f2c5"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ForeachFunctors.cuh": {
@@ -493,7 +512,8 @@
         "ForeachFunctors.cuh": "5c34215b9f7891b9"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "UniqueCub.cuh": {
@@ -502,7 +522,8 @@
         "UniqueCub.cuh": "fed0ce0215b6994f"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Loops.cuh": {
@@ -511,7 +532,8 @@
         "Loops.cuh": "75e7f26abf62db5b"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "GridSampler.cuh": {
@@ -520,7 +542,8 @@
         "GridSampler.cuh": "3da205fb1b2063d4"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ForeachMinMaxFunctors.cuh": {
@@ -529,7 +552,8 @@
         "ForeachMinMaxFunctors.cuh": "53137de7c0c31ec4"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "CUDALoops.cuh": {
@@ -538,7 +562,8 @@
         "CUDALoops.cuh": "d3277ec6b4562a2d"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Reduce.cuh": {
@@ -547,7 +572,8 @@
         "Reduce.cuh": "afde4f3f5831bec6"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "PersistentSoftmax.cuh": {
@@ -556,7 +582,8 @@
         "PersistentSoftmax.cuh": "332061c98b329371"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "fused_adam_impl.cuh": {
@@ -565,7 +592,8 @@
         "fused_adam_impl.cuh": "466f6f7c0e03dc2c"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "cutlass_extensions/README.md": {
@@ -574,7 +602,8 @@
         "cutlass_extensions/README.md": "5d4803394ae12f85"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "MaxMinElementwiseKernel.cu": {
@@ -583,7 +612,8 @@
         "MaxMinElementwiseKernel.cu": "7019321b568adcc4"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "CompositeRandomAccessor.h": {
@@ -592,7 +622,8 @@
         "CompositeRandomAccessor.h": "5ed9c10b22f5e572"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "modified_bessel_k0.cu": {
@@ -601,7 +632,8 @@
         "modified_bessel_k0.cu": "9a73c08099cc9cbe"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "bessel_j1.cu": {
@@ -610,7 +642,8 @@
         "bessel_j1.cu": "e6fb46a3fcfd7326"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ForeachReduceOp.cu": {
@@ -619,7 +652,8 @@
         "ForeachReduceOp.cu": "1ba9445dbf77c9f8"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "AdaptiveMaxPooling3d.cu": {
@@ -628,7 +662,8 @@
         "AdaptiveMaxPooling3d.cu": "9b69383b7f07420c"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "MiscUtils.h": {
@@ -637,7 +672,8 @@
         "MiscUtils.h": "033fa0a1a0e2fdb4"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "BinaryMiscOpsKernels.cu": {

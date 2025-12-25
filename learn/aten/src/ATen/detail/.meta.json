@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "units": {
+    "PrivateUse1HooksInterface": {
+      "type": "group",
+      "hashes": {
+        "PrivateUse1HooksInterface.cpp": "f5268f4d0cb71e10",
+        "PrivateUse1HooksInterface.h": "df09b9458b3b03ea"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDAHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "CUDAHooksInterface.cpp": "9935ada7cb8e8abb",
+        "CUDAHooksInterface.h": "b6205f835b48d35d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MAIAHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "MAIAHooksInterface.cpp": "c4169f97930b7c9f",
+        "MAIAHooksInterface.h": "1547441f42e66648"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "XPUHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "XPUHooksInterface.cpp": "5f8f6cdb61d68ea3",
+        "XPUHooksInterface.h": "606bfb239814d983"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    }
+  }
+}

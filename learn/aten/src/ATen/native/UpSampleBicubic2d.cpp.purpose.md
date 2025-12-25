@@ -1,0 +1,21 @@
+- **文件用途**: 实现 2D 双三次插值上采样 (Bicubic Upsampling) 的 CPU 版本
+- **核心算法**: 使用双三次插值系数对输入张量进行上采样，支持自定义输出尺寸和缩放因子
+- **元数据函数** (`TORCH_META_FUNC`): 
+  - `upsample_bicubic2d`: 验证输入张量维度和尺寸，计算输出尺寸
+  - `_upsample_bicubic2d_aa`: 抗锯齿版本的元数据处理
+- **实现函数** (`TORCH_IMPL_FUNC`):
+  - `upsample_bicubic2d_out_cpu`: CPU 上的前向计算
+  - `_upsample_bicubic2d_aa_out_cpu`: 抗锯齿上采样的 CPU 实现
+- **关键参数**:
+  - `align_corners`: 是否对齐输入输出的角落像素
+  - `scales_h`, `scales_w`: 高度和宽度的缩放因子
+  - `output_size`: 目标输出尺寸
+- **辅助函数** (通过 `UpSample.h` 引入):
+  - `area_pixel_compute_scale`: 计算像素间距
+  - `get_cubic_upsample_coefficients`: 生成三次多项式插值系数
+- **优化策略**:
+  - 特殊处理输入输出尺寸相同的情况 (直接复制)
+  - 支持半精度 (Half) 和 BFloat16 数据类型
+  - 使用 `AT_DISPATCH_FLOATING_TYPES_AND2` 宏实现类型分发
+- **向量化接口** (277-296 行):
+  - `upsample_bicubic2d()`: 包装函数，接受可选的输出尺寸或缩放因子列表

@@ -1,0 +1,604 @@
+--------------------------------
+reduction_template.cuh (CUDA归约模板)
+来源: aten/src/ATen/native/cuda/reduction_template.cuh
+--------------------------------
+
+【设计概述】
+这是一个 JIT 字符串模板，用于生成 CUDA 归约 kernel。
+运行时通过变量替换（${变量名}）生成具体的 CUDA 代码。
+
+【模板变量】
+- ${complex}: 是否支持复数类型
+- ${scalar_type}: 输入标量类型
+- ${reduction_accum_type}: 累加器类型
+- ${result_type}: 输出标量类型
+- ${functor}: 归约操作函数（combine）
+- ${output_vec_size}: 输出向量化大小
+- ${vt0}: 线程归约循环展开因子
+- ${max_threads_lb}: 最大线程数下限
+- ${name}: kernel 名称后缀
+
+--------------------------------
+WARP_SHFL_DOWN (Warp Shuffle)
+--------------------------------
+
+【签名】
+    @device
+    WARP_SHFL_DOWN<T>(value: T, delta: uint, width: int = 32, mask: uint = 0xffffffff) -> T
+
+【算法】
+    # ROCm 使用 __shfl_down，CUDA 使用 __shfl_down_sync
+    if HIP:
+        return __shfl_down(value, delta, width)
+    else:
+        return __shfl_down_sync(mask, value, delta, width)
+
+【特化】
+    # 复数类型：分别 shuffle 实部和虚部
+    WARP_SHFL_DOWN<complex<T>>:
+        real = WARP_SHFL_DOWN(value.real(), delta, width, mask)
+        imag = WARP_SHFL_DOWN(value.imag(), delta, width, mask)
+        return complex<T>(real, imag)
+
+--------------------------------
+aligned_vector (向量化内存访问)
+--------------------------------
+
+【定义】
+    template<scalar_t, vec_size>
+    struct alignas(sizeof(scalar_t) * vec_size) aligned_vector:
+        val: scalar_t[vec_size]
+
+【用途】
+    强制对齐以生成向量化 load/store 指令
+
+--------------------------------
+reduce_fraction (分数化简)
+--------------------------------
+
+【签名】
+    @host @device
+    reduce_fraction(numerator: size_t&, denominator: size_t&)
+
+【算法】
+    # 欧几里得算法求最大公约数
+    a = denominator
+    b = numerator
+    while b != 0:
+        a = a % b
+        swap(a, b)
+    
+    # a 为 GCD
+    numerator /= a
+    denominator /= a
+
+--------------------------------
+ReduceConfig (归约配置)
+来源: reduction_template.cuh
+--------------------------------
+
+【常量】
+    BLOCK_X = 0             # threadIdx.x 维度索引
+    BLOCK_Y = 1             # threadIdx.y 维度索引
+    CTA = 2                 # blockIdx.y 维度索引
+    input_vec_size = 4      # 输入向量化大小
+
+【状态】
+    element_size_bytes: int                # 元素字节数
+    num_inputs: int                        # 输入元素总数
+    num_outputs: int                       # 输出元素总数
+    step_input: int = 1                    # 输入步长
+    step_output: int = 1                   # 输出步长
+    ctas_per_output: int = 1               # 每个输出的 CTA 数
+    input_mult: int[3] = {0,0,0}           # 输入索引乘数 [BLOCK_X, BLOCK_Y, CTA]
+    output_mult: int[2] = {0,0}            # 输出索引乘数 [BLOCK_X, BLOCK_Y]
+    block_width: int                       # blockDim.x
+    block_height: int                      # blockDim.y
+    num_threads: int                       # 总线程数
+    vectorize_input: bool = false          # 是否向量化输入
+    output_vec_size: int = 1               # 输出向量化大小
+
+【接口】
+    should_block_x_reduce() -> bool
+        用途: 是否需要 block_x 维度归约
+        return input_mult[BLOCK_X] != 0
+
+    should_block_y_reduce() -> bool
+        用途: 是否需要 block_y 维度归约
+        return input_mult[BLOCK_Y] != 0
+
+    should_global_reduce() -> bool
+        用途: 是否需要全局归约（多 CTA）
+        return input_mult[CTA] != 0
+
+    should_store(output_idx: int) -> bool
+        用途: 当前线程是否应该写输出
+        return (output_idx < num_outputs &&
+                (!should_block_x_reduce() || threadIdx.x == 0) &&
+                (!should_block_y_reduce() || threadIdx.y == 0))
+
+    should_reduce_tail() -> bool
+        用途: 是否应该归约尾部元素
+        return ((!should_block_y_reduce() || threadIdx.y == 0) &&
+                (!should_global_reduce() || blockIdx.y == 0))
+
+    input_idx() -> int
+        用途: 计算当前线程的输入起始索引
+        lane = threadIdx.x
+        warp = threadIdx.y
+        cta2 = blockIdx.y
+        return (lane * input_mult[BLOCK_X] +
+                warp * input_mult[BLOCK_Y] +
+                cta2 * input_mult[CTA])
+
+    output_idx<output_vec_size>() -> int
+        用途: 计算当前线程的输出起始索引（考虑向量化）
+        lane = threadIdx.x
+        warp = threadIdx.y
+        cta1 = blockIdx.x
+        return (lane * output_mult[BLOCK_X] +
+                warp * output_mult[BLOCK_Y] +
+                cta1 * step_output) * output_vec_size
+
+    shared_memory_offset(offset: int) -> int
+        用途: 计算 shared memory 偏移
+        return threadIdx.x + (threadIdx.y + offset) * blockDim.x
+
+    staging_memory_offset(cta2: int) -> int
+        用途: 计算全局归约缓冲区偏移
+        offset = cta2 + blockIdx.x * gridDim.y
+        if !should_block_x_reduce():
+            offset = threadIdx.x + offset * blockDim.x
+        return offset
+
+--------------------------------
+reducer 命名空间（归约操作接口）
+--------------------------------
+
+【类型别名】
+    scalar_t = ${scalar_type}                  # 输入类型
+    arg_t = ${reduction_accum_type}            # 累加器类型
+    out_scalar_t = ${result_type}              # 输出类型
+
+【函数】
+    ${functor}
+        用途: JIT 插入的归约函数（如 combine(a, b) = a + b）
+
+    project(arg: arg_t) -> out_scalar_t
+        用途: 将累加器类型转换为输出类型
+        return (out_scalar_t)arg
+
+    warp_shfl_down(arg: arg_t, offset: int) -> arg_t
+        用途: warp 内 shuffle
+        return WARP_SHFL_DOWN(arg, offset)
+
+    translate_idx(acc: arg_t, idx: int64) -> arg_t
+        用途: 索引转换（多数归约忽略索引）
+        return acc
+
+    reduce(acc: arg_t, val: arg_t, idx: int64) -> arg_t
+        用途: 归约操作（包装 combine，忽略索引）
+        return combine(acc, val)
+
+--------------------------------
+ReduceJitOp::run (主执行流程)
+--------------------------------
+
+【签名】
+    @device
+    run()
+
+【算法】
+    # Step 0: 初始化
+    output_idx = output_idx<${output_vec_size}>()
+    input_idx = input_idx()
+    base_offsets1 = output_calc.get(output_idx)[1]
+    value: Array<arg_t, ${output_vec_size}>
+
+    # Step 1: 线程级归约
+    if output_idx < num_outputs and input_idx < num_inputs:
+        input_slice = (scalar_t*)((char*)src + base_offsets1)
+        value = thread_reduce<${output_vec_size}>(input_slice)
+
+    # Step 2: Block 级归约
+    if should_block_y_reduce():
+        value = block_y_reduce<${output_vec_size}>(value, shared_memory)
+    if should_block_x_reduce():
+        value = block_x_reduce<${output_vec_size}>(value, shared_memory)
+
+    # Step 3: 准备输出指针
+    for i in range(${output_vec_size}):
+        base_offsets[i] = output_calc.get(output_idx + i)[0]
+        out[i] = (out_scalar_t*)((char*)dst[0] + base_offsets[i])
+
+    acc = nullptr
+    if acc_buf != nullptr:
+        # 计算累加缓冲区偏移（需处理类型大小不同）
+        numerator = sizeof(arg_t)
+        denominator = sizeof(out_scalar_t)
+        reduce_fraction(numerator, denominator)
+        acc = (arg_vec_t*)((char*)acc_buf + (base_offsets[0] * numerator / denominator))
+
+    # Step 4: 全局归约或直接写输出
+    if should_global_reduce():
+        value = global_reduce<${output_vec_size}>(value, acc, shared_memory)
+    elif should_store(output_idx):
+        if accumulate:
+            for i in range(${output_vec_size}):
+                value[i] = reducer::translate_idx(value[i], base_idx)
+
+        if acc == nullptr:
+            # 直接累加到输出
+            if accumulate:
+                value = accumulate_in_output<${output_vec_size}>(out, value)
+            if final_output:
+                set_results_to_output<${output_vec_size}>(value, base_offsets)
+            else:
+                for i in range(${output_vec_size}):
+                    *(out[i]) = get_accumulated_output(out[i], value[i])
+        else:
+            # 使用累加缓冲区
+            if accumulate:
+                for i in range(${output_vec_size}):
+                    value[i] = reducer::combine((*acc)[i], value[i])
+            if final_output:
+                set_results_to_output<${output_vec_size}>(value, base_offsets)
+            else:
+                *acc = value
+
+--------------------------------
+ReduceJitOp::thread_reduce (线程级归约)
+--------------------------------
+
+【签名】
+    @device
+    thread_reduce<output_vec_size>(data: scalar_t*) -> Array<arg_t, output_vec_size>
+
+【算法】
+    if vectorize_input:
+        assert output_vec_size == 1
+        return {input_vectorized_thread_reduce_impl(data)}
+    else:
+        element_stride = input_calc.strides_[0][0] / sizeof(scalar_t)
+        is_contiguous = (input_calc.dims == 1 && element_stride == 1)
+        
+        if is_contiguous:
+            return thread_reduce_impl<output_vec_size>(data, λ idx -> idx)
+        elif input_calc.dims == 1:
+            return thread_reduce_impl<output_vec_size>(data, λ idx -> idx * element_stride)
+        else:
+            return thread_reduce_impl<output_vec_size>(data, λ idx -> input_calc.get(idx)[0] / sizeof(scalar_t))
+
+--------------------------------
+ReduceJitOp::input_vectorized_thread_reduce_impl (向量化输入归约)
+--------------------------------
+
+【签名】
+    @device
+    input_vectorized_thread_reduce_impl(data: scalar_t*) -> arg_t
+
+【算法】
+    end = num_inputs
+    value = ident
+    
+    # Step 1: 处理未对齐的头部
+    align_bytes = alignof(aligned_vector<scalar_t, input_vec_size>)
+    align_elements = align_bytes / sizeof(scalar_t)
+    shift = ((int64)data % align_bytes) / sizeof(scalar_t)
+    
+    if shift > 0:
+        data -= shift
+        end += shift
+        if threadIdx.x >= shift and threadIdx.x < align_elements and should_reduce_tail():
+            value = reducer::reduce(value, data[threadIdx.x], threadIdx.x - shift)
+        end -= align_elements
+        data += align_elements
+        shift = align_elements - shift
+
+    # Step 2: 向量化归约主体
+    idx = input_idx()
+    stride = step_input
+    
+    # 多累加器展开
+    value_list: arg_t[input_vec_size]
+    value_list[0] = value
+    for i in range(1, input_vec_size):
+        value_list[i] = ident
+
+    while idx * input_vec_size + input_vec_size - 1 < end:
+        values = reinterpret_cast<aligned_vector<scalar_t, input_vec_size>*>(data)[idx]
+        for i in range(input_vec_size):
+            value_list[i] = reducer::reduce(value_list[i], values.val[i], shift + idx * input_vec_size + i)
+        idx += stride
+
+    # Step 3: 处理尾部
+    tail_start = end - end % input_vec_size
+    if should_reduce_tail():
+        idx = tail_start + threadIdx.x
+        if idx < end:
+            value_list[0] = reducer::reduce(value_list[0], data[idx], idx + shift)
+
+    # Step 4: 合并累加器
+    for i in range(1, input_vec_size):
+        value_list[0] = reducer::combine(value_list[0], value_list[i])
+    
+    return value_list[0]
+
+--------------------------------
+ReduceJitOp::thread_reduce_impl (通用线程归约)
+--------------------------------
+
+【签名】
+    @device
+    thread_reduce_impl<output_vec_size, offset_calc_t>(data_: scalar_t*, calc: offset_calc_t) -> Array<arg_t, output_vec_size>
+
+【算法】
+    idx = input_idx()
+    end = num_inputs
+    stride = step_input
+    vt0 = ${vt0}
+    
+    data = reinterpret_cast<aligned_vector<scalar_t, output_vec_size>*>(data_)
+
+    # 多累加器初始化
+    value_list: Array<arg_t, output_vec_size>[vt0]
+    for i in range(vt0):
+        for j in range(output_vec_size):
+            value_list[i][j] = ident
+
+    # 主循环
+    while idx + (vt0 - 1) * stride < end:
+        for i in range(vt0):
+            values[i] = data[calc(idx + i * stride) / output_vec_size]
+        for i in range(vt0):
+            for j in range(output_vec_size):
+                value_list[i][j] = reducer::reduce(value_list[i][j], values[i].val[j], idx + i * stride)
+        idx += stride * vt0
+
+    # 尾部处理
+    idx_ = idx
+    for i in range(vt0):
+        if idx >= end:
+            break
+        values[i] = data[calc(idx) / output_vec_size]
+        idx += stride
+    
+    idx = idx_
+    for i in range(vt0):
+        if idx >= end:
+            break
+        for j in range(output_vec_size):
+            value_list[i][j] = reducer::reduce(value_list[i][j], values[i].val[j], idx)
+        idx += stride
+
+    # 合并累加器
+    for i in range(1, vt0):
+        for j in range(output_vec_size):
+            value_list[0][j] = reducer::combine(value_list[0][j], value_list[i][j])
+    
+    return value_list[0]
+
+--------------------------------
+ReduceJitOp::block_x_reduce (Block X维度归约)
+--------------------------------
+
+【签名】
+    @device
+    block_x_reduce<output_vec_size>(value: Array<arg_t, output_vec_size>, shared_memory: char*) -> Array<arg_t, output_vec_size>
+
+【算法】
+    dim_x = blockDim.x
+    shared = (Array<arg_t, output_vec_size>*)shared_memory
+    
+    # Step 1: 树形归约（直到 warpSize）
+    if dim_x > warpSize:
+        address_base = threadIdx.x + threadIdx.y * blockDim.x
+        shared[address_base] = value
+        
+        for offset = dim_x/2 down to warpSize (步长 /= 2):
+            __syncthreads()
+            if threadIdx.x < offset and threadIdx.x + offset < blockDim.x:
+                other = shared[address_base + offset]
+                for i in range(output_vec_size):
+                    value[i] = reducer::combine(value[i], other[i])
+                shared[address_base] = value
+        
+        dim_x = warpSize
+
+    __syncthreads()
+
+    # Step 2: Warp shuffle 归约
+    for offset = 1 to dim_x (步长 *= 2):
+        for i in range(output_vec_size):
+            other = reducer::warp_shfl_down(value[i], offset)
+            value[i] = reducer::combine(value[i], other)
+    
+    return value
+
+【并行模式】
+    - dim_x > warpSize: shared_memory 树形归约
+    - dim_x <= warpSize: warp_shfl_down 归约
+
+--------------------------------
+ReduceJitOp::block_y_reduce (Block Y维度归约)
+--------------------------------
+
+【签名】
+    @device
+    block_y_reduce<output_vec_size>(value: Array<arg_t, output_vec_size>, shared_memory: char*) -> Array<arg_t, output_vec_size>
+
+【算法】
+    shared = (Array<arg_t, output_vec_size>*)shared_memory
+    shared[shared_memory_offset(0)] = value
+    
+    for offset = blockDim.y / 2 down to 1 (步长 /= 2):
+        __syncthreads()
+        if threadIdx.y < offset and threadIdx.y + offset < blockDim.y:
+            other = shared[shared_memory_offset(offset)]
+            for i in range(output_vec_size):
+                value[i] = reducer::combine(value[i], other[i])
+            shared[shared_memory_offset(0)] = value
+    
+    return value
+
+【并行模式】
+    shared_memory 树形归约
+
+--------------------------------
+ReduceJitOp::mark_block_finished (全局归约同步)
+--------------------------------
+
+【签名】
+    @device
+    mark_block_finished() -> bool
+
+【算法】
+    __syncthreads()
+    
+    if threadIdx.x == 0 and threadIdx.y == 0:
+        prev_blocks_finished = atomicAdd(&semaphores[blockIdx.x], 1)
+        is_last_block_done_shared = (prev_blocks_finished == gridDim.y - 1)
+    
+    __syncthreads()
+    
+    return is_last_block_done_shared
+
+【用途】
+    原子计数器判断是否为最后一个完成的 block
+
+--------------------------------
+ReduceJitOp::global_reduce (全局归约)
+--------------------------------
+
+【签名】
+    @device
+    global_reduce<output_vec_size>(
+        value: Array<arg_t, output_vec_size>,
+        acc: Array<arg_t, output_vec_size>*,
+        shared_memory: char*
+    ) -> Array<arg_t, output_vec_size>
+
+【算法】
+    reduce_buffer = (Array<arg_t, output_vec_size>*)cta_buf
+    output_idx = output_idx<output_vec_size>()
+    
+    for i in range(output_vec_size):
+        base_offsets[i] = output_calc.get(output_idx + i)[0]
+        out[i] = (out_scalar_t*)((char*)dst[0] + base_offsets[i])
+
+    # Step 1: 写入暂存缓冲区
+    should_store = should_store(output_idx)
+    if should_store:
+        offset = staging_memory_offset(blockIdx.y)
+        reduce_buffer[offset] = value
+
+    __threadfence()
+    __syncthreads()
+    is_last_block_done = mark_block_finished()
+
+    # Step 2: 最后一个 block 执行全局归约
+    if is_last_block_done:
+        __threadfence()
+        value = ident
+        
+        if should_block_x_reduce():
+            # 所有线程参与
+            input_offset = threadIdx.x + threadIdx.y * blockDim.x
+            step = blockDim.x * blockDim.y
+            for input_offset < ctas_per_output (步长 += step):
+                idx = staging_memory_offset(input_offset)
+                next = reduce_buffer[idx]
+                for i in range(output_vec_size):
+                    value[i] = reducer::combine(value[i], next[i])
+        else:
+            # 只用 threadIdx.y
+            input_offset = threadIdx.y
+            step = blockDim.y
+            for input_offset < ctas_per_output (步长 += step):
+                idx = staging_memory_offset(input_offset)
+                next = reduce_buffer[idx]
+                for i in range(output_vec_size):
+                    value[i] = reducer::combine(value[i], next[i])
+        
+        value = block_y_reduce(value, shared_memory)
+        if should_block_x_reduce():
+            value = block_x_reduce<output_vec_size>(value, shared_memory)
+        
+        # Step 3: 写输出
+        if should_store:
+            if accumulate:
+                for i in range(output_vec_size):
+                    value[i] = reducer::translate_idx(value[i], base_idx)
+
+            if acc == nullptr:
+                if accumulate:
+                    value = accumulate_in_output<output_vec_size>(out, value)
+                if final_output:
+                    set_results_to_output<output_vec_size>(value, base_offsets)
+                else:
+                    for i in range(output_vec_size):
+                        *(out[i]) = get_accumulated_output(out[i], value[i])
+            else:
+                if accumulate:
+                    for i in range(output_vec_size):
+                        value[i] = reducer::combine((*acc)[i], value[i])
+                if final_output:
+                    set_results_to_output<output_vec_size>(value, base_offsets)
+                else:
+                    *acc = value
+    
+    return value
+
+【并行模式】
+    - 阶段1: 所有 block 并行写暂存缓冲区
+    - 阶段2: 最后一个 block 执行归约和输出
+
+--------------------------------
+ReduceJitOp::辅助函数
+--------------------------------
+
+【函数】
+    accumulate_in_output<output_vec_size>(
+        out: Array<out_scalar_t*, output_vec_size>,
+        value: Array<arg_t, output_vec_size>
+    ) -> Array<arg_t, output_vec_size>
+        用途: 从输出读取旧值并累加
+        for i in range(output_vec_size):
+            ret[i] = reducer::combine(*(out[i]), value[i])
+        return ret
+
+    get_accumulated_output(out: out_scalar_t*, value: arg_t) -> out_scalar_t
+        用途: 转换累加值为输出类型（非 final_output）
+        assert !final_output
+        return (out_scalar_t)value
+
+    set_results<T>(x: T, base_offset: uint32)
+        用途: 写单个结果
+        assert noutputs == 1
+        res = (out_scalar_t*)((char*)dst[0] + base_offset)
+        *res = x
+
+    set_results_to_output<output_vec_size>(
+        value: Array<arg_t, output_vec_size>,
+        base_offset: Array<uint32, output_vec_size>
+    )
+        用途: 写向量化结果
+        assert final_output
+        for i in range(output_vec_size):
+            set_results(reducer::project(value[i]), base_offset[i])
+
+--------------------------------
+reduction_${name}_kernel (入口kernel)
+--------------------------------
+
+【签名】
+    @device
+    __launch_bounds__(${max_threads_lb}, 4)
+    reduction_${name}_kernel(r: ReduceJitOp)
+
+【算法】
+    r.run()
+
+【备注】
+    - __launch_bounds__: 限制寄存器使用，提高占用率
+    - 第二个参数4: 最小 blocks per SM

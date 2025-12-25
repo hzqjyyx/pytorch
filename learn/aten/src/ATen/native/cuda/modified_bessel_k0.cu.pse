@@ -1,0 +1,29 @@
+--------------------------------
+modified_bessel_k0_kernel_cuda
+来源: aten/src/ATen/native/cuda/modified_bessel_k0.cu
+--------------------------------
+
+【签名】
+    @host→device
+    modified_bessel_k0_kernel_cuda(iterator: TensorIteratorBase)
+
+【算法】
+    if AT_USE_JITERATOR():
+        # JIT 编译路径
+        AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype()):
+            jitted_gpu_kernel<modified_bessel_k0_name, scalar_t, scalar_t, 1>(
+                iterator, 
+                modified_bessel_k0_string
+            )
+    else:
+        # 普通 kernel 路径
+        AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype()):
+            gpu_kernel(iterator, lambda a: modified_bessel_k0_forward(a))
+
+【并行模式】
+    elementwise
+
+【备注】
+    - modified_bessel_k0_forward: 修正第二类贝塞尔函数 K0 的前向计算，定义在其他文件
+    - JIT 路径使用字符串模板编译，非 JIT 路径直接调用 lambda
+    - 注册到 special_modified_bessel_k0_stub 分发器

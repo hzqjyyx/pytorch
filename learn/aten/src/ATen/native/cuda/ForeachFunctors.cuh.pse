@@ -1,0 +1,526 @@
+--------------------------------
+ForeachFunctors (通用 Functor 和辅助函数)
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【函数】
+    increment_version(tensors: TensorList)
+        用途: 批量增加张量版本号（用于autograd追踪）
+        实现: 遍历 tensors，对每个 t 调用 t.unsafeGetTensorImpl()->bump_version()
+
+    @device
+    init_args<depth, T>(
+        args: T**[depth],
+        tl: TensorListMetadata<depth> | TensorListScalarListMetadata<T2, depth> | FusedOptimizerTensorListMetadata<depth>,
+        chunk_idx: int64,
+        chunk_size: int64,
+        tensor_loc: int64
+    ) -> bool
+        用途: 初始化当前 block 处理的张量指针数组，返回是否全部对齐
+        实现:
+            for i in range(depth):
+                args[i] = tl.addresses[i][tensor_loc] + chunk_idx * chunk_size
+            return all(is_aligned(args[i]) for i in range(depth))
+
+    @device
+    load_args<depth, T>(
+        r_args: T[depth][kILP],
+        args: T**[depth],
+        i_start: int64,
+        chunk_size: int64,
+        n: int64
+    )
+        用途: 从全局内存加载数据到寄存器数组，支持 ILP（指令级并行）
+        实现:
+            for ii in range(kILP):
+                i = i_start + threadIdx.x + ii * blockDim.x
+                for r_index in range(depth):
+                    r_args[r_index][ii] = args[r_index][i] if i < n and i < chunk_size else 0
+
+    @device
+    store_args<T>(
+        dst: T*,
+        src: T[kILP],
+        i_start: int64,
+        chunk_size: int64,
+        n: int64
+    )
+        用途: 从寄存器数组写回全局内存
+        实现:
+            for ii in range(kILP):
+                i = i_start + threadIdx.x + ii * blockDim.x
+                if i < n and i < chunk_size:
+                    dst[i] = src[ii]
+
+    @device
+    binary_op_scalar<res_arg_index, Op, T, opmath_t>(
+        r_args: T[r_args_depth][kILP],
+        args: T**,
+        scalar: opmath_t,
+        n: int64,
+        chunk_size: int64,
+        all_aligned: bool,
+        op: Op
+    )
+        用途: 二元操作核心逻辑（张量与标量），支持对齐优化和 ILP
+        实现:
+            if n % kILP == 0 and chunk_size % kILP == 0 and all_aligned:
+                # 对齐路径：使用 load_store 向量化加载
+                for i_start in range(threadIdx.x, n, blockDim.x):
+                    load_store(r_args[0], args[0], 0, i_start)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], scalar)
+                    load_store(args[res_arg_index], r_args[0], i_start, 0)
+            else:
+                # 非对齐路径：使用 load_args 边界检查
+                for i_start in range(0, n, blockDim.x * kILP):
+                    load_args<1>(r_args, args, i_start, chunk_size, n)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], scalar)
+                    store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n)
+
+    @device
+    pointwise_op_scalar<res_arg_index, Op, T, opmath_t>(
+        r_args: T[r_args_depth][kILP],
+        args: T**,
+        scalar: opmath_t,
+        n: int64,
+        chunk_size: int64,
+        all_aligned: bool,
+        op: Op
+    )
+        用途: 三元 pointwise 操作核心逻辑（result = args[0] + scalar * op(args[1], args[2])）
+        实现:
+            if n % kILP == 0 and chunk_size % kILP == 0 and all_aligned:
+                for i_start in range(threadIdx.x, n, blockDim.x):
+                    load_store(r_args[0], args[0], 0, i_start)
+                    load_store(r_args[1], args[1], 0, i_start)
+                    load_store(r_args[2], args[2], 0, i_start)
+                    for ii in range(kILP):
+                        r_args[0][ii] = r_args[0][ii] + scalar * op(r_args[1][ii], r_args[2][ii])
+                    load_store(args[res_arg_index], r_args[0], i_start, 0)
+            else:
+                for i_start in range(0, n, blockDim.x * kILP):
+                    load_args<3>(r_args, args, i_start, chunk_size, n)
+                    for ii in range(kILP):
+                        r_args[0][ii] = r_args[0][ii] + scalar * op(r_args[1][ii], r_args[2][ii])
+                    store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n)
+
+【依赖】
+    MultiTensorApply.cuh    # kILP常量、load_store、TensorListMetadata
+    Pow.cuh                 # pow_函数
+    is_aligned              # 内存对齐检查
+
+--------------------------------
+BinaryOpScalarFunctor<T, depth, r_args_depth, res_arg_index>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    foreach 二元操作 Functor：result = op(input, scalar)
+
+【接口】
+    @device
+    operator()<Op>(
+        chunk_size: int,
+        tl: TensorListMetadata<depth>,
+        op: Op,
+        scalar: opmath_t
+    )
+        实现:
+            tensor_loc = tl.block_to_tensor[blockIdx.x]
+            chunk_idx = tl.block_to_chunk[blockIdx.x]
+            n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+            all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+            binary_op_scalar<res_arg_index>(r_args, args, scalar, n, chunk_size, all_aligned, op)
+
+--------------------------------
+BinaryOpScalarListFunctor<T, depth, r_args_depth, res_arg_index>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    foreach 二元操作 Functor：result = op(input, scalar_list[i])
+
+【接口】
+    @device
+    operator()<Op>(
+        chunk_size: int,
+        tl: TensorListScalarListMetadata<opmath_t, depth>,
+        op: Op
+    )
+        实现:
+            tensor_loc = tl.block_to_tensor[blockIdx.x]
+            chunk_idx = tl.block_to_chunk[blockIdx.x]
+            scalar = tl.scalar_vals[tensor_loc]
+            n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+            all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+            binary_op_scalar<res_arg_index>(r_args, args, scalar, n, chunk_size, all_aligned, op)
+
+--------------------------------
+BinaryOpListAlphaFunctor<T, depth, r_args_depth, res_arg_index>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    foreach 二元操作 Functor：result = op(args[0], alpha * args[1])
+
+【接口】
+    @device
+    operator()<Op>(
+        chunk_size: int,
+        tl: TensorListMetadata<depth>,
+        op: Op,
+        alpha: opmath_t
+    )
+        实现:
+            tensor_loc = tl.block_to_tensor[blockIdx.x]
+            chunk_idx = tl.block_to_chunk[blockIdx.x]
+            n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+            all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+
+            if n % kILP == 0 and chunk_size % kILP == 0 and all_aligned:
+                for i_start in range(threadIdx.x, n, blockDim.x):
+                    load_store(r_args[0], args[0], 0, i_start)
+                    load_store(r_args[1], args[1], 0, i_start)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], alpha * r_args[1][ii])
+                    load_store(args[res_arg_index], r_args[0], i_start, 0)
+            else:
+                for i_start in range(0, n, blockDim.x * kILP):
+                    load_args<r_args_depth>(r_args, args, i_start, chunk_size, n)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], alpha * r_args[1][ii])
+                    store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n)
+
+--------------------------------
+BinaryOpScalarTensorFunctor<T, depth, r_args_depth, res_arg_index>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    foreach 二元操作 Functor：result = op(input, alpha * (*scalar_tensor))
+
+【接口】
+    @device
+    operator()<Op>(
+        chunk_size: int,
+        tl: TensorListMetadata<depth>,
+        op: Op,
+        scalar: T*,
+        alpha: opmath_t
+    )
+        实现:
+            tensor_loc = tl.block_to_tensor[blockIdx.x]
+            chunk_idx = tl.block_to_chunk[blockIdx.x]
+            n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+            all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+            scalar_val = alpha * (*scalar)
+
+            if n % kILP == 0 and chunk_size % kILP == 0 and all_aligned:
+                for i_start in range(threadIdx.x, n, blockDim.x):
+                    load_store(r_args[0], args[0], 0, i_start)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], scalar_val)
+                    load_store(args[res_arg_index], r_args[0], i_start, 0)
+            else:
+                for i_start in range(0, n, blockDim.x * kILP):
+                    load_args<1>(r_args, args, i_start, chunk_size, n)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], scalar_val)
+                    store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n)
+
+--------------------------------
+ZeroFunctor<T, depth, r_args_depth, res_arg_index>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    foreach zero 操作 Functor：将张量置零
+
+【接口】
+    @device
+    operator()(
+        chunk_size: int,
+        tl: TensorListMetadata<1>
+    )
+        实现:
+            tensor_loc = tl.block_to_tensor[blockIdx.x]
+            chunk_idx = tl.block_to_chunk[blockIdx.x]
+            n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+            all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+
+            if n % kILP == 0 and chunk_size % kILP == 0 and all_aligned:
+                for i_start in range(threadIdx.x, n, blockDim.x):
+                    for ii in range(kILP):
+                        r_args[0][ii] = 0
+                    load_store(args[0], r_args[0], i_start, 0)
+            else:
+                for i_start in range(0, n, blockDim.x * kILP):
+                    for ii in range(kILP):
+                        r_args[0][ii] = 0
+                    store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n)
+
+--------------------------------
+UnaryOpFunctor<T, depth, r_args_depth, res_arg_index>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    foreach 一元操作 Functor：result = op(input)
+
+【接口】
+    @device
+    operator()<Op>(
+        chunk_size: int,
+        tl: TensorListMetadata<depth>,
+        op: Op
+    )
+        实现:
+            tensor_loc = tl.block_to_tensor[blockIdx.x]
+            chunk_idx = tl.block_to_chunk[blockIdx.x]
+            n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+            all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+
+            if n % kILP == 0 and chunk_size % kILP == 0 and all_aligned:
+                for i_start in range(threadIdx.x, n, blockDim.x):
+                    load_store(r_args[0], args[0], 0, i_start)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii])
+                    load_store(args[res_arg_index], r_args[0], i_start, 0)
+            else:
+                for i_start in range(0, n, blockDim.x * kILP):
+                    load_args<r_args_depth>(r_args, args, i_start, chunk_size, n)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii])
+                    store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n)
+
+--------------------------------
+PointwiseOpScalarFunctor<T, depth, r_args_depth, res_arg_index>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    foreach pointwise 操作 Functor：result = args[0] + scalar * op(args[1], args[2])
+
+【接口】
+    @device
+    operator()<Op>(
+        chunk_size: int,
+        tl: TensorListMetadata<depth>,
+        op: Op,
+        scalar: opmath_t
+    )
+        实现:
+            tensor_loc = tl.block_to_tensor[blockIdx.x]
+            chunk_idx = tl.block_to_chunk[blockIdx.x]
+            n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+            all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+            pointwise_op_scalar<res_arg_index>(r_args, args, scalar, n, chunk_size, all_aligned, op)
+
+--------------------------------
+PointwiseOpScalarListFunctor<T, depth, r_args_depth, res_arg_index>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    foreach pointwise 操作 Functor：result = args[0] + scalar_list[i] * op(args[1], args[2])
+
+【接口】
+    @device
+    operator()<Op>(
+        chunk_size: int,
+        tl: TensorListScalarListMetadata<opmath_t, depth>,
+        op: Op
+    )
+        实现:
+            tensor_loc = tl.block_to_tensor[blockIdx.x]
+            chunk_idx = tl.block_to_chunk[blockIdx.x]
+            scalar = tl.scalar_vals[tensor_loc]
+            n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+            all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+            pointwise_op_scalar<res_arg_index>(r_args, args, scalar, n, chunk_size, all_aligned, op)
+
+--------------------------------
+PointwiseOpListFunctor<T, depth>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    foreach pointwise 操作 Functor：result = op(args[0], args[1])
+
+【接口】
+    @device
+    operator()<Op>(
+        chunk_size: int,
+        tl: TensorListMetadata<depth>,
+        op: Op
+    )
+        实现:
+            tensor_loc = tl.block_to_tensor[blockIdx.x]
+            chunk_idx = tl.block_to_chunk[blockIdx.x]
+            n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+            all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+
+            if n % kILP == 0 and chunk_size % kILP == 0 and all_aligned:
+                for i_start in range(threadIdx.x, n, blockDim.x):
+                    load_store(r_args[0], args[0], 0, i_start)
+                    load_store(r_args[1], args[1], 0, i_start)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], r_args[1][ii])
+                    load_store(args[2], r_args[0], i_start, 0)
+            else:
+                for i_start in range(0, n, blockDim.x * kILP):
+                    load_args<depth - 1>(r_args, args, i_start, chunk_size, n)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], r_args[1][ii])
+                    store_args(args[2], r_args[0], i_start, chunk_size, n)
+
+--------------------------------
+TernaryOpListFunctor<T, depth, r_args_depth, res_arg_index>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    foreach 三元操作 Functor：result = op(args[0], args[1], args[2])
+
+【约束】
+    depth == 3 or depth == 4
+    depth >= r_args_depth
+    res_arg_index == depth - 1 or res_arg_index == 0
+
+【接口】
+    @device
+    operator()<Op>(
+        chunk_size: int,
+        tl: TensorListMetadata<depth>,
+        op: Op
+    )
+        实现:
+            tensor_loc = tl.block_to_tensor[blockIdx.x]
+            chunk_idx = tl.block_to_chunk[blockIdx.x]
+            n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+            all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+
+            if n % kILP == 0 and chunk_size % kILP == 0 and all_aligned:
+                for i_start in range(threadIdx.x, n, blockDim.x):
+                    load_store(r_args[0], args[0], 0, i_start)
+                    load_store(r_args[1], args[1], 0, i_start)
+                    load_store(r_args[2], args[2], 0, i_start)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], r_args[1][ii], r_args[2][ii])
+                    load_store(args[res_arg_index], r_args[0], i_start, 0)
+            else:
+                for i_start in range(0, n, blockDim.x * kILP):
+                    load_args<r_args_depth>(r_args, args, i_start, chunk_size, n)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], r_args[1][ii], r_args[2][ii])
+                    store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n)
+
+--------------------------------
+TernaryOpScalarFunctor<T, depth, r_args_depth, res_arg_index>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    foreach 三元操作 Functor：result = op(args[0], args[1], alpha)
+
+【约束】
+    depth == 2 or depth == 3
+    depth >= r_args_depth
+    res_arg_index == depth - 1 or res_arg_index == 0
+
+【接口】
+    @device
+    operator()<Op>(
+        chunk_size: int,
+        tl: TensorListMetadata<depth>,
+        op: Op,
+        alpha: opmath_t
+    )
+        实现:
+            tensor_loc = tl.block_to_tensor[blockIdx.x]
+            chunk_idx = tl.block_to_chunk[blockIdx.x]
+            n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+            all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+
+            if n % kILP == 0 and chunk_size % kILP == 0 and all_aligned:
+                for i_start in range(threadIdx.x, n, blockDim.x):
+                    load_store(r_args[0], args[0], 0, i_start)
+                    load_store(r_args[1], args[1], 0, i_start)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], r_args[1][ii], alpha)
+                    load_store(args[res_arg_index], r_args[0], i_start, 0)
+            else:
+                for i_start in range(0, n, blockDim.x * kILP):
+                    load_args<r_args_depth>(r_args, args, i_start, chunk_size, n)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], r_args[1][ii], alpha)
+                    store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n)
+
+--------------------------------
+TernaryOpScalarListFunctor<T, depth, r_args_depth, res_arg_index>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    foreach 三元操作 Functor：result = op(args[0], args[1], scalar_list[i])
+
+【约束】
+    depth == 2 or depth == 3
+    depth >= r_args_depth
+    res_arg_index == depth - 1 or res_arg_index == 0
+
+【接口】
+    @device
+    operator()<Op>(
+        chunk_size: int,
+        tl: TensorListScalarListMetadata<opmath_t, depth>,
+        op: Op
+    )
+        实现:
+            tensor_loc = tl.block_to_tensor[blockIdx.x]
+            chunk_idx = tl.block_to_chunk[blockIdx.x]
+            scalar = tl.scalar_vals[tensor_loc]
+            n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size
+            all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)
+
+            if n % kILP == 0 and chunk_size % kILP == 0 and all_aligned:
+                for i_start in range(threadIdx.x, n, blockDim.x):
+                    load_store(r_args[0], args[0], 0, i_start)
+                    load_store(r_args[1], args[1], 0, i_start)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], r_args[1][ii], scalar)
+                    load_store(args[res_arg_index], r_args[0], i_start, 0)
+            else:
+                for i_start in range(0, n, blockDim.x * kILP):
+                    load_args<r_args_depth>(r_args, args, i_start, chunk_size, n)
+                    for ii in range(kILP):
+                        r_args[0][ii] = op(r_args[0][ii], r_args[1][ii], scalar)
+                    store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n)
+
+--------------------------------
+power_functor<T>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    幂运算仿函数
+
+【接口】
+    @device
+    operator()(a: T, b: T) -> T
+        实现: return at::native::pow_(a, b)
+
+--------------------------------
+reverse_power_functor<T>
+来源: aten/src/ATen/native/cuda/ForeachFunctors.cuh
+--------------------------------
+
+【用途】
+    反向幂运算仿函数（交换底数和指数）
+
+【接口】
+    @device
+    operator()(a: T, b: T) -> T
+        实现: return at::native::pow_(b, a)

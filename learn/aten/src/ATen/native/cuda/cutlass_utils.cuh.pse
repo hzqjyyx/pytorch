@@ -1,0 +1,190 @@
+--------------------------------
+Sm90RowBroadcastPtrArray (行向量广播，指针数组版本)
+来源: aten/src/ATen/native/cuda/cutlass_utils.cuh
+--------------------------------
+
+【签名】
+    @device
+    Sm90RowBroadcastPtrArray<
+        Stages: int = 0,
+        CtaTileShapeMNK,
+        ElementInput,
+        ElementCompute = ElementInput,
+        StrideMNL = Stride<_0,_1,_0>,
+        Alignment = 128 / sizeof_bits_v<ElementInput>,
+        EnableNullptr: bool = true
+    >
+
+    约束:
+    - Stages == 0 (不支持smem流水线)
+    - StrideMNL 的前两维必须是 Stride<_0,_1> 或支持动态广播
+
+【状态】
+    ptr_row_array: ElementInput const* const*    # 指针数组，每个batch一个指针
+    null_default: ElementCompute                 # nullptr时的默认值
+    dRow: StrideMNL                              # 行向量的stride (M,N,L)
+    is_zero_: bool                               # 是否为零值优化
+    smem: ElementInput*                          # 共享内存缓冲区
+
+【算法】
+    # Step 1: 初始化时检测零值优化
+    if ptr_row_array == nullptr:
+        is_zero_ = (null_default == 0)
+    elif IsDynamicBroadcast and stride_N == false and stride_L == 0:
+        # 动态标量广播
+        is_zero_ = (ptr_row_array[0][0] == 0)
+
+    # Step 2: begin() - 从全局内存加载行向量到共享内存
+    if ptr_row_array != nullptr:
+        # G2S: Global to Shared
+        tGS_gRow = partition_S(gRow)              # 全局内存分区
+        tGS_sRow = partition_D(sRow)              # 共享内存分区
+        
+        for i in filtered_range(tGS_gRow):
+            if tGS_cRow_flt(i) < residue_cRow:    # 在边界内
+                tGS_sRow_flt(i) = tGS_gRow_flt(i)
+            else:
+                tGS_sRow_flt(i) = 0               # OOB填零
+        
+        barrier_sync()
+
+    # Step 3: begin_loop(epi_m, epi_n) - 从共享内存加载到寄存器
+    if epi_m == 0 and ptr_row_array != nullptr:   # 假设M维优先循环
+        # S2R: Shared to Register
+        tSR_rRow_flt = copy_aligned(tSR_sRow[:,:,:,epi_m,epi_n])
+        tSR_rRow_compute = convert<ElementCompute>(tSR_rRow_flt)
+
+    # Step 4: visit(frg_acc, epi_v, epi_m, epi_n) - 返回广播值
+    frg_row[i] = tSR_rRow(epi_v * FragmentSize + i) for i in range(FragmentSize)
+    return frg_row
+
+【并行模式】
+    - G2S阶段: ThreadCount个线程协作，每个线程处理部分列
+    - S2R阶段: 使用 tiled_copy 分区加载
+    - 优化: 零值时跳过所有加载
+
+【备注】
+    - 支持动态广播: StrideMNL的第二维可以是bool，控制是行向量还是标量广播
+    - 共享内存布局: (CTA_M, CTA_N) 但stride为 (_0, _1)，只存储列维度
+    - EnableNullptr: 允许传入nullptr回退到标量广播
+
+--------------------------------
+Sm90ColBroadcastPtrArray (列向量广播，指针数组版本)
+来源: aten/src/ATen/native/cuda/cutlass_utils.cuh
+--------------------------------
+
+【签名】
+    @device
+    Sm90ColBroadcastPtrArray<
+        Stages: int = 0,
+        CtaTileShapeMNK,
+        ElementInput,
+        ElementCompute = ElementInput,
+        StrideMNL = Stride<_1,_0,_0>,
+        Alignment = 128 / sizeof_bits_v<ElementInput>,
+        EnableNullptr: bool = true
+    >
+
+    约束:
+    - Stages == 0 (不支持smem流水线)
+    - StrideMNL 的前两维必须是 Stride<_1,_0> 或支持动态广播
+
+【状态】
+    ptr_col_array: ElementInput const* const*    # 指针数组，每个batch一个指针
+    null_default: ElementCompute                 # nullptr时的默认值
+    dCol: StrideMNL                              # 列向量的stride (M,N,L)
+    is_zero_: bool                               # 是否为零值优化
+
+【算法】
+    # Step 1: 初始化时检测零值优化
+    if ptr_col_array == nullptr:
+        is_zero_ = (null_default == 0)
+    elif IsDynamicBroadcast and stride_M == false and stride_L == 0:
+        # 动态标量广播
+        is_zero_ = (ptr_col_array[0][0] == 0)
+
+    # Step 2: begin() - 直接从全局内存加载到寄存器
+    if ptr_col_array != nullptr:
+        tCgCol_flt = filter_zeros(tCgCol)
+        tCrCol_flt = make_tensor_like<ElementInput>(tCgCol_flt)
+        tCcCol_flt = filter_zeros(tCcCol)
+        
+        # 使用向量化加载 (尝试V > 1的向量)
+        if V > 1:
+            tCgCol_vec = recast<VecType>(coalesce(tCgCol_flt))
+            tCrCol_vec = recast<VecType>(coalesce(tCrCol_flt))
+            copy_if(tCcCol_vec < residue_tCcCol, tCgCol_vec, tCrCol_vec)
+        else:
+            copy_if(tCcCol_flt < residue_tCcCol, tCgCol_flt, tCrCol_flt)
+        
+        # 类型转换
+        tCrCol_compute = convert<ElementCompute>(tCrCol_flt)
+
+    # Step 3: visit(frg_acc, epi_v, epi_m, epi_n) - 返回广播值
+    tCrCol_mn = tCrCol[:,:,:,epi_m,epi_n]
+    frg_col[i] = tCrCol_mn(epi_v * FragmentSize + i) for i in range(FragmentSize)
+    return frg_col
+
+【并行模式】
+    - 无smem阶段: 累加器已将列元素均匀分配给线程
+    - G2R阶段: 直接从全局内存加载，支持向量化
+    - 优化: 零值时跳过所有加载
+
+【备注】
+    - 不使用共享内存: 列向量的分布特性允许直接G2R
+    - 支持动态广播: StrideMNL的第一维可以是bool
+    - 向量化对齐: 自动检测 max_common_layout 以确定向量宽度
+
+--------------------------------
+Sm90OuterProduct (列向量与行向量外积)
+来源: aten/src/ATen/native/cuda/cutlass_utils.cuh
+--------------------------------
+
+【签名】
+    @device
+    Sm90OuterProduct<
+        Stages: int = 0,
+        CtaTileShapeMNK,
+        ElementScalar,
+        StrideColMNL = Stride<_1,_0,int64_t>,
+        StrideRowMNL = Stride<_0,_1,int64_t>,
+        Alignment = 128 / sizeof_bits_v<ElementScalar>,
+        EnableNullptr: bool = false
+    >
+
+    约束:
+    - Stages == 0 (不支持smem)
+    - Alignment * sizeof_bits_v<ElementScalar> % 128 == 0
+    - StrideColMNL 前两维 == Stride<_1,_0>
+    - StrideRowMNL 前两维 == Stride<_0,_1>
+    - !EnableNullptr (未实现nullptr回退)
+
+【状态】
+    ptr_col: ElementScalar const*                # 列向量指针
+    ptr_row: ElementScalar const*                # 行向量指针
+    dCol: StrideColMNL                           # 列向量stride
+    dRow: StrideRowMNL                           # 行向量stride
+
+【算法】
+    # Step 1: begin() - 加载列向量和行向量到寄存器
+    copy(filter(tCgCol), filter(tCrCol))         # 列向量: G2R
+    copy(filter(tCgRow), filter(tCrRow))         # 行向量: G2R
+
+    # Step 2: visit(frg_acc, epi_v, epi_m, epi_n) - 计算外积
+    tCrCol_mn = tCrCol[:,:,:,epi_m,epi_n]
+    tCrRow_mn = tCrRow[:,:,:,epi_m,epi_n]
+    
+    frg_colrow[i] = tCrCol_mn(epi_v * FragmentSize + i) * tCrRow_mn(epi_v * FragmentSize + i)
+    for i in range(FragmentSize)
+    
+    return frg_colrow
+
+【并行模式】
+    - 无smem阶段: 直接G2R
+    - elementwise: 每个元素独立计算外积
+    - 优化: filter_zeros 过滤stride-0模式，避免冗余拷贝
+
+【备注】
+    - 用途: 实现 col * row^T 形式的逐元素缩放
+    - 典型场景: LayerNorm/BatchNorm 的仿射变换
+    - 未实现nullptr回退: EnableNullptr 固定为false

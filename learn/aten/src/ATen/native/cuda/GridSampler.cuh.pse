@@ -1,0 +1,453 @@
+# aten/src/ATen/native/cuda/GridSampler.cuh
+
+--------------------------------
+grid_sampler_unnormalize
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:22
+--------------------------------
+
+【签名】
+    @device
+    grid_sampler_unnormalize(coord: scalar_t, size: int, align_corners: bool) -> scalar_t
+
+【算法】
+    if align_corners:
+        # 从 [-1, 1] 映射到 [0, size - 1]
+        return ((coord + 1) / 2) * (size - 1)
+    else:
+        # 从 [-1, 1] 映射到 [-0.5, size - 0.5]
+        return ((coord + 1) * size - 1) / 2
+
+【备注】
+    - 将归一化坐标映射到像素索引空间
+    - align_corners=true: 端点映射到像素中心
+    - align_corners=false: 端点映射到图像边缘
+
+--------------------------------
+grid_sampler_unnormalize_set_grad
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:38
+--------------------------------
+
+【签名】
+    @device
+    grid_sampler_unnormalize_set_grad(
+        coord: scalar_t,
+        size: int,
+        align_corners: bool,
+        grad_in: scalar_t*    # 输出参数: d_output/d_coord
+    ) -> scalar_t
+
+【算法】
+    if align_corners:
+        *grad_in = (size - 1) / 2
+        return ((coord + 1) / 2) * (size - 1)
+    else:
+        *grad_in = size / 2
+        return ((coord + 1) * size - 1) / 2
+
+【备注】
+    - 同时计算前向值和梯度 d_output/d_input
+
+--------------------------------
+clip_coordinates
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:54
+--------------------------------
+
+【签名】
+    @device
+    clip_coordinates(in: scalar_t, clip_limit: int) -> scalar_t
+
+【算法】
+    return min(clip_limit - 1, max(in, 0))
+
+【备注】
+    - 将坐标裁剪到 [0, clip_limit - 1]
+
+--------------------------------
+clip_coordinates_set_grad
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:63
+--------------------------------
+
+【签名】
+    @device
+    clip_coordinates_set_grad(
+        in: scalar_t,
+        clip_limit: int,
+        grad_in: scalar_t*    # 输出参数: d_output/d_in
+    ) -> scalar_t
+
+【算法】
+    if in <= 0:
+        *grad_in = 0
+        return 0
+    else:
+        max_val = clip_limit - 1
+        if in >= max_val:
+            *grad_in = 0
+            return max_val
+        else:
+            *grad_in = 1
+            return in
+
+【备注】
+    - 边界上梯度为0（边界视为越界）
+    - 内部梯度为1
+
+--------------------------------
+reflect_coordinates
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:86
+--------------------------------
+
+【签名】
+    @device
+    reflect_coordinates(
+        in: scalar_t,
+        twice_low: int,      # 2 * 下界
+        twice_high: int      # 2 * 上界
+    ) -> scalar_t
+
+【算法】
+    if twice_low == twice_high:
+        return 0
+    
+    min = twice_low / 2
+    span = (twice_high - twice_low) / 2
+    
+    # 计算到下界的距离
+    in = abs(in - min)
+    
+    # 模运算得到余数
+    extra = fmod(in, span)
+    
+    # 计算翻折次数
+    flips = floor(in / span)
+    
+    if flips % 2 == 0:
+        return extra + min
+    else:
+        return span - extra + min
+
+【备注】
+    - 通过镜像反射将坐标映射到 [low, high]
+    - twice_* 用整数表示半整数值
+
+--------------------------------
+reflect_coordinates_set_grad
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:109
+--------------------------------
+
+【签名】
+    @device
+    reflect_coordinates_set_grad(
+        in: scalar_t,
+        twice_low: int,
+        twice_high: int,
+        grad_in: scalar_t*    # 输出参数: d_output/d_in
+    ) -> scalar_t
+
+【算法】
+    if twice_low == twice_high:
+        *grad_in = 0
+        return 0
+    
+    min = twice_low / 2
+    span = (twice_high - twice_low) / 2
+    in = in - min
+    
+    # 记录初始符号
+    if in < 0:
+        grad_in_mult = -1
+        in = -in
+    else:
+        grad_in_mult = 1
+    
+    extra = fmod(in, span)
+    flips = floor(in / span)
+    
+    if flips % 2 == 0:
+        *grad_in = grad_in_mult
+        return extra + min
+    else:
+        *grad_in = -grad_in_mult
+        return span - extra + min
+
+【备注】
+    - 梯度在偶数翻折时保持符号，奇数翻折时反转
+
+--------------------------------
+safe_downgrade_to_int_range
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:139
+--------------------------------
+
+【签名】
+    @device
+    safe_downgrade_to_int_range(x: scalar_t) -> scalar_t
+
+【算法】
+    if x > INT_MAX - 1 or x < INT_MIN or not isfinite(x):
+        return -100.0
+    return x
+
+【备注】
+    - 防止越界和非有限值导致未定义行为
+    - -100.0 确保后续 within_bounds_* 检查失败
+
+--------------------------------
+compute_coordinates
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:150
+--------------------------------
+
+【签名】
+    @device
+    compute_coordinates(
+        coord: scalar_t,
+        size: int,
+        padding_mode: GridSamplerPadding,
+        align_corners: bool
+    ) -> scalar_t
+
+【算法】
+    if padding_mode == Border:
+        coord = clip_coordinates(coord, size)
+    
+    elif padding_mode == Reflection:
+        if align_corners:
+            coord = reflect_coordinates(coord, 0, 2*(size - 1))
+        else:
+            coord = reflect_coordinates(coord, -1, 2*size - 1)
+        
+        coord = clip_coordinates(coord, size)
+    
+    coord = safe_downgrade_to_int_range(coord)
+    return coord
+
+【备注】
+    - padding_mode=Zeros 时不做处理（调用者负责边界检查）
+    - Reflection 后仍需 clip 确保在范围内
+
+--------------------------------
+grid_sampler_compute_source_index
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:174
+--------------------------------
+
+【签名】
+    @device
+    grid_sampler_compute_source_index(
+        coord: scalar_t,
+        size: int,
+        padding_mode: GridSamplerPadding,
+        align_corners: bool
+    ) -> scalar_t
+
+【算法】
+    coord = grid_sampler_unnormalize(coord, size, align_corners)
+    coord = compute_coordinates(coord, size, padding_mode, align_corners)
+    return coord
+
+【备注】
+    - 组合归一化和边界处理
+
+--------------------------------
+grid_sampler_compute_source_index_set_grad
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:190
+--------------------------------
+
+【签名】
+    @device
+    grid_sampler_compute_source_index_set_grad(
+        coord: scalar_t,
+        size: int,
+        padding_mode: GridSamplerPadding,
+        align_corners: bool,
+        grad_in: scalar_t*    # 输出参数: d_output/d_coord
+    ) -> scalar_t
+
+【算法】
+    coord = grid_sampler_unnormalize_set_grad(coord, size, align_corners, grad_in)
+    
+    if padding_mode == Border:
+        coord = clip_coordinates_set_grad(coord, size, &grad_clip)
+        *grad_in = (*grad_in) * grad_clip
+    
+    elif padding_mode == Reflection:
+        if align_corners:
+            coord = reflect_coordinates_set_grad(coord, 0, 2*(size - 1), &grad_refl)
+        else:
+            coord = reflect_coordinates_set_grad(coord, -1, 2*size - 1, &grad_refl)
+        
+        coord = clip_coordinates_set_grad(coord, size, &grad_clip)
+        *grad_in = (*grad_in) * grad_refl * grad_clip
+    
+    coord = safe_downgrade_to_int_range(coord)
+    return coord
+
+【备注】
+    - 梯度通过链式法则累积: grad_unnorm * grad_refl * grad_clip
+
+--------------------------------
+within_bounds_2d
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:219
+--------------------------------
+
+【签名】
+    @device
+    within_bounds_2d(h: int, w: int, H: int, W: int) -> bool
+
+【算法】
+    return h >= 0 and h < H and w >= 0 and w < W
+
+--------------------------------
+within_bounds_3d
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:224
+--------------------------------
+
+【签名】
+    @device
+    within_bounds_3d(d: int, h: int, w: int, D: int, H: int, W: int) -> bool
+
+【算法】
+    return d >= 0 and d < D and h >= 0 and h < H and w >= 0 and w < W
+
+--------------------------------
+get_value_bounded
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:230
+--------------------------------
+
+【签名】
+    @device
+    get_value_bounded(
+        data: scalar_t*,
+        x: scalar_t, y: scalar_t,
+        W: int, H: int,
+        sW: int, sH: int,     # stride
+        padding_mode: GridSamplerPadding,
+        align_corners: bool
+    ) -> scalar_t
+
+【算法】
+    x = compute_coordinates(x, W, padding_mode, align_corners)
+    y = compute_coordinates(y, H, padding_mode, align_corners)
+    
+    ix = int(x)
+    iy = int(y)
+    
+    if within_bounds_2d(iy, ix, H, W):
+        return data[iy * sH + ix * sW]
+    
+    return 0
+
+【备注】
+    - 边界外返回0（用于 padding_mode=Zeros）
+
+--------------------------------
+safe_add_2d
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:249
+--------------------------------
+
+【签名】
+    @device
+    safe_add_2d(
+        data: scalar_t*,
+        h: int, w: int,
+        sH: int, sW: int,     # stride
+        H: int, W: int,
+        delta: scalar_t,
+        NC_offset: index_t,   # batch/channel 偏移
+        memory_span: index_t
+    )
+
+【算法】
+    if within_bounds_2d(h, w, H, W):
+        fastAtomicAdd(data, NC_offset + h * sH + w * sW, memory_span, delta, true)
+
+【并行模式】
+    atomic_add
+
+【备注】
+    - 边界检查后原子累加（用于 backward）
+
+--------------------------------
+safe_add_3d
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:265
+--------------------------------
+
+【签名】
+    @device
+    safe_add_3d(
+        data: scalar_t*,
+        d: int, h: int, w: int,
+        sD: int, sH: int, sW: int,
+        D: int, H: int, W: int,
+        delta: scalar_t,
+        NC_offset: index_t,
+        memory_span: index_t
+    )
+
+【算法】
+    if within_bounds_3d(d, h, w, D, H, W):
+        fastAtomicAdd(data, NC_offset + d * sD + h * sH + w * sW, memory_span, delta, true)
+
+【并行模式】
+    atomic_add
+
+--------------------------------
+add_value_bounded
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:281
+--------------------------------
+
+【签名】
+    @device
+    add_value_bounded(
+        data: scalar_t*,
+        x: scalar_t, y: scalar_t,
+        W: int, H: int,
+        sW: int, sH: int,
+        delta: scalar_t,
+        padding_mode: GridSamplerPadding,
+        align_corners: bool,
+        NC_offset: index_t,
+        memory_span: index_t
+    )
+
+【算法】
+    x = compute_coordinates(x, W, padding_mode, align_corners)
+    y = compute_coordinates(y, H, padding_mode, align_corners)
+    
+    ix = int(x)
+    iy = int(y)
+    
+    safe_add_2d(data, iy, ix, sH, sW, H, W, delta, NC_offset, memory_span)
+
+【并行模式】
+    atomic_add
+
+【备注】
+    - 用于 backward 时累加梯度到对应像素
+
+--------------------------------
+get_cubic_coefficients_grad
+来源: aten/src/ATen/native/cuda/GridSampler.cuh:301
+--------------------------------
+
+【签名】
+    @device
+    get_cubic_coefficients_grad(coeffs: scalar_t[4], t: scalar_t)
+
+【算法】
+    A = -0.75
+    
+    # d/dt of cubic interpolation coefficients
+    x = -1 - t
+    coeffs[0] = (-3 * A * x - 10 * A) * x - 8 * A
+    
+    x = -t
+    coeffs[1] = (-3 * (A + 2) * x - 2 * (A + 3)) * x
+    
+    x = 1 - t
+    coeffs[2] = (3 * (A + 2) * x - 2 * (A + 3)) * x
+    
+    x = 2 - t
+    coeffs[3] = (3 * A * x - 10 * A) * x + 8 * A
+
+【备注】
+    - 计算 bicubic 插值系数的导数
+    - 需与 UpSample.cuh:get_cubic_upsample_coefficients 一致

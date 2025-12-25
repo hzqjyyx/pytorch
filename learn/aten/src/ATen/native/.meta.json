@@ -340,6 +340,1592 @@
       "tasks": {
         "purpose": "done"
       }
+    },
+    "TensorAdvancedIndexing": {
+      "type": "group",
+      "hashes": {
+        "TensorAdvancedIndexing.cpp": "198be62b27d0e67e",
+        "TensorAdvancedIndexing.h": "1e98a7673a884734"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryOps": {
+      "type": "group",
+      "hashes": {
+        "UnaryOps.cpp": "20e242046bea1e3f",
+        "UnaryOps.h": "f5c0bbe58bc391ad"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CPUBlas": {
+      "type": "group",
+      "hashes": {
+        "CPUBlas.cpp": "03a6cb1a2e8778fd",
+        "CPUBlas.h": "5de8509feb2d640f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FusedAdam": {
+      "type": "group",
+      "hashes": {
+        "FusedAdam.cpp": "f04ee9ef2d2255e3",
+        "FusedAdam.h": "26351c65324f65c1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Sorting": {
+      "type": "group",
+      "hashes": {
+        "Sorting.cpp": "fdf4ce1956715d2e",
+        "Sorting.h": "1135f8caa77800b7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorShape": {
+      "type": "group",
+      "hashes": {
+        "TensorShape.cpp": "d25b90127ce305b8",
+        "TensorShape.h": "67c4cadca5e9b418"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorFactories": {
+      "type": "group",
+      "hashes": {
+        "TensorFactories.cpp": "2a6df4c4210338ab",
+        "TensorFactories.h": "40da8a5e6d941e60"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "verbose_wrapper": {
+      "type": "group",
+      "hashes": {
+        "verbose_wrapper.cpp": "6ab76823914f812f",
+        "verbose_wrapper.h": "dd77e2f82ff4bb38"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorProperties": {
+      "type": "group",
+      "hashes": {
+        "TensorProperties.cpp": "fd133530259d9e72",
+        "TensorProperties.h": "4b6291086e765ed3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "EmbeddingBag": {
+      "type": "group",
+      "hashes": {
+        "EmbeddingBag.cpp": "9508c75bd7517973",
+        "EmbeddingBag.h": "3bf837fc31d5569f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Histogram": {
+      "type": "group",
+      "hashes": {
+        "Histogram.cpp": "bf1ff7ceda38778f",
+        "Histogram.h": "e238795a36b5269a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ConvolutionMM3d": {
+      "type": "group",
+      "hashes": {
+        "ConvolutionMM3d.cpp": "c36e3a993fcb623e",
+        "ConvolutionMM3d.h": "2cf3b3f857a74c9e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorCompare": {
+      "type": "group",
+      "hashes": {
+        "TensorCompare.cpp": "bf544aea6b8ef74a",
+        "TensorCompare.h": "2e8d1cca6dd483cb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "group_norm": {
+      "type": "group",
+      "hashes": {
+        "group_norm.cpp": "6490f2afea11e3f5",
+        "group_norm.h": "5d98a4191b3d1225"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Activation": {
+      "type": "group",
+      "hashes": {
+        "Activation.cpp": "2baa509e3c4acb01",
+        "Activation.h": "6b0869b352a7f14f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SegmentReduce": {
+      "type": "group",
+      "hashes": {
+        "SegmentReduce.cpp": "cbcd50c4578d884f",
+        "SegmentReduce.h": "06043dbc1200bb75"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FusedSGD": {
+      "type": "group",
+      "hashes": {
+        "FusedSGD.cpp": "b63693009915f377",
+        "FusedSGD.h": "341091087e499d0b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorConversions": {
+      "type": "group",
+      "hashes": {
+        "TensorConversions.cpp": "c8e10a74cf3dbc07",
+        "TensorConversions.h": "195e02617bd6c963"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PointwiseOps": {
+      "type": "group",
+      "hashes": {
+        "PointwiseOps.cpp": "4a812b555bcbd512",
+        "PointwiseOps.h": "77db0a37549b44dc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/quantized/AffineQuantizerBase": {
+      "type": "group",
+      "hashes": {
+        "quantized/AffineQuantizerBase.cpp": "9df4151005273acd",
+        "quantized/AffineQuantizerBase.h": "85d9225310add1a0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/quantized/AffineQuantizer": {
+      "type": "group",
+      "hashes": {
+        "quantized/AffineQuantizer.cpp": "807e6f018414b113",
+        "quantized/AffineQuantizer.h": "5ec25e78294c8c70"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/quantized/Copy": {
+      "type": "group",
+      "hashes": {
+        "quantized/Copy.cpp": "3a8ef55390f0ace9",
+        "quantized/Copy.h": "4966ad6bfdcf7fc3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BatchLinearAlgebra": {
+      "type": "group",
+      "hashes": {
+        "BatchLinearAlgebra.cpp": "978dcb6b4df26b4f",
+        "BatchLinearAlgebra.h": "7caf8019a0012ca7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "utils/utils/Factory": {
+      "type": "group",
+      "hashes": {
+        "utils/Factory.cpp": "bcda7b4d2f6825fa",
+        "utils/Factory.h": "a3776f9eccd9d3f2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/quantized/library": {
+      "type": "group",
+      "hashes": {
+        "quantized/library.cpp": "1447c4ad9cb5c16b",
+        "quantized/library.h": "602333ac0cbc2b68"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nested/nested/NestedTensorUtils": {
+      "type": "group",
+      "hashes": {
+        "nested/NestedTensorUtils.cpp": "53daf4bc6f4448b3",
+        "nested/NestedTensorUtils.h": "0bbe275e4b956357"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nested/nested/NestedTensorMath": {
+      "type": "group",
+      "hashes": {
+        "nested/NestedTensorMath.cpp": "6fab8e2630431b7b",
+        "nested/NestedTensorMath.h": "71a4e748e7df88d8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nested/nested/NestedTensorBinaryOps": {
+      "type": "group",
+      "hashes": {
+        "nested/NestedTensorBinaryOps.cpp": "a0bae54d617613a6",
+        "nested/NestedTensorBinaryOps.h": "e83d638cd710fa88"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ts_native_functions.yaml": {
+      "type": "file",
+      "hashes": {
+        "ts_native_functions.yaml": "f62f9770e2694bdf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nested/nested/NestedTensorTransformerFunctions": {
+      "type": "group",
+      "hashes": {
+        "nested/NestedTensorTransformerFunctions.cpp": "e0bd00bf212e53b3",
+        "nested/NestedTensorTransformerFunctions.h": "b7aa033e5d718318"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "README.md": {
+      "type": "file",
+      "hashes": {
+        "README.md": "b35d23b2f46a5ae2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "tags.yaml": {
+      "type": "file",
+      "hashes": {
+        "tags.yaml": "b5be526e4fb63dba"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/README.md": {
+      "type": "file",
+      "hashes": {
+        "quantized/README.md": "db6d6450a1033e69"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "native_functions.yaml": {
+      "type": "file",
+      "hashes": {
+        "native_functions.yaml": "1469947e378adf90"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nested/README.md": {
+      "type": "file",
+      "hashes": {
+        "nested/README.md": "044c3c13882895ed"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CompositeRandomAccessor.h": {
+      "type": "file",
+      "hashes": {
+        "CompositeRandomAccessor.h": "04ccf5400ee6bb10"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MathBitsFallback.h": {
+      "type": "file",
+      "hashes": {
+        "MathBitsFallback.h": "485cad6c0d8966d3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ComplexHelper.h": {
+      "type": "file",
+      "hashes": {
+        "ComplexHelper.h": "6ed9908e95b91b00"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Bucketization.cpp": {
+      "type": "file",
+      "hashes": {
+        "Bucketization.cpp": "7e62e0a11f839dab"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Dropout.cpp": {
+      "type": "file",
+      "hashes": {
+        "Dropout.cpp": "be7ac9f70618b48c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReductionType.h": {
+      "type": "file",
+      "hashes": {
+        "ReductionType.h": "f39c2216d0f76400"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LossCTC.cpp": {
+      "type": "file",
+      "hashes": {
+        "LossCTC.cpp": "ada8a18052bae833"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ConvUtils.h": {
+      "type": "file",
+      "hashes": {
+        "ConvUtils.h": "fbd981089bd32842"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Memory.cpp": {
+      "type": "file",
+      "hashes": {
+        "Memory.cpp": "34dea04b33ed14b1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AdaptiveAveragePooling3d.cpp": {
+      "type": "file",
+      "hashes": {
+        "AdaptiveAveragePooling3d.cpp": "813d18a98dc40433"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Embedding.cpp": {
+      "type": "file",
+      "hashes": {
+        "Embedding.cpp": "ee962b129fccc1e4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AutogradComposite.cpp": {
+      "type": "file",
+      "hashes": {
+        "AutogradComposite.cpp": "d92cf87276b11405"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "RowwisePrune.cpp": {
+      "type": "file",
+      "hashes": {
+        "RowwisePrune.cpp": "d2fbe3f9577f5e88"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Linear.cpp": {
+      "type": "file",
+      "hashes": {
+        "Linear.cpp": "b7aa142506798956"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PadNd.cpp": {
+      "type": "file",
+      "hashes": {
+        "PadNd.cpp": "dffb16fcb935f211"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FractionalMaxPool2d.cpp": {
+      "type": "file",
+      "hashes": {
+        "FractionalMaxPool2d.cpp": "cbb5ba19cd603363"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TriangularOpsUtils.h": {
+      "type": "file",
+      "hashes": {
+        "TriangularOpsUtils.h": "53fa66286f81ccab"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "batch_norm.h": {
+      "type": "file",
+      "hashes": {
+        "batch_norm.h": "17700c2ac1ccb20d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AveragePool2d.cpp": {
+      "type": "file",
+      "hashes": {
+        "AveragePool2d.cpp": "ab5321a32e4631ca"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Im2Col.cpp": {
+      "type": "file",
+      "hashes": {
+        "Im2Col.cpp": "e3fea539875b18c0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NaiveConvolutionTranspose2d.cpp": {
+      "type": "file",
+      "hashes": {
+        "NaiveConvolutionTranspose2d.cpp": "3fe468b920dfe546"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "IndexKernel.h": {
+      "type": "file",
+      "hashes": {
+        "IndexKernel.h": "038711093aea40b9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LegacyBatching.cpp": {
+      "type": "file",
+      "hashes": {
+        "LegacyBatching.cpp": "f5855dbfaaeec3f7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PackedSequence.cpp": {
+      "type": "file",
+      "hashes": {
+        "PackedSequence.cpp": "f73614f09c3ea85f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AveragePool3d.cpp": {
+      "type": "file",
+      "hashes": {
+        "AveragePool3d.cpp": "0a636e747ccb9b62"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "RangeUtils.h": {
+      "type": "file",
+      "hashes": {
+        "RangeUtils.h": "02e29db63be5edbf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Pool.h": {
+      "type": "file",
+      "hashes": {
+        "Pool.h": "1bcbc1477e2a0dd7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleLinear1d.cpp": {
+      "type": "file",
+      "hashes": {
+        "UpSampleLinear1d.cpp": "468fc60fc6757ab2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TransposeType.h": {
+      "type": "file",
+      "hashes": {
+        "TransposeType.h": "19ee152d1978b206"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "im2col.h": {
+      "type": "file",
+      "hashes": {
+        "im2col.h": "2fafc61c1d4364e2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReflectionPad.cpp": {
+      "type": "file",
+      "hashes": {
+        "ReflectionPad.cpp": "130b241d9a18b1d5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NaiveConvolutionTranspose3d.cpp": {
+      "type": "file",
+      "hashes": {
+        "NaiveConvolutionTranspose3d.cpp": "54df927ae9081dd7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FractionalMaxPool3d.cpp": {
+      "type": "file",
+      "hashes": {
+        "FractionalMaxPool3d.cpp": "0cb691d1a026f705"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LossMultiLabelMargin.cpp": {
+      "type": "file",
+      "hashes": {
+        "LossMultiLabelMargin.cpp": "d48dd8a3a9abed75"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SobolEngineOps.cpp": {
+      "type": "file",
+      "hashes": {
+        "SobolEngineOps.cpp": "5b7ad83e8bc58de6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BlasKernel.cpp": {
+      "type": "file",
+      "hashes": {
+        "BlasKernel.cpp": "74f7fc1b30a59ec8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Gelu.h": {
+      "type": "file",
+      "hashes": {
+        "Gelu.h": "d70c38924b66a54e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "GridSamplerUtils.h": {
+      "type": "file",
+      "hashes": {
+        "GridSamplerUtils.h": "1f71c453b9a59d2c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TopKImpl.h": {
+      "type": "file",
+      "hashes": {
+        "TopKImpl.h": "dddf5fc982e7d25f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorAdvancedIndexingUtils.h": {
+      "type": "file",
+      "hashes": {
+        "TensorAdvancedIndexingUtils.h": "f41509b631c3ccdc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DilatedConvolutionUtils.h": {
+      "type": "file",
+      "hashes": {
+        "DilatedConvolutionUtils.h": "b3448f5a4c0d4046"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AdaptiveMaxPooling2d.cpp": {
+      "type": "file",
+      "hashes": {
+        "AdaptiveMaxPooling2d.cpp": "962686947d3f773a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Correlation.cpp": {
+      "type": "file",
+      "hashes": {
+        "Correlation.cpp": "efa1b59d15bf5c3d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AffineGridGenerator.cpp": {
+      "type": "file",
+      "hashes": {
+        "AffineGridGenerator.cpp": "ba65008609211af3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LossNLL2d.cpp": {
+      "type": "file",
+      "hashes": {
+        "LossNLL2d.cpp": "35fad960fd910f9a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ForeachUtils.h": {
+      "type": "file",
+      "hashes": {
+        "ForeachUtils.h": "331a315a0a7c142e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleNearest2d.cpp": {
+      "type": "file",
+      "hashes": {
+        "UpSampleNearest2d.cpp": "7051b0d4f72823d5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Scalar.cpp": {
+      "type": "file",
+      "hashes": {
+        "Scalar.cpp": "5098245223c13967"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MaxUnpooling.cpp": {
+      "type": "file",
+      "hashes": {
+        "MaxUnpooling.cpp": "32ae584c5636ee76"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleTrilinear3d.cpp": {
+      "type": "file",
+      "hashes": {
+        "UpSampleTrilinear3d.cpp": "eb4b9857380d4991"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NamedTensor.cpp": {
+      "type": "file",
+      "hashes": {
+        "NamedTensor.cpp": "39f22c1789ea426f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SortingUtils.h": {
+      "type": "file",
+      "hashes": {
+        "SortingUtils.h": "8b7ae587d5e6626d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MathBitFallThroughLists.h": {
+      "type": "file",
+      "hashes": {
+        "MathBitFallThroughLists.h": "66a96df77d271781"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "StridedRandomAccessor.h": {
+      "type": "file",
+      "hashes": {
+        "StridedRandomAccessor.h": "70f3204806cdab94"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Integration.cpp": {
+      "type": "file",
+      "hashes": {
+        "Integration.cpp": "48e92c7ee507bef1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "VariableMethodStubs.cpp": {
+      "type": "file",
+      "hashes": {
+        "VariableMethodStubs.cpp": "80c85c042ecf1f48"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleBicubic2d.cpp": {
+      "type": "file",
+      "hashes": {
+        "UpSampleBicubic2d.cpp": "558979bdcd908fb7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Pooling.cpp": {
+      "type": "file",
+      "hashes": {
+        "Pooling.cpp": "fdb578f9fecb5b00"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ChanelShuffle.cpp": {
+      "type": "file",
+      "hashes": {
+        "ChanelShuffle.cpp": "b052bfea2c3a07fc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NNPACK.cpp": {
+      "type": "file",
+      "hashes": {
+        "NNPACK.cpp": "12e961b10b8d1a68"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LossNLL.cpp": {
+      "type": "file",
+      "hashes": {
+        "LossNLL.cpp": "2264af1cbf7f472a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleNearest3d.cpp": {
+      "type": "file",
+      "hashes": {
+        "UpSampleNearest3d.cpp": "532724d00530db2a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ResizeCommon.h": {
+      "type": "file",
+      "hashes": {
+        "ResizeCommon.h": "bf22179a5772cfd5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Itertools.cpp": {
+      "type": "file",
+      "hashes": {
+        "Itertools.cpp": "b0c659818b5b547d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NegateFallback.cpp": {
+      "type": "file",
+      "hashes": {
+        "NegateFallback.cpp": "9753396883450c5a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SummaryOps.cpp": {
+      "type": "file",
+      "hashes": {
+        "SummaryOps.cpp": "d9644979c40dc475"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LossMultiMargin.cpp": {
+      "type": "file",
+      "hashes": {
+        "LossMultiMargin.cpp": "a3b0e3d8b477ff60"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SharedReduceOps.h": {
+      "type": "file",
+      "hashes": {
+        "SharedReduceOps.h": "df2cbdbd2e8fdec5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AdaptiveMaxPooling3d.cpp": {
+      "type": "file",
+      "hashes": {
+        "AdaptiveMaxPooling3d.cpp": "48a9d4eeae50fddf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TestOps.cpp": {
+      "type": "file",
+      "hashes": {
+        "TestOps.cpp": "9c512bc3da4b25df"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "prim_native_functions.cpp": {
+      "type": "file",
+      "hashes": {
+        "prim_native_functions.cpp": "7e2b1082a2fece79"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SpectralOps.cpp": {
+      "type": "file",
+      "hashes": {
+        "SpectralOps.cpp": "42e9e2ffd9370785"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Constraints.cpp": {
+      "type": "file",
+      "hashes": {
+        "Constraints.cpp": "b41da87e0a0069fc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AdaptiveAveragePooling.cpp": {
+      "type": "file",
+      "hashes": {
+        "AdaptiveAveragePooling.cpp": "5436f5d8e0669289"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ConvolutionTBC.cpp": {
+      "type": "file",
+      "hashes": {
+        "ConvolutionTBC.cpp": "ad49090121db5108"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SpectralOpsUtils.h": {
+      "type": "file",
+      "hashes": {
+        "SpectralOpsUtils.h": "7935e427b0e2abc9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NonSymbolicBC.h": {
+      "type": "file",
+      "hashes": {
+        "NonSymbolicBC.h": "1c9c9c2937080fd1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BucketizationUtils.h": {
+      "type": "file",
+      "hashes": {
+        "BucketizationUtils.h": "509b4d63dab0e046"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "vol2col.h": {
+      "type": "file",
+      "hashes": {
+        "vol2col.h": "ca3c73fe208d5b36"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Unique.cpp": {
+      "type": "file",
+      "hashes": {
+        "Unique.cpp": "faded0e0e6517006"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LossMulti.h": {
+      "type": "file",
+      "hashes": {
+        "LossMulti.h": "6f937d3ee71ee5f2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NonEmptyUtils.h": {
+      "type": "file",
+      "hashes": {
+        "NonEmptyUtils.h": "1acb2e21adff35ba"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReplicationPadding.cpp": {
+      "type": "file",
+      "hashes": {
+        "ReplicationPadding.cpp": "6fd7ce8450a6d659"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorDimApply.h": {
+      "type": "file",
+      "hashes": {
+        "TensorDimApply.h": "b8da8cea8ffac6fd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "WeightNorm.cpp": {
+      "type": "file",
+      "hashes": {
+        "WeightNorm.cpp": "925e6ff80bc4ff4f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Onehot.cpp": {
+      "type": "file",
+      "hashes": {
+        "Onehot.cpp": "7beebaef01760287"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SoftMax.cpp": {
+      "type": "file",
+      "hashes": {
+        "SoftMax.cpp": "c3fe0eb0553b53f9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorIteratorReduce.cpp": {
+      "type": "file",
+      "hashes": {
+        "TensorIteratorReduce.cpp": "f262358c5eb2aaf3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AdaptivePooling.h": {
+      "type": "file",
+      "hashes": {
+        "AdaptivePooling.h": "848380c20abb80dc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Loss.cpp": {
+      "type": "file",
+      "hashes": {
+        "Loss.cpp": "5d4d16a48297c5d2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Blas.cpp": {
+      "type": "file",
+      "hashes": {
+        "Blas.cpp": "2b7a8cab9831a0bd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ComparisonUtils.cpp": {
+      "type": "file",
+      "hashes": {
+        "ComparisonUtils.cpp": "c09fa1ed5ea15aa7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TriangularOps.cpp": {
+      "type": "file",
+      "hashes": {
+        "TriangularOps.cpp": "a428c66c157de4c8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "QuantizedLinear.cpp": {
+      "type": "file",
+      "hashes": {
+        "QuantizedLinear.cpp": "08f3cbf51fa25c85"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleBilinear2d.cpp": {
+      "type": "file",
+      "hashes": {
+        "UpSampleBilinear2d.cpp": "01df3a1f73370932"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleNearest1d.cpp": {
+      "type": "file",
+      "hashes": {
+        "UpSampleNearest1d.cpp": "856dce3c7dc8bf54"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ForeachOpsKernels.cpp": {
+      "type": "file",
+      "hashes": {
+        "ForeachOpsKernels.cpp": "51eae727a6a55ffe"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ScatterGatherChecks.h": {
+      "type": "file",
+      "hashes": {
+        "ScatterGatherChecks.h": "4e5f7ca18bf65851"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DilatedMaxPool2d.cpp": {
+      "type": "file",
+      "hashes": {
+        "DilatedMaxPool2d.cpp": "c0dac791622199c6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CompositeRandomAccessorCommon.h": {
+      "type": "file",
+      "hashes": {
+        "CompositeRandomAccessorCommon.h": "478e9cb076166868"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Col2Im.cpp": {
+      "type": "file",
+      "hashes": {
+        "Col2Im.cpp": "7735b9ee1d7b42b6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Math.h": {
+      "type": "file",
+      "hashes": {
+        "Math.h": "b68123bf4e551139"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ConvolutionMM2d.cpp": {
+      "type": "file",
+      "hashes": {
+        "ConvolutionMM2d.cpp": "e23fc19352e3d0eb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorIterator.h": {
+      "type": "file",
+      "hashes": {
+        "TensorIterator.h": "43b27f3746ecf713"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FractionalMaxPooling.h": {
+      "type": "file",
+      "hashes": {
+        "FractionalMaxPooling.h": "82c2196d53656eb6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DistributionTemplates.h": {
+      "type": "file",
+      "hashes": {
+        "DistributionTemplates.h": "f888393b98c44a6e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NaiveDilatedConvolution.cpp": {
+      "type": "file",
+      "hashes": {
+        "NaiveDilatedConvolution.cpp": "f6087601fd40bf2a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReduceOpsUtils.h": {
+      "type": "file",
+      "hashes": {
+        "ReduceOpsUtils.h": "8bc75aec7951fbda"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BatchLinearAlgebraKernel.cpp": {
+      "type": "file",
+      "hashes": {
+        "BatchLinearAlgebraKernel.cpp": "dfdc8a1ce4cc5bde"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "GatedLinearUnit.cpp": {
+      "type": "file",
+      "hashes": {
+        "GatedLinearUnit.cpp": "a2be046ed03a4ca4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MetaTensor.cpp": {
+      "type": "file",
+      "hashes": {
+        "MetaTensor.cpp": "44192fb8034f2251"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "im2col_shape_check.h": {
+      "type": "file",
+      "hashes": {
+        "im2col_shape_check.h": "6be718359108dee8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Padding.h": {
+      "type": "file",
+      "hashes": {
+        "Padding.h": "74f57807d9d4f36e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DilatedMaxPool3d.cpp": {
+      "type": "file",
+      "hashes": {
+        "DilatedMaxPool3d.cpp": "c143d4f51b1cfd5a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CanUse32BitIndexMath.h": {
+      "type": "file",
+      "hashes": {
+        "CanUse32BitIndexMath.h": "80700ea1dc752ac7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorIteratorDynamicCasting.h": {
+      "type": "file",
+      "hashes": {
+        "TensorIteratorDynamicCasting.h": "e339970b63fef877"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LinearAlgebraUtils.h": {
+      "type": "file",
+      "hashes": {
+        "LinearAlgebraUtils.h": "ae12b8feb9f90eae"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Convolution.cpp": {
+      "type": "file",
+      "hashes": {
+        "Convolution.cpp": "a01db0554fae82ca"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/ConvUtils.h": {
+      "type": "file",
+      "hashes": {
+        "quantized/ConvUtils.h": "4c3a94c17e2addf7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/IndexKernel.h": {
+      "type": "file",
+      "hashes": {
+        "quantized/IndexKernel.h": "54f5b09dd69160a5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/FakeQuantPerChannelAffine.cpp": {
+      "type": "file",
+      "hashes": {
+        "quantized/FakeQuantPerChannelAffine.cpp": "78ee0c4b21ed1fe7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/qlinear_unpack.cpp": {
+      "type": "file",
+      "hashes": {
+        "quantized/qlinear_unpack.cpp": "3e0a982e20c0feb9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/qconv_unpack.cpp": {
+      "type": "file",
+      "hashes": {
+        "quantized/qconv_unpack.cpp": "e7ea16534c4e834b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/TensorCompare.cpp": {
+      "type": "file",
+      "hashes": {
+        "quantized/TensorCompare.cpp": "aa40eb26207a591d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/TensorFactories.cpp": {
+      "type": "file",
+      "hashes": {
+        "quantized/TensorFactories.cpp": "fb0e0e4fceb6c436"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/FakeQuantAffine.h": {
+      "type": "file",
+      "hashes": {
+        "quantized/FakeQuantAffine.h": "3cbf51a83854694c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/FakeQuantPerTensorAffine.cpp": {
+      "type": "file",
+      "hashes": {
+        "quantized/FakeQuantPerTensorAffine.cpp": "81cf33e097d5a664"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/PackedParams.h": {
+      "type": "file",
+      "hashes": {
+        "quantized/PackedParams.h": "b6580b503231f8b5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/TensorAdvancedIndexing.cpp": {
+      "type": "file",
+      "hashes": {
+        "quantized/TensorAdvancedIndexing.cpp": "3394eec3d18d8947"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "utils/ParamUtils.h": {
+      "type": "file",
+      "hashes": {
+        "utils/ParamUtils.h": "4ada1d497d46a47e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/QTensor.cpp": {
+      "type": "file",
+      "hashes": {
+        "quantized/QTensor.cpp": "bf53e5814c109840"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "utils/ParamsHash.h": {
+      "type": "file",
+      "hashes": {
+        "utils/ParamsHash.h": "e1dedce34cfd5a99"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nested/NestedTensorTransformerUtils.h": {
+      "type": "file",
+      "hashes": {
+        "nested/NestedTensorTransformerUtils.h": "12dd534a3d45e9b4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nested/NestedTensorUnaryOps.cpp": {
+      "type": "file",
+      "hashes": {
+        "nested/NestedTensorUnaryOps.cpp": "495aa52b46de9605"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nested/NestedTensorBackward.cpp": {
+      "type": "file",
+      "hashes": {
+        "nested/NestedTensorBackward.cpp": "a68f7e4850da38ab"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nested/NestedTensorFactories.cpp": {
+      "type": "file",
+      "hashes": {
+        "nested/NestedTensorFactories.cpp": "4d455e939ee2f76d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nested/NestedTensorAliases.cpp": {
+      "type": "file",
+      "hashes": {
+        "nested/NestedTensorAliases.cpp": "bad5582c5eb3b192"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nested/NestedTensorMatmul.cpp": {
+      "type": "file",
+      "hashes": {
+        "nested/NestedTensorMatmul.cpp": "5e7c653b52ce8253"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
     }
   }
 }

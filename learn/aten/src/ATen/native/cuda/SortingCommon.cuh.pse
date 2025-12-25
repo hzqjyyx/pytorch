@@ -1,0 +1,157 @@
+--------------------------------
+Grid配置工具
+来源: aten/src/ATen/native/cuda/SortingCommon.cuh
+--------------------------------
+
+【常量】
+    MAX_BLOCK_SIZE: int = 1024 (CUDA) | 256 (ROCm)
+    MAX_GRID_SIZE: int64 = 65535
+
+【函数】
+    getGridFromTiles(gridTiles: int64) -> dim3
+        用途: 将一维tile数映射到3D grid，最大化利用CUDA grid维度
+        算法:
+            if gridTiles > MAX_GRID_SIZE³:
+                return false
+            
+            gridX = min(gridTiles, MAX_GRID_SIZE)
+            
+            if gridTiles > MAX_GRID_SIZE:
+                gridTiles = ceil_div(gridTiles, MAX_GRID_SIZE)
+                gridY = min(gridTiles, MAX_GRID_SIZE)
+                
+                if gridTiles > MAX_GRID_SIZE:
+                    gridTiles = ceil_div(gridTiles, MAX_GRID_SIZE)
+                    gridZ = min(gridTiles, MAX_GRID_SIZE)
+            
+            return dim3(gridX, gridY, gridZ)
+
+    nextHighestPowerOf2(n: uint64) -> uint64
+        用途: 计算 2^(ceil(log2(n)))
+        算法:
+            n--
+            n |= n >> 1
+            n |= n >> 2
+            n |= n >> 4
+            n |= n >> 8
+            n |= n >> 16
+            n |= n >> 32  (非MSC_VER)
+            n++
+            return n
+
+--------------------------------
+比较运算符
+来源: aten/src/ATen/native/cuda/SortingCommon.cuh
+--------------------------------
+
+【函数】
+    @device
+    GTOp<scalar_t, handleNaN>(lhs: scalar_t, rhs: scalar_t) -> bool
+        用途: 大于比较，可选NaN处理
+        算法:
+            if handleNaN and isnan(lhs) and not isnan(rhs):
+                return true
+            return lhs > rhs
+
+    @device
+    LTOp<scalar_t, handleNaN>(lhs: scalar_t, rhs: scalar_t) -> bool
+        用途: 小于比较，可选NaN处理
+        算法:
+            if handleNaN and isnan(rhs) and not isnan(lhs):
+                return true
+            return lhs < rhs
+
+【备注】
+    - handleNaN=true时，NaN总是被视为最大值（GTOp）或最小值（LTOp）
+
+--------------------------------
+索引工具
+来源: aten/src/ATen/native/cuda/SortingCommon.cuh
+--------------------------------
+
+【函数】
+    @device
+    getLinearBlockId<index_t>() -> index_t
+        用途: 将3D blockIdx映射到线性block ID
+        算法:
+            return blockIdx.z * gridDim.y * gridDim.x 
+                 + blockIdx.y * gridDim.x 
+                 + blockIdx.x
+
+    SliceComp(sliceSize: int64)
+        用途: Thrust排序比较器，按slice索引分段
+        @device
+        operator()(a: int64, b: int64) -> bool
+            算法:
+                segA = a / sliceSize
+                segB = b / sliceSize
+                return segA < segB
+
+    GlobalIndexToPerSliceIndex(sliceSize: int64)
+        用途: 将全局索引转换为slice内索引
+        @device
+        operator()(v: int64&)
+            算法:
+                v = v % sliceSize
+
+--------------------------------
+Launcher包装器
+来源: aten/src/ATen/native/cuda/SortingCommon.cuh
+--------------------------------
+
+【签名】
+    run_launcher<scalar_t, index_t, Launcher>(
+        values: Tensor[*, slice_size],
+        indices: Tensor[*, slice_size, int64],
+        self: Tensor[*, slice_size, scalar_t],
+        dim: int,
+        l: Launcher
+    )
+
+    约束:
+    - values, indices, self 必须连续
+
+【算法】
+    # Step 1: 获取TensorInfo并降维
+    self_info = getTensorInfo<scalar_t, index_t>(self)
+    values_info = getTensorInfo<scalar_t, index_t>(values)
+    indices_info = getTensorInfo<int64, index_t>(indices)
+    
+    slice_size = self.size(dim)
+    
+    # 将dim维度降维，仅保留slice offset信息
+    self_info.reduceDim(dim)
+    values_info.reduceDim(dim)
+    indices_info.reduceDim(dim)
+    
+    # Step 2: 折叠其他维度
+    collapse_self_dim = self_info.collapseDims(dim)
+    collapse_values_dim = values_info.collapseDims(dim)
+    collapse_indices_dim = indices_info.collapseDims(dim)
+    
+    # Step 3: 计算slice总数
+    num_slices = product(self_info.sizes)
+    
+    # Step 4: 确定维度模板参数
+    if values_info.dims == indices_info.dims == self_info.dims:
+        all_dims = self_info.dims
+    else:
+        all_dims = -1  # 任意维度
+    
+    # Step 5: 特化调用launcher
+    if all_dims == 1:
+        l.launch<scalar_t, index_t, 1>(
+            values_info, collapse_values_dim,
+            indices_info, collapse_indices_dim,
+            self_info, collapse_self_dim,
+            num_slices, slice_size)
+    elif all_dims == 2:
+        l.launch<scalar_t, index_t, 2>(...)
+    elif all_dims == 3:
+        l.launch<scalar_t, index_t, 3>(...)
+    else:
+        l.launch<scalar_t, index_t, -1>(...)
+
+【备注】
+    - Launcher: 策略对象，提供 launch<scalar_t, index_t, Dims>() 方法
+    - 维度特化 (1/2/3/-1) 用于编译期优化索引计算
