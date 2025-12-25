@@ -1,0 +1,158 @@
+--------------------------------
+logical_not_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnarySignKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    logical_not_kernel_cuda(iter: TensorIterator)
+
+【算法】
+    # 类型检查（确保输入输出类型在支持列表中）
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(0), ...)
+    
+    # 实际计算
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(1), ...):
+        gpu_kernel(iter, λ(a) -> bool: !a)
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持所有数值类型、复数类型、bool、half、bfloat16
+    - 双重分发：先检查输出类型，再检查输入类型
+
+--------------------------------
+neg_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnarySignKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    neg_kernel_cuda(iter: TensorIterator)
+
+【算法】
+    if isComplexType(dtype):
+        # 复数类型
+        if AT_USE_JITERATOR:
+            # JIT编译路径
+            jitted_gpu_kernel<neg_name>(iter, "template<T> T neg_kernel(T a) { return -a; }")
+        else:
+            # 直接kernel路径
+            AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, ...):
+                gpu_kernel(iter, λ(a) -> scalar_t: -a)
+    else:
+        # 实数类型
+        AT_DISPATCH_ALL_TYPES_AND2(Half, BFloat16, dtype, ...):
+            gpu_kernel(iter, λ(a) -> scalar_t: -a)
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 复数类型支持 JIT 编译优化（AT_USE_JITERATOR 宏控制）
+    - 实数类型包括所有标准类型 + half/bfloat16
+
+--------------------------------
+sign_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnarySignKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    sign_kernel_cuda(iter: TensorIterator)
+
+【算法】
+    if dtype == Bool:
+        gpu_kernel(iter, λ(a) -> bool: a)
+    else:
+        AT_DISPATCH_ALL_TYPES_AND2(Half, BFloat16, dtype, ...):
+            gpu_kernel(iter, λ(a) -> scalar_t: c10::signum(a))
+
+【并行模式】
+    elementwise
+
+【备注】
+    - bool 类型：恒等映射（返回自身）
+    - 其他类型：调用 c10::signum（返回 -1/0/+1）
+
+--------------------------------
+signbit_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnarySignKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    signbit_kernel_cuda(iter: TensorIterator)
+
+【算法】
+    if isIntegralType(input_dtype, includeBool=false):
+        # 整数类型：手动检查符号位
+        AT_DISPATCH_INTEGRAL_TYPES(input_dtype, ...):
+            gpu_kernel(iter, λ(a) -> bool: is_negative(a))
+    else:
+        # 浮点类型：使用 signbit 函数
+        AT_DISPATCH_FLOATING_TYPES_AND2(bfloat16, Half, input_dtype, ...):
+            gpu_kernel(iter, λ(a) -> bool: signbit(opmath_t(a)))
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 整数类型使用 c10::is_negative（因为标准 signbit 不支持整数）
+    - 浮点类型先转换为 opmath_t（提升精度）再调用 signbit
+    - signbit 返回符号位（负数为 true，包括 -0.0）
+
+--------------------------------
+sgn_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnarySignKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    sgn_kernel_cuda(iter: TensorIterator)
+
+【算法】
+    if AT_USE_JITERATOR:
+        # JIT 编译路径
+        jitted_gpu_kernel<sgn_name>(iter, 
+            "template<T> T sgn_kernel(T z) {
+                const T zero = T(0);
+                if (z == zero) return zero;
+                else return z / std::abs(z);
+            }")
+    else:
+        # 直接 kernel 路径
+        AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, ...):
+            gpu_kernel(iter, λ(a) -> scalar_t: sgn_wrapper(opmath_t(a)))
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 仅支持复数类型（包括 complex_half）
+    - sgn_wrapper 实现：z == 0 ? 0 : z / |z|（返回单位复数或零）
+    - 与 sign 区别：sign 用于实数，sgn 用于复数
+
+--------------------------------
+辅助函数
+来源: aten/src/ATen/native/cuda/UnarySignKernels.cu
+--------------------------------
+
+【函数】
+    @host @device
+    sgn_wrapper(z: complex<T>) -> complex<T>
+        用途: 计算复数的 sgn（单位化）
+        算法:
+            if z == (0, 0):
+                return (0, 0)
+            else:
+                return z / |z|
+
+【函数】
+    REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda)
+    REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda)
+    REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda)
+    REGISTER_DISPATCH(signbit_stub, &signbit_kernel_cuda)
+    REGISTER_DISPATCH(sgn_stub, &sgn_kernel_cuda)
+        用途: 将 CUDA kernel 注册到对应的分发 stub

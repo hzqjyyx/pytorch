@@ -1,0 +1,131 @@
+--------------------------------
+std_var_kernel_impl
+来源: aten/src/ATen/native/cuda/ReduceMomentKernel.cu:14
+--------------------------------
+
+【签名】
+    @host→device
+    std_var_kernel_impl<scalar_t, out_t=scalar_t>(
+        iter: TensorIterator,
+        correction: float64,
+        take_sqrt: bool
+    )
+
+【算法】
+    使用 Welford 在线算法计算方差/标准差
+    
+    使用 WelfordOps 作为归约操作符
+    调用 gpu_reduce_kernel<scalar_t, out_t, unroll=2>(iter, ops, init={})
+
+【并行模式】
+    reduce(iter.reduce_dims, op=WelfordOps)
+    
+    优化:
+    - unroll_factor=2 (降低寄存器使用，避免寄存器溢出)
+    - 使用 accscalar_t 累加以保持精度
+
+【备注】
+    - WelfordOps: 实现 Welford 在线方差算法的归约操作符
+    - gpu_reduce_kernel: 通用 GPU 归约框架，见 Reduce.cuh
+
+--------------------------------
+std_var_kernel_cuda
+来源: aten/src/ATen/native/cuda/ReduceMomentKernel.cu:23
+--------------------------------
+
+【签名】
+    std_var_kernel_cuda(
+        iter: TensorIterator,
+        correction: float64,
+        take_sqrt: bool
+    )
+
+【算法】
+    input_dtype = iter.input_dtype()
+    output_dtype = iter.dtype()
+    
+    match (input_dtype, output_dtype):
+        (float16, float32):
+            # 类型提升: 在单个kernel内完成 cast + reduction
+            std_var_kernel_impl<Half, float>(iter, correction, take_sqrt)
+        
+        (bfloat16, float32):
+            # 类型提升: 在单个kernel内完成 cast + reduction
+            std_var_kernel_impl<BFloat16, float>(iter, correction, take_sqrt)
+        
+        _:
+            # 通用浮点类型 (包括 float16, bfloat16)
+            std_var_kernel_impl<scalar_t>(iter, correction, take_sqrt)
+
+【备注】
+    - 针对 fp16/bf16 → fp32 的类型提升做了融合优化
+    - take_sqrt=True 时计算标准差，False 时计算方差
+
+--------------------------------
+mean_kernel_impl
+来源: aten/src/ATen/native/cuda/ReduceMomentKernel.cu:40
+--------------------------------
+
+【签名】
+    @host→device
+    mean_kernel_impl<scalar_t, acc_t=scalar_t, out_t=scalar_t>(
+        iter: TensorIterator
+    )
+
+【算法】
+    # 计算归一化因子
+    factor = iter.num_output_elements() / iter.numel()
+    
+    调用 gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps{factor})
+
+【并行模式】
+    reduce(iter.reduce_dims, op=MeanOps)
+
+【备注】
+    - MeanOps: 累加后除以 factor 的归约操作符
+    - factor_t: 复数类型使用其值类型 (complex<T> → T)
+
+--------------------------------
+mean_kernel_cuda
+来源: aten/src/ATen/native/cuda/ReduceMomentKernel.cu:47
+--------------------------------
+
+【签名】
+    mean_kernel_cuda(iter: TensorIterator)
+
+【算法】
+    output_dtype = iter.dtype()
+    input_dtype = iter.dtype(1)
+    
+    match (input_dtype, output_dtype):
+        (_, float16):
+            # 输出是 fp16，使用 fp32 累加
+            mean_kernel_impl<Half, float>(iter)
+        
+        (float16, float32):
+            # 类型提升: fp16 输入 → fp32 输出
+            mean_kernel_impl<Half, float, float>(iter)
+        
+        (_, bfloat16):
+            # 输出是 bf16，使用 fp32 累加
+            mean_kernel_impl<BFloat16, float>(iter)
+        
+        (bfloat16, float32):
+            # 类型提升: bf16 输入 → fp32 输出
+            mean_kernel_impl<BFloat16, float, float>(iter)
+        
+        _:
+            # 通用类型 (包括所有浮点和复数类型)
+            mean_kernel_impl<scalar_t>(iter)
+
+【备注】
+    - 针对 fp16/bf16 的精度优化: 即使输出是低精度，也用 fp32 累加
+    - 支持复数类型
+
+--------------------------------
+Dispatch 注册
+来源: aten/src/ATen/native/cuda/ReduceMomentKernel.cu:65
+--------------------------------
+
+REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda)
+REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda)

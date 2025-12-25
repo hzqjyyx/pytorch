@@ -1,0 +1,10 @@
+- **文件用途**: CMake 配置模板文件，在构建时生成实际的 `CUDAConfig.h` 头文件
+- **主要功能**: 定义 CUDA 相关功能的编译时开关宏
+- **关键宏定义**:
+  - `AT_CUDNN_ENABLED()`: cuDNN 库是否可用
+  - `AT_CUSPARSELT_ENABLED()`: cuSPARSELt 库是否可用
+  - `AT_MAGMA_ENABLED()`: MAGMA 库是否可用
+  - `NVCC_FLAGS_EXTRA`: 额外的 NVCC 编译器标志
+- **设计特点**: 使用 `#if` 而非 `#ifdef` 检查宏，确保宏必须被定义，防止意外的未定义行为
+- **使用限制**: 只能在 C++ 源文件中包含，不能从其他头文件中包含（避免头文件间的循环依赖和重复定义问题）
+- **占位符替换**: `@VARIABLE@` 格式的内容由 CMake 在构建时自动替换为实际的配置值

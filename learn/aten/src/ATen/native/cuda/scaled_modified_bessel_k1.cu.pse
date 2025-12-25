@@ -1,0 +1,25 @@
+--------------------------------
+scaled_modified_bessel_k1_kernel_cuda
+来源: aten/src/ATen/native/cuda/scaled_modified_bessel_k1.cu
+--------------------------------
+
+【签名】
+    @host→device
+    scaled_modified_bessel_k1_kernel_cuda(iterator: TensorIteratorBase)
+
+【算法】
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), λ):
+        if AT_USE_JITERATOR():
+            jitted_gpu_kernel<scaled_modified_bessel_k1_name>(iterator, scaled_modified_bessel_k1_string)
+        else:
+            gpu_kernel(iterator, λ(a: scalar_t) -> scalar_t:
+                return scaled_modified_bessel_k1_forward(a)
+            )
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 注册到 special_scaled_modified_bessel_k1_stub
+    - scaled_modified_bessel_k1_forward: 定义在 ATen/native/Math.h
+    - JIT路径使用预定义字符串 scaled_modified_bessel_k1_string 动态编译kernel

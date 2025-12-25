@@ -1,0 +1,36 @@
+--------------------------------
+modified_bessel_i0_kernel_cuda
+来源: aten/src/ATen/native/cuda/modified_bessel_i0.cu
+--------------------------------
+
+【签名】
+    @host→device
+    modified_bessel_i0_kernel_cuda(iterator: TensorIteratorBase)
+
+【算法】
+    # 根据编译配置选择实现方式
+    if AT_USE_JITERATOR():
+        # JIT 编译方式：运行时生成 GPU 代码
+        AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), [&]() {
+            jitted_gpu_kernel<modified_bessel_i0_name, scalar_t, scalar_t, 1>(
+                iterator, 
+                modified_bessel_i0_string
+            )
+        })
+    else:
+        # 静态编译方式：直接调用预定义函数
+        AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), [&]() {
+            gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+                return modified_bessel_i0_forward(a)
+            })
+        })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - modified_bessel_i0_forward: 实际的 I0 修正贝塞尔函数计算，定义在 ATen/native/Math.h
+    - 注册到 special_modified_bessel_i0_stub 分发键
+    - AT_USE_JITERATOR(): 编译时宏，控制是否使用 JIT 生成 kernel
+    - JIT 模式使用字符串 modified_bessel_i0_string 作为函数源码
+    - 支持的数据类型: float, double

@@ -1,0 +1,30 @@
+--------------------------------
+modified_bessel_i1_kernel_cuda
+来源: aten/src/ATen/native/cuda/modified_bessel_i1.cu
+--------------------------------
+
+【签名】
+    @host→device
+    modified_bessel_i1_kernel_cuda(iterator: TensorIteratorBase)
+
+【算法】
+    # 根据编译配置选择实现方式
+    if AT_USE_JITERATOR():
+        # JIT方式: 使用字符串模板编译kernel
+        jitted_gpu_kernel<modified_bessel_i1_name, scalar_t, scalar_t, 1>(
+            iterator, 
+            modified_bessel_i1_string
+        )
+    else:
+        # 预编译方式: 直接调用device函数
+        gpu_kernel(iterator, λ(a: scalar_t) -> scalar_t {
+            return modified_bessel_i1_forward(a)
+        })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持浮点类型: float, double
+    - modified_bessel_i1_forward: 第一类修正贝塞尔函数 I₁(x) 的具体实现，定义在其他文件
+    - 已注册到 special_modified_bessel_i1_stub 分发器

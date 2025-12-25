@@ -1,0 +1,815 @@
+--------------------------------
+get_index_mapping1d
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @device
+    get_index_mapping1d(
+        input_w: int64,
+        output_w: int64,
+        output_x: int64,
+        pad_l: int64
+    ) -> (input_index: int64, output_index: int64)
+
+【算法】
+    # 计算当前线程在3D grid中的输入/输出偏移
+    input_offset = (blockIdx.y + blockIdx.z * gridDim.y) * input_w
+    output_offset = (blockIdx.y + blockIdx.z * gridDim.y) * output_w
+
+    # 计算有效起始位置
+    i_start_x = max(0, -pad_l)
+    o_start_x = max(0, pad_l)
+
+    # 反射映射公式
+    input_x = abs(output_x - pad_l) 
+              - abs(output_x - (input_w + pad_l - 1)) 
+              - output_x 
+              + 2*pad_l + input_w - 1 
+              - o_start_x + i_start_x
+
+    return (input_offset + input_x, output_offset + output_x)
+
+【备注】
+    - 反射映射公式处理边界折叠逻辑
+    - 3D grid布局: (x方向, plane方向, batch方向)
+
+--------------------------------
+get_index_mapping2d
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @device
+    get_index_mapping2d(
+        input_dim_x: int64, input_dim_y: int64,
+        output_dim_x: int64, output_dim_y: int64,
+        pad_l: int64, pad_t: int64,
+        output_xy: int64,
+        y_shift: int, z_shift: int, nplane: int
+    ) -> (input_index: int64, output_index: int64)
+
+【算法】
+    # 计算偏移
+    input_offset = ((blockIdx.y + y_shift) + (blockIdx.z + z_shift) * nplane) * input_dim_x * input_dim_y
+    output_offset = ((blockIdx.y + y_shift) + (blockIdx.z + z_shift) * nplane) * output_dim_x * output_dim_y
+
+    # 线性索引转2D坐标
+    output_x = output_xy % output_dim_x
+    output_y = output_xy / output_dim_x
+
+    # 有效起始位置
+    i_start_x = max(0, -pad_l)
+    i_start_y = max(0, -pad_t)
+    o_start_x = max(0, pad_l)
+    o_start_y = max(0, pad_t)
+
+    # x方向反射映射
+    input_x = abs(output_x - pad_l) 
+              - abs(output_x - (input_dim_x + pad_l - 1)) 
+              - output_x 
+              + 2*pad_l + input_dim_x - 1 
+              - o_start_x + i_start_x
+
+    # y方向反射映射
+    input_y = abs(output_y - pad_t) 
+              - abs(output_y - (input_dim_y + pad_t - 1)) 
+              - output_y 
+              + 2*pad_t + input_dim_y - 1 
+              - o_start_y + i_start_y
+
+    return (
+        input_offset + input_y * input_dim_x + input_x,
+        output_offset + output_y * output_dim_x + output_x
+    )
+
+【备注】
+    - 2D反射映射，x/y方向独立计算
+    - 支持分块并行处理大batch/channel
+
+--------------------------------
+reflection_pad1d_out_kernel
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @device
+    reflection_pad1d_out_kernel<scalar_t>(
+        input: Tensor[*, input_w],
+        output: Tensor[*, output_w],
+        input_w: int64,
+        pad_l: int64, pad_r: int64
+    )
+
+【算法】
+    output_x = threadIdx.x + blockIdx.x * blockDim.x
+    output_w = input_w + pad_l + pad_r
+
+    if output_x < output_w:
+        (input_idx, output_idx) = get_index_mapping1d(input_w, output_w, output_x, pad_l)
+        output[output_idx] = input[input_idx]
+
+【并行模式】
+    grid: (ceil(output_w/256), nplane, nbatch)
+    block: (min(output_w, 256))
+    每线程处理输出的一个元素
+
+--------------------------------
+reflection_pad1d_backward_out_kernel
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @device
+    reflection_pad1d_backward_out_kernel<scalar_t>(
+        grad_input: Tensor[*, input_w],
+        grad_output: Tensor[*, output_w],
+        input_w: int64,
+        pad_l: int64, pad_r: int64
+    )
+
+【算法】
+    output_x = threadIdx.x + blockIdx.x * blockDim.x
+    output_w = input_w + pad_l + pad_r
+
+    if output_x < output_w:
+        (input_idx, output_idx) = get_index_mapping1d(input_w, output_w, output_x, pad_l)
+        gpuAtomicAddNoReturn(&grad_input[input_idx], grad_output[output_idx])
+
+【并行模式】
+    atomic_add - 多个输出位置可能映射到同一输入位置
+
+--------------------------------
+reflection_pad2d_out_kernel
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @device
+    reflection_pad2d_out_kernel<scalar_t>(
+        input: Tensor[*, input_h, input_w],
+        output: Tensor[*, output_h, output_w],
+        input_dim_x: int64, input_dim_y: int64,
+        pad_t: int, pad_b: int, pad_l: int, pad_r: int,
+        y_shift: int, z_shift: int, nplane: int
+    )
+
+【算法】
+    output_xy = threadIdx.x + blockIdx.x * blockDim.x
+    output_dim_x = input_dim_x + pad_l + pad_r
+    output_dim_y = input_dim_y + pad_t + pad_b
+
+    if output_xy < output_dim_x * output_dim_y:
+        (input_idx, output_idx) = get_index_mapping2d(
+            input_dim_x, input_dim_y,
+            output_dim_x, output_dim_y,
+            pad_l, pad_t,
+            output_xy, y_shift, z_shift, nplane
+        )
+        output[output_idx] = input[input_idx]
+
+【并行模式】
+    grid: (ceil(output_plane_size/256), block_y_size, block_z_size)
+    block: (min(output_plane_size, 256))
+    每线程处理输出平面的一个元素
+    使用分块策略处理大batch/channel (每块最多65535)
+
+--------------------------------
+reflection_pad2d_backward_out_kernel
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @device
+    reflection_pad2d_backward_out_kernel<scalar_t>(
+        grad_input: Tensor[*, input_h, input_w],
+        grad_output: Tensor[*, output_h, output_w],
+        input_dim_x: int64, input_dim_y: int64,
+        pad_t: int, pad_b: int, pad_l: int, pad_r: int,
+        y_shift: int, z_shift: int, nplane: int
+    )
+
+【算法】
+    output_xy = threadIdx.x + blockIdx.x * blockDim.x
+    output_dim_x = input_dim_x + pad_l + pad_r
+    output_dim_y = input_dim_y + pad_t + pad_b
+
+    if output_xy < output_dim_x * output_dim_y:
+        (input_idx, output_idx) = get_index_mapping2d(
+            input_dim_x, input_dim_y,
+            output_dim_x, output_dim_y,
+            pad_l, pad_t,
+            output_xy, y_shift, z_shift, nplane
+        )
+        gpuAtomicAddNoReturn(&grad_input[input_idx], grad_output[output_idx])
+
+【并行模式】
+    atomic_add - 多个输出位置可能映射到同一输入位置
+
+--------------------------------
+reflection_pad2d_backward_det_out_kernel
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @device
+    reflection_pad2d_backward_det_out_kernel<scalar_t>(
+        grad_input: Tensor[batch, channels, input_h, input_w],
+        grad_output: Tensor[batch, channels, output_h, output_w],
+        input_dim_x: int64, input_dim_y: int64,
+        pad_t: int, pad_b: int, pad_l: int, pad_r: int,
+        batch: int, channels: int
+    )
+
+【算法】
+    output_dim_x = input_dim_x + pad_l + pad_r
+    output_dim_y = input_dim_y + pad_t + pad_b
+    N = output_dim_x * output_dim_y
+    stride = gridDim.x * blockDim.x
+    end = batch * channels * input_dim_x * input_dim_y
+
+    for input_xy in range(threadIdx.x + blockIdx.x * blockDim.x, end, stride):
+        partial = 0
+
+        # 解析输入坐标
+        b = input_xy / (channels * input_dim_x * input_dim_y)
+        c = (input_xy / (input_dim_x * input_dim_y)) % channels
+        pos_xy = input_xy % (input_dim_x * input_dim_y)
+        inp_row = pos_xy / input_dim_x
+        inp_col = pos_xy % input_dim_x
+
+        # 判断边界区域
+        is_top = (inp_row >= 1) and (inp_row <= pad_t)
+        is_bottom = (inp_row < input_dim_y - 1) and (inp_row >= input_dim_y - pad_b - 1)
+        is_left = (inp_col >= 1) and (inp_col <= pad_l)
+        is_right = (inp_col < input_dim_x - 1) and (inp_col >= input_dim_x - pad_r - 1)
+
+        # 顶部边界反射
+        if is_top:
+            reflected_top_row = (pad_t) - inp_row
+            reflected_top_out = reflected_top_row * output_dim_x + (pad_l + inp_col)
+            if reflected_top_out < N:
+                partial += grad_output[b, c, reflected_top_out]
+
+            # 左上角
+            if is_left:
+                reflect_tl_out = (pad_t - inp_row) * output_dim_x + (pad_l - inp_col)
+                if 0 <= reflect_tl_out < N:
+                    partial += grad_output[b, c, reflect_tl_out]
+
+            # 右上角
+            elif is_right:
+                dist_cols = abs(inp_col - (input_dim_x - 1))
+                reflect_tr_out = (pad_t - inp_row) * output_dim_x + (pad_l + input_dim_x - 1 + dist_cols)
+                if 0 <= reflect_tr_out < N:
+                    partial += grad_output[b, c, reflect_tr_out]
+
+        # 底部边界反射
+        if is_bottom:
+            dist_from_bot = abs(inp_row - (input_dim_y - 1))
+            reflect_bot_row = pad_t + input_dim_y - 1 + dist_from_bot
+            reflect_bot_out = reflect_bot_row * output_dim_x + (pad_l + inp_col)
+            if 0 <= reflect_bot_out < N:
+                partial += grad_output[b, c, reflect_bot_out]
+
+            # 左下角
+            if is_left:
+                reflect_bl_out = (pad_t + input_dim_y - 1 + dist_from_bot) * output_dim_x + (pad_l - inp_col)
+                if 0 <= reflect_bl_out < N:
+                    partial += grad_output[b, c, reflect_bl_out]
+
+            # 右下角
+            elif is_right:
+                dist_cols = abs(inp_col - (input_dim_x - 1))
+                reflect_br_out = (pad_t + input_dim_y - 1 + dist_from_bot) * output_dim_x + (pad_l + input_dim_x - 1 + dist_cols)
+                if 0 <= reflect_br_out < N:
+                    partial += grad_output[b, c, reflect_br_out]
+
+        # 左边界反射
+        if is_left:
+            reflect_left_out = (pad_t + inp_row) * output_dim_x + (pad_l - inp_col)
+            if 0 <= reflect_left_out < N:
+                partial += grad_output[b, c, reflect_left_out]
+
+        # 右边界反射
+        if is_right:
+            dist_from_right = abs(inp_col - (input_dim_x - 1))
+            reflect_right_out = (pad_t + inp_row) * output_dim_x + (pad_l + input_dim_x - 1 + dist_from_right)
+            if 0 <= reflect_right_out < N:
+                partial += grad_output[b, c, reflect_right_out]
+
+        # 中心区域直接对应
+        out_row = inp_row + pad_t
+        out_col = inp_col + pad_l
+        partial += grad_output[b, c, out_row * output_dim_x + out_col]
+
+        grad_input[input_xy] += partial
+
+【并行模式】
+    grid: (1024)
+    block: (256)
+    每线程处理多个输入元素 (grid-stride loop)
+    确定性算法 - 避免原子操作
+
+【备注】
+    - 用于确定性模式的backward实现
+    - 遍历输入位置，累加所有对应的输出梯度
+    - 处理边界/角落的多重反射映射
+
+--------------------------------
+parallel_reflection_pad3d
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @device
+    parallel_reflection_pad3d<input_scalar_t, output_scalar_t, F>(
+        input: PackedTensorAccessor64[input_scalar_t, 5],
+        output: PackedTensorAccessor64[output_scalar_t, 5],
+        pad_left: int64, pad_top: int64, pad_front: int64,
+        y_shift: int64, z_shift: int64,
+        f: F
+    )
+
+【算法】
+    output_id = threadIdx.x + blockIdx.x * blockDim.x
+    if output_id >= (output.size(2) * output.size(3) * output.size(4)):
+        return
+
+    # 线性索引转3D坐标
+    output_x = output_id % output.size(4)
+    output_y = (output_id / output.size(4)) % output.size(3)
+    output_z = output_id / (output.size(3) * output.size(4))
+
+    # 有效起始位置
+    i_start_x = max(0, -pad_left)
+    o_start_x = max(0, pad_left)
+    i_start_y = max(0, -pad_top)
+    o_start_y = max(0, pad_top)
+    i_start_z = max(0, -pad_front)
+    o_start_z = max(0, pad_front)
+
+    # x方向反射映射
+    input_x = abs(output_x - pad_left) 
+              - abs(output_x - (input.size(4) + pad_left - 1)) 
+              - output_x 
+              + 2*pad_left + input.size(4) - 1 
+              - o_start_x + i_start_x
+
+    # y方向反射映射
+    input_y = abs(output_y - pad_top) 
+              - abs(output_y - (input.size(3) + pad_top - 1)) 
+              - output_y 
+              + 2*pad_top + input.size(3) - 1 
+              - o_start_y + i_start_y
+
+    # z方向反射映射
+    input_z = abs(output_z - pad_front) 
+              - abs(output_z - (input.size(2) + pad_front - 1)) 
+              - output_z 
+              + 2*pad_front + input.size(2) - 1 
+              - o_start_z + i_start_z
+
+    plane = blockIdx.y + y_shift
+    batch = blockIdx.z + z_shift
+    f(plane, batch, output_z, output_y, output_x, input_z, input_y, input_x)
+
+【备注】
+    - 通用3D反射映射helper
+    - 由lambda f定义具体操作 (forward/backward)
+
+--------------------------------
+reflection_pad3d_out_kernel
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @device
+    reflection_pad3d_out_kernel<scalar_t>(
+        input: PackedTensorAccessor64[scalar_t, 5],
+        output: PackedTensorAccessor64[scalar_t, 5],
+        pad_left: int64, pad_top: int64, pad_front: int64,
+        y_shift: int64, z_shift: int64
+    )
+
+【算法】
+    parallel_reflection_pad3d(
+        input, output, 
+        pad_left, pad_top, pad_front, 
+        y_shift, z_shift,
+        lambda (plane, batch, output_z, output_y, output_x, input_z, input_y, input_x):
+            value = input[batch][plane][input_z][input_y][input_x]
+            output[batch][plane][output_z][output_y][output_x] = value
+    )
+
+【并行模式】
+    grid: (ceil(output_plane_size/256), block_y_size, block_z_size)
+    block: (min(output_plane_size, 256))
+    每线程处理输出volume的一个元素
+
+--------------------------------
+reflection_pad3d_backward_out_kernel
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @device
+    reflection_pad3d_backward_out_kernel<scalar_t>(
+        grad_input: PackedTensorAccessor64[scalar_t, 5],
+        grad_output: PackedTensorAccessor64[scalar_t, 5],
+        pad_left: int64, pad_top: int64, pad_front: int64,
+        y_shift: int64, z_shift: int64
+    )
+
+【算法】
+    parallel_reflection_pad3d(
+        grad_input, grad_output, 
+        pad_left, pad_top, pad_front, 
+        y_shift, z_shift,
+        lambda (plane, batch, output_z, output_y, output_x, input_z, input_y, input_x):
+            value = grad_output[batch][plane][output_z][output_y][output_x]
+            target = &grad_input[batch][plane][input_z][input_y][input_x]
+            gpuAtomicAddNoReturn(target, value)
+    )
+
+【并行模式】
+    atomic_add - 多个输出位置可能映射到同一输入位置
+
+--------------------------------
+reflection_pad2d_out_template
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @host→device
+    reflection_pad2d_out_template(
+        output: Tensor,
+        input: Tensor[*, H, W],
+        padding: [pad_l, pad_r, pad_t, pad_b]
+    )
+
+【算法】
+    # 确定维度索引
+    if input.ndim == 4:
+        nbatch = input.size(0)
+        plane_dim = 1; dim_h = 2; dim_w = 3
+    else:  # ndim == 3
+        nbatch = 1
+        plane_dim = 0; dim_h = 1; dim_w = 2
+
+    nplane = input.size(plane_dim)
+    input_h = input.size(dim_h)
+    input_w = input.size(dim_w)
+    output_h = input_h + pad_t + pad_b
+    output_w = input_w + pad_l + pad_r
+
+    # 调整输出形状
+    if input.ndim == 3:
+        output.resize([nplane, output_h, output_w])
+    else:
+        output.resize([nbatch, nplane, output_h, output_w])
+
+    if output.numel() == 0:
+        return
+
+    input = input.contiguous()
+    output_plane_size = output_h * output_w
+    block_size = min(output_plane_size, 256)
+
+    # 分块处理大batch/channel (每块最多65535)
+    for block_y in range(0, nplane, 65535):
+        block_y_size = min(nplane - block_y, 65535)
+        for block_z in range(0, nbatch, 65535):
+            block_z_size = min(nbatch - block_z, 65535)
+
+            grid_size = (ceil(output_plane_size/256), block_y_size, block_z_size)
+            reflection_pad2d_out_kernel<<<grid_size, block_size>>>(
+                input.const_data_ptr<scalar_t>(),
+                output.mutable_data_ptr<scalar_t>(),
+                input_w, input_h,
+                pad_t, pad_b, pad_l, pad_r,
+                block_y, block_z, nplane
+            )
+
+【备注】
+    - 支持3D (C,H,W) 和 4D (N,C,H,W) 输入
+    - 使用AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16)
+
+--------------------------------
+reflection_pad2d_backward_out_template
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @host→device
+    reflection_pad2d_backward_out_template(
+        grad_input: Tensor[*, H, W],
+        grad_output: Tensor[*, output_h, output_w],
+        input: Tensor[*, H, W],
+        padding: [pad_l, pad_r, pad_t, pad_b]
+    )
+
+【算法】
+    if grad_input.numel() == 0:
+        return
+
+    # 确定维度索引
+    if input.ndim == 4:
+        nbatch = input.size(0)
+        plane_dim = 1; dim_h = 2; dim_w = 3
+    else:
+        nbatch = 1
+        plane_dim = 0; dim_h = 1; dim_w = 2
+
+    nplane = input.size(plane_dim)
+    input_h = input.size(dim_h)
+    input_w = input.size(dim_w)
+    output_h = input_h + pad_t + pad_b
+    output_w = input_w + pad_l + pad_r
+
+    grad_output = grad_output.contiguous()
+    output_plane_size = output_h * output_w
+    block_size = min(output_plane_size, 256)
+
+    if globalContext().deterministicAlgorithms():
+        # 确定性模式
+        grid_size = 1024
+        block_size = 256
+        reflection_pad2d_backward_det_out_kernel<<<grid_size, block_size>>>(
+            grad_input.mutable_data_ptr<scalar_t>(),
+            grad_output.const_data_ptr<scalar_t>(),
+            input_w, input_h,
+            pad_t, pad_b, pad_l, pad_r,
+            nbatch, nplane, 0
+        )
+    else:
+        # 非确定性模式 (原子操作)
+        for block_y in range(0, nplane, 65535):
+            block_y_size = min(nplane - block_y, 65535)
+            for block_z in range(0, nbatch, 65535):
+                block_z_size = min(nbatch - block_z, 65535)
+
+                grid_size = (ceil(output_plane_size/256), block_y_size, block_z_size)
+                reflection_pad2d_backward_out_kernel<<<grid_size, block_size>>>(
+                    grad_input.mutable_data_ptr<scalar_t>(),
+                    grad_output.const_data_ptr<scalar_t>(),
+                    input_w, input_h,
+                    pad_t, pad_b, pad_l, pad_r,
+                    block_y, block_z, nplane
+                )
+
+【备注】
+    - 支持确定性和非确定性两种模式
+    - 使用AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16)
+
+--------------------------------
+reflection_pad1d_out_cuda
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @host→device
+    reflection_pad1d_out_cuda(
+        input: Tensor[*, W],
+        padding: [pad_l, pad_r],
+        output: Tensor
+    ) -> Tensor
+
+【算法】
+    if output.numel() == 0:
+        return
+
+    # 确定维度索引
+    if input.ndim == 3:
+        nbatch = input.size(0)
+        dim_plane = 1; dim_w = 2
+    else:  # ndim == 2
+        nbatch = 1
+        dim_plane = 0; dim_w = 1
+
+    nplane = input.size(dim_plane)
+    input_w = input.size(dim_w)
+    output_w = input_w + pad_l + pad_r
+
+    block_size = min(output_w, 256)
+    grid_size = (ceil(output_w/256), nplane, nbatch)
+
+    input = input.contiguous()
+    reflection_pad1d_out_kernel<<<grid_size, block_size>>>(
+        input.const_data_ptr<scalar_t>(),
+        output.mutable_data_ptr<scalar_t>(),
+        input_w, pad_l, pad_r
+    )
+
+【备注】
+    - 支持2D (C,W) 和 3D (N,C,W) 输入
+    - 使用AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16)
+
+--------------------------------
+reflection_pad1d_backward_out_cuda
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @host→device
+    reflection_pad1d_backward_out_cuda(
+        grad_output: Tensor[*, output_w],
+        input: Tensor[*, W],
+        padding: [pad_l, pad_r],
+        grad_input: Tensor[*, W]
+    ) -> Tensor
+
+【算法】
+    grad_input.zero_()
+    if grad_input.numel() == 0:
+        return
+
+    # 确定维度索引
+    if input.ndim == 3:
+        nbatch = input.size(0)
+        dim_plane = 1; dim_w = 2
+    else:
+        nbatch = 1
+        dim_plane = 0; dim_w = 1
+
+    nplane = input.size(dim_plane)
+    input_w = input.size(dim_w)
+    output_w = input_w + pad_l + pad_r
+
+    grad_output = grad_output.contiguous()
+    block_size = min(output_w, 256)
+    grid_size = (ceil(output_w/256), nplane, nbatch)
+
+    reflection_pad1d_backward_out_kernel<<<grid_size, block_size>>>(
+        grad_input.mutable_data_ptr<scalar_t>(),
+        grad_output.const_data_ptr<scalar_t>(),
+        input_w, pad_l, pad_r
+    )
+
+【备注】
+    - 使用原子操作，非确定性
+    - 使用AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16)
+
+--------------------------------
+reflection_pad2d_out_cuda / reflection_pad2d_cuda
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @host→device
+    reflection_pad2d_out_cuda(
+        input: Tensor[*, H, W],
+        padding: [pad_l, pad_r, pad_t, pad_b],
+        output: Tensor
+    ) -> Tensor
+
+    reflection_pad2d_cuda(
+        input: Tensor[*, H, W],
+        padding: [pad_l, pad_r, pad_t, pad_b]
+    ) -> Tensor
+
+【算法】
+    reflection_pad2d_out_template(output, input, padding)
+    return output
+
+【备注】
+    - 简单wrapper，调用reflection_pad2d_out_template
+
+--------------------------------
+reflection_pad2d_backward_out_cuda / reflection_pad2d_backward_cuda
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @host→device
+    reflection_pad2d_backward_out_cuda(
+        grad_output: Tensor[*, output_h, output_w],
+        input: Tensor[*, H, W],
+        padding: [pad_l, pad_r, pad_t, pad_b],
+        grad_input: Tensor[*, H, W]
+    ) -> Tensor
+
+    reflection_pad2d_backward_cuda(
+        grad_output: Tensor[*, output_h, output_w],
+        input: Tensor[*, H, W],
+        padding: [pad_l, pad_r, pad_t, pad_b]
+    ) -> Tensor
+
+【算法】
+    grad_input.resize_as_(input)
+    grad_input.zero_()
+    reflection_pad2d_backward_out_template(grad_input, grad_output, input, padding)
+    return grad_input
+
+【备注】
+    - 简单wrapper，调用reflection_pad2d_backward_out_template
+
+--------------------------------
+reflection_pad3d_out_cuda
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @host→device
+    reflection_pad3d_out_cuda(
+        input: Tensor[*, D, H, W],
+        padding: [pad_l, pad_r, pad_t, pad_b, pad_front, pad_back],
+        output: Tensor
+    ) -> Tensor
+
+【算法】
+    if output.numel() == 0:
+        return
+
+    pad_left = padding[0]
+    pad_top = padding[2]
+    pad_front = padding[4]
+
+    input = input.contiguous()
+    batch_mode = (input.dim() == 5)
+
+    # 非batch模式添加batch维度
+    if not batch_mode:
+        input = input.unsqueeze(0)
+        output = output.unsqueeze(0)
+
+    input_packed = input.packed_accessor64<scalar_t, 5>()
+    output_packed = output.packed_accessor64<scalar_t, 5>()
+
+    output_plane_size = output_packed.size(2) * output_packed.size(3) * output_packed.size(4)
+    size_y = input_packed.size(1)  # channels
+    size_z = input_packed.size(0)  # batch
+    block_size = min(output_plane_size, 256)
+
+    # 分块处理大batch/channel
+    for block_y in range(0, size_y, 65535):
+        block_y_size = min(size_y - block_y, 65535)
+        for block_z in range(0, size_z, 65535):
+            block_z_size = min(size_z - block_z, 65535)
+
+            grid_size = (ceil(output_plane_size/256), block_y_size, block_z_size)
+            reflection_pad3d_out_kernel<<<grid_size, block_size>>>(
+                input_packed, output_packed,
+                pad_left, pad_top, pad_front,
+                block_y, block_z
+            )
+
+【备注】
+    - 支持4D (C,D,H,W) 和 5D (N,C,D,H,W) 输入
+    - 使用AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16)
+
+--------------------------------
+reflection_pad3d_backward_out_cuda
+来源: aten/src/ATen/native/cuda/ReflectionPad.cu
+--------------------------------
+
+【签名】
+    @host→device
+    reflection_pad3d_backward_out_cuda(
+        grad_output: Tensor[*, output_d, output_h, output_w],
+        input: Tensor[*, D, H, W],
+        padding: [pad_l, pad_r, pad_t, pad_b, pad_front, pad_back],
+        grad_input: Tensor[*, D, H, W]
+    ) -> Tensor
+
+【算法】
+    if grad_input.numel() == 0:
+        return
+
+    grad_input.zero_()
+
+    pad_left = padding[0]
+    pad_top = padding[2]
+    pad_front = padding[4]
+
+    # 非batch模式添加batch维度
+    grad_input_ = grad_input
+    grad_output_ = grad_output
+    if input.dim() == 4:
+        grad_input_ = grad_input.unsqueeze(0)
+        grad_output_ = grad_output.unsqueeze(0)
+
+    grad_input_packed = grad_input_.packed_accessor64<scalar_t, 5>()
+    grad_output_packed = grad_output_.packed_accessor64<scalar_t, 5>()
+
+    output_plane_size = grad_output_packed.size(2) * grad_output_packed.size(3) * grad_output_packed.size(4)
+    size_y = grad_input_packed.size(1)
+    size_z = grad_input_packed.size(0)
+    block_size = min(output_plane_size, 256)
+
+    # 分块处理大batch/channel
+    for block_y in range(0, size_y, 65535):
+        block_y_size = min(size_y - block_y, 65535)
+        for block_z in range(0, size_z, 65535):
+            block_z_size = min(size_z - block_z, 65535)
+
+            grid_size = (ceil(output_plane_size/256), block_y_size, block_z_size)
+            reflection_pad3d_backward_out_kernel<<<grid_size, block_size>>>(
+                grad_input_packed, grad_output_packed,
+                pad_left, pad_top, pad_front,
+                block_y, block_z
+            )
+
+【备注】
+    - 使用原子操作，非确定性
+    - 使用AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16)

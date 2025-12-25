@@ -1,0 +1,304 @@
+--------------------------------
+CuFFT 计划缓存
+来源: aten/src/ATen/native/cuda/CuFFTPlanCache.h
+--------------------------------
+
+【类型定义】
+    CuFFTTransformType: enum
+        C2C    # Complex-to-complex
+        R2C    # Real-to-complex
+        C2R    # Complex-to-real
+
+    cufft_size_type = long long int
+    CuFFTDimVector = SmallVector<cufft_size_type, kDimVectorStaticSize>
+
+【常量】
+    max_rank = 3    # FFT 最大维度
+    
+    CUFFT_MAX_PLAN_NUM:
+        ROCm: 1023
+        CUDA: int64_max
+    
+    CUFFT_DEFAULT_CACHE_SIZE:
+        ROCm: 1023
+        CUDA: 4096
+
+--------------------------------
+CuFFTParams (计划缓存键)
+--------------------------------
+
+【状态】
+    signal_ndim_: int64                      # 信号维度，范围 [1, 3]
+    sizes_[max_rank + 1]: int64              # 包含 batch 的完整尺寸
+    input_strides_[max_rank + 1]: int64      # 输入步长
+    output_strides_[max_rank + 1]: int64     # 输出步长
+    fft_type_: CuFFTTransformType            # 变换类型
+    value_type_: ScalarType                  # 数据类型
+
+【接口】
+    CuFFTParams(in_strides, out_strides, signal_sizes, fft_type, value_type)
+        用途: 构造参数键，填充所有字段并清零 padding bits 以保证哈希一致性
+
+【约束】
+    - 必须是 trivial 类型以支持 memset
+    - in_strides.size == out_strides.size == signal_sizes.size
+    - 1 <= signal_ndim <= max_rank
+
+--------------------------------
+CuFFTDataLayout (嵌入步长表示)
+--------------------------------
+
+【状态】
+    embed: CuFFTDimVector    # cuFFT 嵌入维度
+    stride: cufft_size_type  # 基础步长
+    dist: cufft_size_type    # batch 间距
+    must_clone: bool         # 是否需要克隆输入
+    simple: bool             # 是否为简单连续布局
+
+【备注】
+    用于将 PyTorch 步长转换为 cuFFT 的嵌入表示
+    参见 NOTE [ cuFFT Embedded Strides ]
+
+--------------------------------
+辅助函数
+--------------------------------
+
+【函数】
+    cufft_complex_input(type: CuFFTTransformType) -> bool
+        用途: 判断变换是否输入为复数
+        返回: type in {C2C, C2R}
+
+    cufft_complex_output(type: CuFFTTransformType) -> bool
+        用途: 判断变换是否输出为复数
+        返回: type in {C2C, R2C}
+
+    GetCuFFTTransformType(complex_input: bool, complex_output: bool) -> CuFFTTransformType
+        用途: 根据输入输出类型创建变换类型枚举
+        返回:
+            (true, true)   -> C2C
+            (true, false)  -> C2R
+            (false, true)  -> R2C
+            (false, false) -> ASSERT FAIL (不支持 R2R)
+
+    is_pow_of_two(x: int64) -> bool
+        用途: 判断是否为 2 的幂
+        算法: (x & (x - 1)) == 0
+
+    cufft_simple_embed(sizes: IntArrayRef, onesided: bool) -> CuFFTDataLayout
+        用途: 为连续信号创建简单嵌入布局
+        算法:
+            embed = sizes[1:]
+            if onesided:
+                embed[-1] = sizes[-1] / 2 + 1
+            stride = 1
+            dist = product(embed)
+            return CuFFTDataLayout(embed, stride, dist, must_clone=false, simple=true)
+
+    as_cufft_embed(strides, sizes, onesided: bool) -> CuFFTDataLayout
+        参数:
+            strides: 原始步长
+            sizes: 原始尺寸
+            onesided: 是否为单边谱（R2C/C2R）
+        用途: 将 PyTorch 步长转换为 cuFFT 嵌入表示
+        算法:
+            # Step 1: 检查最后一维步长
+            must_clone = (strides[-1] <= 0)
+            
+            # Step 2: 计算 batch 间距
+            if sizes[0] == 1:
+                dist = signal_numel
+            else if strides[0] == 0:
+                must_clone = true
+            else:
+                dist = strides[0]
+            
+            # Step 3: 计算嵌入维度
+            embed[signal_ndim]
+            for i in reversed(1..signal_ndim-1):
+                if sizes[i] == 1:
+                    embed[i] = 1
+                else if strides[i] > 0 and strides[i] % last_stride == 0:
+                    embed[i] = strides[i] / last_stride
+                    last_stride = strides[i]
+                else:
+                    must_clone = true
+                    break
+            
+            # Step 4: 如果无法嵌入，回退到简单布局
+            if must_clone:
+                return cufft_simple_embed(sizes, onesided).set_must_clone(true)
+            else:
+                embed[0] = sizes[1]
+                stride = strides[signal_ndim]
+                simple = (all embed[i] == sizes[i+1]) and (stride == 1) and (dist == signal_numel)
+                return CuFFTDataLayout(embed, stride, dist, must_clone=false, simple)
+
+--------------------------------
+CuFFTHandle (RAII 包装)
+--------------------------------
+
+【状态】
+    handle_: ::cufftHandle
+
+【接口】
+    CuFFTHandle()
+        用途: 创建 cuFFT 句柄
+        调用: cufftCreate(&handle_)
+
+    get() -> cufftHandle&
+        用途: 获取底层句柄
+
+    ~CuFFTHandle()
+        用途: 销毁句柄
+        调用: cufftDestroy(handle_)  # ROCm 除外
+
+--------------------------------
+CuFFTConfig (计划缓存值)
+--------------------------------
+
+【状态】
+    plan_ptr: CuFFTHandle            # 计划句柄
+    clone_input: bool                # 是否需要克隆输入
+    ws_size: int64                   # 工作空间大小
+    fft_type_: CuFFTTransformType    # 变换类型
+    value_type_: ScalarType          # 数据类型
+
+【接口】
+    CuFFTConfig(params: CuFFTParams)
+        用途: 从缓存键构造配置
+
+    CuFFTConfig(in_strides, out_strides, sizes, fft_type, dtype)
+        参数:
+            in_strides/out_strides: 步长（复数类型以 2*element_size 为单位）
+            sizes: 完整信号尺寸（含 batch，双边）
+            fft_type: 变换类型
+            dtype: 数据类型
+        用途: 创建 cuFFT 计划
+        算法:
+            # Step 1: 初始化
+            signal_sizes = sizes[1:]
+            batch = sizes[0]
+            clone_input = (USE_ROCM ? true : false)
+            
+            # Step 2: Half 精度特殊处理
+            if dtype == Half:
+                assert device.compute_capability >= SM_53
+                assert all sizes[i] are power-of-two
+                clone_input |= (in_strides[-1] != 1)
+            
+            # Step 3: 计算数据布局
+            if clone_input:
+                in_layout = cufft_simple_embed(sizes, fft_type == C2R)
+            else:
+                in_layout = as_cufft_embed(in_strides, sizes, fft_type == C2R)
+            
+            out_layout = as_cufft_embed(out_strides, sizes, fft_type == R2C)
+            clone_input |= in_layout.must_clone
+            
+            # Step 4: 确定数据类型
+            itype, otype, exec_type = match dtype:
+                Float:  (CUDA_C/R_32F, CUDA_C/R_32F, CUDA_C_32F)
+                Double: (CUDA_C/R_64F, CUDA_C/R_64F, CUDA_C_64F)
+                Half:   (CUDA_C/R_16F, CUDA_C/R_16F, CUDA_C_16F)
+            
+            # Step 5: 创建计划
+            cufftSetAutoAllocation(plan(), autoAllocate=false)
+            
+            if in_layout.simple and out_layout.simple:
+                cufftXtMakePlanMany(
+                    plan(), signal_ndim, signal_sizes,
+                    inembed=nullptr, istride=1, idist=1, itype,
+                    onembed=nullptr, ostride=1, odist=1, otype,
+                    batch, &ws_size, exec_type)
+            else:
+                cufftXtMakePlanMany(
+                    plan(), signal_ndim, signal_sizes,
+                    in_layout.embed, in_layout.stride, in_layout.dist, itype,
+                    out_layout.embed, out_layout.stride, out_layout.dist, otype,
+                    batch, &ws_size, exec_type)
+
+    plan() -> cufftHandle
+        用途: 获取底层计划句柄
+
+    should_clone_input() -> bool
+        用途: 查询是否需要克隆输入
+
+    workspace_size() -> int64
+        用途: 查询工作空间大小
+
+【约束】
+    - 禁止拷贝构造和赋值
+    - 仅支持移动语义
+
+【备注】
+    - 简单布局: 传递 nullptr 给 inembed/onembed，cuFFT 假定单位步长
+    - 复杂布局: 传递显式 embed/stride/dist 参数
+
+--------------------------------
+CuFFTParamsLRUCache (LRU 缓存)
+--------------------------------
+
+【状态】
+    _usage_list: list<pair<CuFFTParams, CuFFTConfig>>    # LRU 链表
+    _cache_map: unordered_map<CuFFTParams, iter>         # 参数 -> 链表迭代器
+    _max_size: size_t                                     # 最大缓存数
+    mutex: std::mutex                                     # 线程安全锁
+
+【接口】
+    CuFFTParamsLRUCache(max_size: int64 = CUFFT_DEFAULT_CACHE_SIZE)
+        用途: 创建指定大小的缓存
+
+    lookup(params: CuFFTParams) -> const CuFFTConfig&
+        用途: 查找或创建计划配置
+        算法:
+            if params in _cache_map:
+                # Hit: 移到链表头
+                _usage_list.splice_to_front(_cache_map[params])
+                return _cache_map[params]->second
+            else:
+                # Miss: 淘汰 LRU 项
+                if _usage_list.size() >= _max_size:
+                    _cache_map.erase(_usage_list.back().first)
+                    _usage_list.pop_back()
+                
+                # 在链表头构造新计划
+                _usage_list.emplace_front(params, CuFFTConfig(params))
+                _cache_map[params] = _usage_list.begin()
+                return _usage_list.front().second
+
+    clear()
+        用途: 清空缓存
+
+    resize(new_size: int64)
+        用途: 调整缓存大小，淘汰超出部分
+
+    size() -> size_t
+        用途: 获取当前缓存项数
+
+    max_size() -> size_t
+        用途: 获取最大缓存数
+
+【约束】
+    - 非线程安全，调用方需持有 mutex
+    - lookup 要求 max_size > 0
+
+--------------------------------
+全局 API
+--------------------------------
+
+【函数】
+    cufft_get_plan_cache_max_size_impl(device_index: DeviceIndex) -> int64
+        用途: 获取指定设备的最大缓存数
+
+    cufft_set_plan_cache_max_size_impl(device_index: DeviceIndex, max_size: int64)
+        用途: 设置指定设备的最大缓存数
+
+    cufft_get_plan_cache_size_impl(device_index: DeviceIndex) -> int64
+        用途: 获取指定设备的当前缓存项数
+
+    cufft_clear_plan_cache_impl(device_index: DeviceIndex)
+        用途: 清空指定设备的缓存
+
+【备注】
+    - 通过 CUDAHooks 机制从 native/SpectralOps.cpp 调用
+    - 支持多设备独立缓存

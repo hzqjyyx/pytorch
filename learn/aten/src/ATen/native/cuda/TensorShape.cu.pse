@@ -1,0 +1,494 @@
+--------------------------------
+辅助工具: 128位内存加载/存储
+来源: aten/src/ATen/native/cuda/TensorShape.cu
+--------------------------------
+
+【常量】
+    BLOCK_SIZE = 128           # 线程块大小
+    BYTES_PER_THREAD = 16      # 每线程处理字节数
+    BYTES_PER_BLOCK = 2048     # 每块处理字节数
+
+【函数】
+    div_up(a: int64, b: int64) -> int64
+        @host @device
+        用途: 向上取整除法
+        算法: (a + b - 1) / b
+
+    stream_load128(addr: char*) -> uint4
+        @device
+        用途: 128位非缓存加载（streaming load）
+        平台: ROCm/CUDA<8.0用直接内存访问，CUDA≥8.0用PTX内联汇编 ld.global.nc
+
+    stream_store128(addr: char*, val: uint4)
+        @device
+        用途: 128位缓存流式存储（streaming store）
+        平台: ROCm/CUDA<8.0用直接内存访问，CUDA≥8.0用PTX内联汇编 st.global.cs
+
+    load128<T>(addr: char*) -> uint4
+        @device
+        用途: 根据对齐情况选择最优加载策略
+        算法:
+            if is_aligned<uint4>(addr):
+                stream_load128(addr)
+            elif is_aligned<uint64>(addr):
+                分2次64位加载
+            elif is_aligned<uint32>(addr):
+                分4次32位加载
+            else:
+                分16次8位加载
+
+    is_aligned<T>(addr: void*) -> bool
+        @device
+        用途: 检查地址是否按T类型对齐
+        算法: uintptr(addr) % sizeof(T) == 0
+
+--------------------------------
+设备端数据拷贝核心
+来源: aten/src/ATen/native/cuda/TensorShape.cu
+--------------------------------
+
+【函数】
+    get_aligned_region(ptr: char*, chunk_size: int64, alignment: int64) -> (align_off: int64, aligned_size: int64)
+        @device
+        用途: 计算可128位对齐写入的内存区域
+        算法:
+            ptr_val = uintptr(ptr)
+            align_off = div_up(ptr_val, alignment) * alignment - ptr_val
+            aligned_size = (chunk_size - align_off) / alignment * alignment
+
+    copy_chunk(dst: char*, src: char*, chunk_size: int64, thread_idx: int64, num_threads: int64)
+        @device
+        用途: 线程协作拷贝单个chunk，优化对齐区域的向量化访问
+        算法:
+            # 快速路径: chunk小于线程数，每线程拷贝1字节
+            if chunk_size < num_threads:
+                if thread_idx < chunk_size:
+                    dst[thread_idx] = src[thread_idx]
+                return
+
+            # 分三段处理:
+            # [0, align_off): 未对齐前缀
+            # [align_off, align_off+aligned_size): 对齐区域，向量化写入
+            # [align_off+aligned_size, chunk_size): 未对齐后缀
+
+            align_off, aligned_size = get_aligned_region(dst, chunk_size, BYTES_PER_THREAD)
+
+            # 对齐区域: 保证写入128位对齐，机会性地向量化读取
+            for off in range(align_off + thread_idx*16, align_off+aligned_size, num_threads*16):
+                val = load128(&src[off])  # 机会性向量化读
+                stream_store128(&dst[off], val)  # 保证向量化写
+
+            # 未对齐前缀
+            if thread_idx < align_off and thread_idx < chunk_size:
+                dst[thread_idx] = src[thread_idx]
+
+            # 未对齐后缀
+            if align_off + aligned_size + thread_idx < chunk_size:
+                dst[align_off+aligned_size+thread_idx] = src[align_off+aligned_size+thread_idx]
+
+    copy_chunk_with_pad<dst_t, src_t>(
+        dst_ptr: dst_t*, src_ptr: src_t*,
+        max_chunk_size: int64, actual_chunk_size: int64,
+        thread_idx: int64, num_threads: int64
+    )
+        @device
+        用途: 带类型转换和零填充的chunk拷贝
+        参数: max_chunk_size=目标大小，actual_chunk_size=实际源数据大小
+        算法:
+            # 类型转换路径
+            if dst_t != src_t:
+                max_elems = max_chunk_size / sizeof(dst_t)
+                actual_elems = actual_chunk_size / sizeof(src_t)
+                for elem_idx in parallel_range(num_threads):
+                    if elem_idx < actual_elems:
+                        dst_ptr[elem_idx] = static_cast<dst_t>(src_ptr[elem_idx])
+                    elif elem_idx < max_elems:
+                        dst_ptr[elem_idx] = 0
+                return
+
+            # 快速路径: 线程数大于字节数
+            if max_chunk_size < num_threads:
+                val = src[thread_idx] if thread_idx < actual_chunk_size else 0
+                if thread_idx < max_chunk_size:
+                    dst[thread_idx] = val
+                return
+
+            # 三段对齐处理（同copy_chunk）
+            align_off, aligned_size = get_aligned_region(dst, actual_chunk_size, BYTES_PER_THREAD)
+            align_end = align_off + aligned_size
+
+            # 对齐区域: 向量化拷贝
+            for i in range(align_off + thread_idx*16, align_end, num_threads*16):
+                if is_aligned<uint4>(src + i):
+                    val = stream_load128(src + i)
+                else:
+                    for j in range(16):
+                        val.bytes[j] = src[i+j]
+                stream_store128(&dst[i], val)
+
+            # 前缀（带填充）
+            if thread_idx < align_off and thread_idx < max_chunk_size:
+                val = src[thread_idx] if thread_idx < actual_chunk_size else 0
+                dst[thread_idx] = val
+
+            # 后缀（带填充）
+            idx = align_end
+            while idx + thread_idx < max_chunk_size:
+                val = src[idx+thread_idx] if idx+thread_idx < actual_chunk_size else 0
+                dst[idx+thread_idx] = val
+                idx += num_threads
+
+--------------------------------
+split_with_sizes_copy: 张量按大小切分并拷贝
+来源: aten/src/ATen/native/cuda/TensorShape.cu
+--------------------------------
+
+【签名】
+    @host→device
+    split_with_sizes_copy_out_cuda_contiguous_no_cast(
+        self: Tensor[*D, dim_size, *],
+        split_sizes: int64[],     # split_sizes.sum() == dim_size
+        dim: int64,
+        out: Tensor[]             # len(out) == len(split_sizes)
+    )
+
+【算法】
+    # 将输入张量沿dim维度切分成多个输出张量，每个输出是连续内存
+
+    # 预处理: 计算每个split的元数据
+    src_base_addrs = get_split_base_addrs(self, split_sizes, dim)  # 每个split在src中的起始地址
+    dst_base_addrs = get_dst_addrs(out)                            # 每个split的dst起始地址
+    src_stride = get_chunk_stride(self, dim)                       # chunk在src中的跨度
+    split_chunk_sizes = get_split_chunk_sizes(self, split_sizes, dim)  # 每个split的chunk大小（字节）
+    num_chunks = get_num_chunks(self, dim)                         # 沿dim外部的chunk总数
+
+    # 锯齿网格策略: 每个split根据chunk大小分配不同数量的块
+    num_blocks = sum(div_up(size, BLOCK_SIZE * BYTES_PER_THREAD) for size in split_chunk_sizes)
+
+    # 动态负载调节
+    max_blocks = num_sms * max_threads_per_sm / BLOCK_SIZE * 2
+    iter_factor = div_up(num_blocks * num_chunks, max_blocks)
+    chunks_per_block = min(ceil(sqrt(iter_factor)), num_chunks)
+    iters_per_chunk = div_up(iter_factor, chunks_per_block)
+
+    # 构建锯齿索引
+    block_idx_to_split_idx = []  # 长度 = 实际块数
+    blocks_cumsums = [0]
+    for split_idx, chunk_size in enumerate(split_chunk_sizes):
+        blocks = div_up(chunk_size, BLOCK_SIZE * BYTES_PER_THREAD * iters_per_chunk)
+        block_idx_to_split_idx += [split_idx] * blocks
+        blocks_cumsums += [blocks_cumsums[-1] + blocks]
+
+    # 打包元数据到GPU
+    packed_ptrs = pack_vecs([dst_base_addrs, src_base_addrs, split_chunk_sizes,
+                             block_idx_to_split_idx, blocks_cumsums], device)
+
+    # 启动kernel
+    split_with_sizes_copy_out_contiguous_no_cast_kernel<<<
+        grid=(blocks_cumsums[-1], num_chunks/chunks_per_block),
+        block=(BLOCK_SIZE, 1, 1)
+    >>>(packed_ptrs, src_stride, num_chunks)
+
+【并行模式】
+    grid: (jagged_blocks_total, num_chunks / chunks_per_block)
+    block: (128, 1, 1)
+
+    - blockIdx.x: 通过block_idx_to_split_idx映射到split_idx，实现锯齿网格
+    - blockIdx.y: 循环处理num_chunks
+    - 每个(blockIdx.x组, blockIdx.y)调用copy_chunk处理一个(split, chunk)对
+
+【kernel实现】
+    split_with_sizes_copy_out_contiguous_no_cast_kernel(
+        dst_base_addrs: char**, src_base_addrs: char**,
+        split_chunk_sizes: int64*, block_idx_to_split_idx: int64*,
+        blocks_cumsums: int64*, src_stride: int64, num_chunks: int64
+    )
+        @device
+        算法:
+            split_idx = block_idx_to_split_idx[blockIdx.x]
+            split_blocks = blocks_cumsums[split_idx+1] - blocks_cumsums[split_idx]
+            split_threads = split_blocks * blockDim.x
+            split_thread_idx = (blockIdx.x - blocks_cumsums[split_idx]) * blockDim.x + threadIdx.x
+            split_chunk_size = split_chunk_sizes[split_idx]
+
+            dst_base = dst_base_addrs[split_idx]
+            src_base = src_base_addrs[split_idx]
+
+            for chunk_idx in range(blockIdx.y, num_chunks, gridDim.y):
+                copy_chunk(
+                    dst_base + chunk_idx * split_chunk_size,
+                    src_base + chunk_idx * src_stride,
+                    split_chunk_size,
+                    split_thread_idx,
+                    split_threads
+                )
+
+【host包装】
+    split_with_sizes_copy_out_cuda(self, split_sizes, dim, out)
+        用途: 带容错的入口，检测连续性和类型，符合条件调用fast path
+        算法:
+            if not capturing and all_contiguous and no_type_cast:
+                # 输入验证
+                assert dim in [0, self.dim())
+                assert self.dim() >= 1
+                assert sum(split_sizes) == self.size(dim)
+                assert len(out) == len(split_sizes)
+                # resize输出张量
+                for i, size in enumerate(split_sizes):
+                    out[i].resize_([..., size, ...])
+                # 调用优化kernel
+                split_with_sizes_copy_out_cuda_contiguous_no_cast(self, split_sizes, dim, out)
+            else:
+                # 回退到通用实现
+                at::native::split_with_sizes_copy_out(self, split_sizes, dim, out)
+
+--------------------------------
+辅助函数: split元数据计算
+来源: aten/src/ATen/native/cuda/TensorShape.cu
+--------------------------------
+
+【函数】
+    get_split_base_addrs(tensor: Tensor, split_sizes: int64[], dim: int64) -> int64[]
+        用途: 计算每个split在tensor中的起始地址（字节）
+        算法:
+            data_ptr = tensor.const_data_ptr()
+            strides = tensor.strides()
+            elem_size = tensor.element_size()
+            addrs = []
+            off = 0
+            for split_size in split_sizes:
+                addrs.append(int64(data_ptr + off))
+                off += split_size * strides[dim] * elem_size
+            return addrs
+
+    get_dst_addrs(out: Tensor[]) -> int64[]
+        用途: 获取每个输出张量的data_ptr
+        算法: [int64(t.data_ptr()) for t in out]
+
+    get_split_chunk_sizes(tensor: Tensor, split_sizes: int64[], dim: int64) -> int64[]
+        用途: 计算每个split的chunk大小（字节）
+        算法:
+            stride = tensor.stride(dim)
+            elem_size = tensor.element_size()
+            return [size * stride * elem_size for size in split_sizes]
+
+    get_chunk_stride(tensor: Tensor, dim: int64) -> int64
+        用途: 计算chunk在内存中的跨度（字节）
+        算法:
+            stride = prod(tensor.sizes()[dim:])  # 从dim到末尾的所有维度乘积
+            return stride * tensor.element_size()
+
+    get_num_chunks(tensor: Tensor, dim: int64) -> int64
+        用途: 计算沿dim外部的chunk总数
+        算法: tensor.numel() / prod(tensor.sizes()[dim:])
+
+    pack_vecs(vecs: vector<int64>*[], device: Device) -> (Tensor, int64*[])
+        用途: 将多个CPU vector打包到单个CUDA张量，返回张量和各vector在GPU的起始指针
+        算法:
+            numel = sum(vec.size() for vec in vecs)
+            packed = at::empty([numel], dtype=int64, pinned_memory=True)
+            # CPU侧拼接
+            offset = 0
+            for vec in vecs:
+                memcpy(packed.data() + offset, vec.data(), vec.size() * 8)
+                offset += vec.size()
+            # 异步拷贝到GPU
+            packed = packed.to(device, non_blocking=True)
+            # 计算GPU指针
+            ptrs = []
+            offset = 0
+            for vec in vecs:
+                ptrs.append(packed.data_ptr<int64>() + offset)
+                offset += vec.size()
+            return (packed, ptrs)
+
+--------------------------------
+chunk_cat: 多张量分块拼接
+来源: aten/src/ATen/native/cuda/TensorShape.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _chunk_cat_cuda(tensors: Tensor[*D, dim_size_i, *][], dim: int64, num_chunks: int64) -> Tensor
+
+    @host→device
+    _chunk_cat_out_cuda(tensors: Tensor[], dim: int64, num_chunks: int64, out: Tensor) -> Tensor
+
+【算法】
+    # 将多个输入张量沿dim维度填充并拼接，输出形状为 [*D_leading, num_chunks, chunk_size]
+    # chunk_size = sum(ceil(tensors[i].size(dim) / num_chunks) * num_chunks * trailing_numel_i)
+
+    dim = preprocess_chunk_cat_inputs(tensors, dim, num_chunks)
+
+    if all_contiguous(tensors):
+        elem_size = tensors[0].element_size()
+        chunk_size = get_chunk_size(tensors, dim, num_chunks, elem_size)
+        leading_dim = get_leading_dim(tensors[0].sizes(), dim)
+        view_sizes = get_chunk_cat_out_sizes(tensors[0].sizes(), dim, num_chunks, chunk_size, elem_size)
+
+        # 分配输出或检查out
+        if out is None:
+            out = tensors[0].new_empty(chunk_size * num_chunks * leading_dim / elem_size).view(view_sizes)
+
+        # 选择类型转换路径
+        if tensors[0].dtype == out.dtype:
+            _chunk_cat_out_cuda_contiguous<char, char>(tensors, dim, num_chunks, out, elem_size, elem_size)
+        elif tensors[0].dtype == BFloat16 and out.dtype == Float:
+            _chunk_cat_out_cuda_contiguous<float, BFloat16>(tensors, dim, num_chunks, out, 4, 2)
+        else:
+            fallback_to_generic
+
+        return out
+    else:
+        return at::native::_chunk_cat(tensors, dim, num_chunks)
+
+【并行模式】
+    grid: (num_blocks_per_chunk, num_chunks, leading_dim)
+    block: (BLOCK_SIZE, 1, 1)
+
+    - blockIdx.z: leading_dim并行
+    - blockIdx.y: num_chunks并行
+    - blockIdx.x: 通过block_idx_to_tensor_idx映射到tensor_idx，实现锯齿网格
+
+【kernel实现】
+    chunk_cat_cuda_kernel<dst_t, src_t>(
+        src: src_t**, dst: dst_t*,
+        block_idx_to_tensor_idx: int64*,
+        tensor_idx_to_start_tensor_bytes: int64*,
+        start_block_idx_per_tensor_chunk: int64*,
+        actual_tensor_sizes: int64*,
+        pad_tensor_chunk_sizes: int64*,
+        num_blocks_per_tensor_chunk: int64*,
+        slice_size: int64, chunk_size: int64, dst_to_src_ratio: int64
+    )
+        @device
+        算法:
+            slice_idx = blockIdx.z
+            chunk_idx = blockIdx.y
+            tensor_idx = block_idx_to_tensor_idx[blockIdx.x]
+            tile_idx = blockIdx.x - start_block_idx_per_tensor_chunk[tensor_idx]
+            num_threads = num_blocks_per_tensor_chunk[tensor_idx] * BLOCK_SIZE
+            thread_idx = tile_idx * BLOCK_SIZE + threadIdx.x
+
+            src_addr = src[tensor_idx] +
+                       slice_idx * actual_tensor_sizes[tensor_idx] +
+                       chunk_idx * pad_tensor_chunk_sizes[tensor_idx] / dst_to_src_ratio
+
+            dst_addr = dst +
+                       slice_idx * slice_size +
+                       chunk_idx * chunk_size +
+                       tensor_idx_to_start_tensor_bytes[tensor_idx]
+
+            actual_copy_size = min(
+                pad_tensor_chunk_sizes[tensor_idx] / dst_to_src_ratio,
+                max(0, actual_tensor_sizes[tensor_idx] - chunk_idx * pad_tensor_chunk_sizes[tensor_idx] / dst_to_src_ratio)
+            )
+
+            copy_chunk_with_pad<dst_t, src_t>(
+                dst_addr, src_addr,
+                pad_tensor_chunk_sizes[tensor_idx],
+                actual_copy_size,
+                thread_idx, num_threads
+            )
+
+--------------------------------
+辅助函数: chunk_cat元数据计算
+来源: aten/src/ATen/native/cuda/TensorShape.cu
+--------------------------------
+
+【函数】
+    all_contiguous(tensors: Tensor[]) -> bool
+        用途: 检查所有张量是否连续
+        算法: all(t.is_non_overlapping_and_dense() for t in tensors)
+
+    get_leading_dim(sizes: int64[], dim: int64) -> int64
+        用途: 计算dim之前的维度乘积
+        算法: prod(sizes[0:dim]) if dim > 0 else 1
+
+    get_pad_size(sizes: int64[], dim: int64, num_chunks: int64) -> (pad_size_along_dim: int64, trailing_numel: int64)
+        用途: 计算沿dim维度的填充大小和trailing维度乘积
+        算法:
+            trailing_numel = prod(sizes[dim+1:]) if dim+1 < len(sizes) else 1
+            pad_size_along_dim = div_up(sizes[dim], num_chunks) * num_chunks
+            return (pad_size_along_dim, trailing_numel)
+
+    get_chunk_size(tensors: Tensor[], dim: int64, num_chunks: int64, elem_size: int64) -> int64
+        用途: 计算拼接后的chunk大小（字节）
+        算法:
+            chunk_size = 0
+            for tensor in tensors:
+                pad_size_along_dim, trailing_numel = get_pad_size(tensor.sizes(), dim, num_chunks)
+                pad_tensor_chunk_size = pad_size_along_dim * trailing_numel * elem_size / num_chunks
+                chunk_size += pad_tensor_chunk_size
+            return chunk_size
+
+    get_chunk_cat_out_sizes(input_sizes: int64[], dim: int64, num_chunks: int64, chunk_size: int64, out_elem_size: int64) -> int64[]
+        用途: 计算输出张量的view形状
+        算法:
+            view_sizes = input_sizes[0:dim] + [num_chunks, chunk_size / out_elem_size]
+            return view_sizes
+
+    get_chunk_cat_metadata(
+        tensors: Tensor[], dim: int64, num_chunks: int64,
+        dst_elem_size: int64, src_elem_size: int64
+    ) -> (
+        chunk_size: int64, leading_dim: int64, num_blocks_per_chunk: int64, slice_size: int64,
+        srcs: int64[], block_idx_to_tensor_idx: int64[],
+        tensor_idx_to_start_tensor_bytes: int64[],
+        start_block_idx_per_tensor_chunk: int64[],
+        actual_tensor_sizes: int64[],
+        pad_tensor_chunk_sizes: int64[],
+        num_blocks_per_tensor_chunk: int64[]
+    )
+        用途: 计算chunk_cat所需的所有元数据
+        参数: dst_elem_size % src_elem_size == 0
+        算法:
+            leading_dim = get_leading_dim(tensors[0].sizes(), dim)
+            chunk_size = 0
+            srcs = []
+            block_idx_to_tensor_idx = []
+            tensor_idx_to_start_tensor_bytes = [0]
+            start_block_idx_per_tensor_chunk = [0]
+            actual_tensor_sizes = []
+            pad_tensor_chunk_sizes = []
+            num_blocks_per_tensor_chunk = []
+
+            for i, tensor in enumerate(tensors):
+                srcs.append(int64(tensor.data_ptr()))
+
+                pad_size_along_dim, trailing_numel = get_pad_size(tensor.sizes(), dim, num_chunks)
+                pad_tensor_chunk_size = pad_size_along_dim * trailing_numel * dst_elem_size / num_chunks
+                pad_tensor_chunk_sizes.append(pad_tensor_chunk_size)
+                chunk_size += pad_tensor_chunk_size
+
+                num_blocks = div_up(pad_tensor_chunk_size, BYTES_PER_BLOCK)
+                num_blocks_per_tensor_chunk.append(num_blocks)
+                start_block_idx_per_tensor_chunk.append(start_block_idx_per_tensor_chunk[-1] + num_blocks)
+                block_idx_to_tensor_idx += [i] * num_blocks
+
+                tensor_idx_to_start_tensor_bytes.append(tensor_idx_to_start_tensor_bytes[-1] + pad_tensor_chunk_size)
+                actual_tensor_sizes.append(tensor.size(dim) * trailing_numel * src_elem_size)
+
+            num_blocks_per_chunk = start_block_idx_per_tensor_chunk[-1]
+            slice_size = num_chunks * chunk_size
+
+            return (chunk_size, leading_dim, num_blocks_per_chunk, slice_size,
+                    srcs, block_idx_to_tensor_idx, tensor_idx_to_start_tensor_bytes,
+                    start_block_idx_per_tensor_chunk, actual_tensor_sizes,
+                    pad_tensor_chunk_sizes, num_blocks_per_tensor_chunk)
+
+    _chunk_cat_out_cuda_contiguous<dst_t, src_t>(
+        tensors: Tensor[], dim: int64, num_chunks: int64, out: Tensor,
+        dst_elem_size: int64, src_elem_size: int64
+    )
+        用途: 连续张量的chunk_cat实现，调用kernel
+        算法:
+            metadata = get_chunk_cat_metadata(tensors, dim, num_chunks, dst_elem_size, src_elem_size)
+            packed = pack_vecs([srcs, block_idx_to_tensor_idx, ...], device)
+            view_sizes = get_chunk_cat_out_sizes(tensors[0].sizes(), dim, num_chunks, chunk_size, dst_elem_size)
+            at::native::resize_output(out, view_sizes)
+
+            chunk_cat_cuda_kernel<dst_t, src_t><<<
+                grid=(num_blocks_per_chunk, num_chunks, leading_dim),
+                block=(BLOCK_SIZE, 1, 1)
+            >>>(packed.second[0..6], slice_size, chunk_size, dst_elem_size / src_elem_size)

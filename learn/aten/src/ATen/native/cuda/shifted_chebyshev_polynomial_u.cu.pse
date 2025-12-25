@@ -1,0 +1,31 @@
+--------------------------------
+shifted_chebyshev_polynomial_u_kernel_cuda
+来源: aten/src/ATen/native/cuda/shifted_chebyshev_polynomial_u.cu
+--------------------------------
+
+【签名】
+    @host→device
+    shifted_chebyshev_polynomial_u_kernel_cuda(iterator: TensorIteratorBase) -> void
+
+【算法】
+    # 根据编译配置选择实现策略
+    if AT_USE_JITERATOR:
+        # JIT编译方式：运行时编译CUDA代码字符串
+        opmath_jitted_gpu_kernel_with_scalars<shifted_chebyshev_polynomial_u_name, scalar_t, scalar_t>(
+            iterator, 
+            shifted_chebyshev_polynomial_u_string
+        )
+    else:
+        # 直接编译方式：使用lambda kernel
+        gpu_kernel_with_scalars(iterator, [](x: scalar_t, n: scalar_t) -> scalar_t {
+            return shifted_chebyshev_polynomial_u_forward<scalar_t, true>(x, n)
+        })
+
+【并行模式】
+    elementwise (通过 TensorIterator 并行化)
+
+【备注】
+    - 支持数据类型：float, double (AT_DISPATCH_FLOATING_TYPES)
+    - shifted_chebyshev_polynomial_u_forward: 实际计算函数，定义在其他文件
+    - JIT模式使用字符串模板 shifted_chebyshev_polynomial_u_string
+    - 注册到 shifted_chebyshev_polynomial_u_stub 分发表

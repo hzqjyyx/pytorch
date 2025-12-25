@@ -1,0 +1,20 @@
+--------------------------------
+record_stream_cuda
+来源: aten/src/ATen/native/cuda/RecordStream.cu
+--------------------------------
+
+【签名】
+    record_stream_cuda(self: Tensor, stream: c10::Stream)
+
+【算法】
+    # 将 stream 打包为三元组
+    data = stream.pack3()  # -> StreamData3{stream_id, device_index, device_type}
+    
+    # 解包并记录到 CUDA 缓存分配器
+    cuda_stream = at::cuda::CUDAStream::unpack3(data.stream_id, data.device_index, data.device_type)
+    c10::cuda::CUDACachingAllocator::recordStream(self.storage().data_ptr(), cuda_stream)
+
+【备注】
+    - 用途: 标记 tensor 的底层存储正在被指定的 CUDA stream 使用，防止提前释放
+    - pack3/unpack3: stream 序列化/反序列化机制
+    - recordStream: 通知缓存分配器延迟内存回收，直到 stream 执行完毕

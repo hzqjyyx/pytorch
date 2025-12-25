@@ -1,0 +1,20 @@
+--------------------------------
+uniform_kernel
+来源: aten/src/ATen/native/cuda/DistributionUniform.cu
+--------------------------------
+
+【签名】
+    uniform_kernel(
+        iter: TensorIteratorBase,
+        from: float,
+        to: float,
+        gen: Optional[Generator]
+    )
+
+【算法】
+    generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator())
+    templates::cuda::uniform_kernel(iter, from, to, generator)
+
+【备注】
+    - 注册到 uniform_stub 分发表
+    - 实际的均匀分布采样实现在 DistributionTemplates.h 的 templates::cuda::uniform_kernel

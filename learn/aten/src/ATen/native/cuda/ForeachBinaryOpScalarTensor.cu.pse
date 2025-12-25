@@ -1,0 +1,283 @@
+--------------------------------
+foreach_binary_op (非原地版本)
+来源: aten/src/ATen/native/cuda/ForeachBinaryOpScalarTensor.cu:21-60
+--------------------------------
+
+【签名】
+    foreach_binary_op<T, Op>(
+        tensors: TensorList,           # 输入tensor列表
+        scalar: Tensor[scalar, T],     # 标量tensor (0维，1元素)
+        alpha: Scalar = 1
+    ) -> List[Tensor]
+
+    约束:
+    - scalar.dim() == 0 && scalar.numel() == 1
+    - tensors[0].device() == scalar.device()
+
+【算法】
+    # Step 1: 创建输出列表
+    vec_res = [empty_like(t) for t in tensors]
+
+    # Step 2: 构造双层列表
+    tensor_lists = [
+        tensors.vec(),
+        vec_res
+    ]
+
+    # Step 3: 多tensor并行操作
+    multi_tensor_apply<2>(
+        tensor_lists,
+        BinaryOpScalarTensorFunctor<T, depth=2, r_args_depth=1, res_arg_index=1>(),
+        Op<opmath_t>(),
+        scalar.data_ptr<T>(),
+        alpha.to<opmath_t>()
+    )
+
+    return vec_res
+
+【并行模式】
+    multi_tensor_apply: 并行处理多个tensor
+    - depth=2: 处理2个tensor列表
+    - r_args_depth=1: 1个只读参数列表
+    - res_arg_index=1: 结果在第1个列表
+
+【备注】
+    - opmath_t: 计算精度类型，见 at::opmath_type<T>
+    - BinaryOpScalarTensorFunctor: 实际执行 op(tensor_elem, scalar, alpha) 的functor
+
+--------------------------------
+foreach_binary_op_ (原地版本)
+来源: aten/src/ATen/native/cuda/ForeachBinaryOpScalarTensor.cu:62-95
+--------------------------------
+
+【签名】
+    foreach_binary_op_<T, Op>(
+        tensors: TensorList,           # 输入输出tensor列表 (原地修改)
+        scalar: Tensor[scalar, T],     # 标量tensor (0维，1元素)
+        alpha: Scalar = 1
+    )
+
+    约束:
+    - scalar.dim() == 0 && scalar.numel() == 1
+    - tensors[0].device() == scalar.device()
+
+【算法】
+    # Step 1: 构造单层列表 (原地操作)
+    tensor_lists = [tensors.vec()]
+
+    # Step 2: 多tensor并行操作
+    multi_tensor_apply<1>(
+        tensor_lists,
+        BinaryOpScalarTensorFunctor<T, depth=1, r_args_depth=1, res_arg_index=0>(),
+        Op<opmath_t>(),
+        scalar.data_ptr<T>(),
+        alpha.to<opmath_t>()
+    )
+
+    # Step 3: 更新所有tensor版本号
+    increment_version(tensors)
+
+【并行模式】
+    multi_tensor_apply: 并行处理多个tensor
+    - depth=1: 处理1个tensor列表 (原地)
+    - r_args_depth=1: 1个只读参数列表
+    - res_arg_index=0: 结果在第0个列表 (原地)
+
+【备注】
+    - increment_version: 标记tensor已被原地修改
+
+--------------------------------
+foreach_tensor_add_tensor_kernel_cuda (非原地)
+来源: aten/src/ATen/native/cuda/ForeachBinaryOpScalarTensor.cu:189-192
+--------------------------------
+
+【签名】
+    foreach_tensor_add_tensor_kernel_cuda(
+        tensors: TensorList,
+        scalar: Tensor,
+        alpha: Scalar
+    ) -> List[Tensor]
+
+【算法】
+    check_foreach_api_restrictions(tensors)
+
+    # 快速路径检查
+    if not (can_use_fast_route(tensors, alpha) and 
+            tensors[0].scalar_type() == scalar.scalar_type()):
+        return foreach_tensor_add_tensor_kernel_slow(tensors, scalar, alpha)
+
+    return all_types_complex_bool_half_bfloat16<std::plus>(tensors, scalar, alpha)
+
+【备注】
+    - all_types_complex_bool_half_bfloat16: 分发到 foreach_binary_op，支持所有类型+复数+bool+half+bfloat16
+    - 退化到 slow 路径时处理类型不匹配的情况
+
+--------------------------------
+foreach_tensor_add_tensor_kernel_cuda_ (原地)
+来源: aten/src/ATen/native/cuda/ForeachBinaryOpScalarTensor.cu:189-192
+--------------------------------
+
+【签名】
+    foreach_tensor_add_tensor_kernel_cuda_(
+        tensors: TensorList,
+        scalar: Tensor,
+        alpha: Scalar
+    )
+
+【算法】
+    check_foreach_api_restrictions(tensors)
+
+    # 快速路径检查
+    if not (can_use_fast_route(tensors, alpha) and 
+            tensors[0].scalar_type() == scalar.scalar_type()):
+        foreach_tensor_add_tensor_kernel_slow_(tensors, scalar, alpha)
+        return
+
+    all_types_complex_bool_half_bfloat16_<std::plus>(tensors, scalar, alpha)
+
+--------------------------------
+foreach_tensor_mul_tensor_kernel_cuda (非原地)
+来源: aten/src/ATen/native/cuda/ForeachBinaryOpScalarTensor.cu:194-198
+--------------------------------
+
+【签名】
+    foreach_tensor_mul_tensor_kernel_cuda(
+        tensors: TensorList,
+        scalar: Tensor
+    ) -> List[Tensor]
+
+【算法】
+    # 标量tensor在CPU时退化到scalar版本
+    if scalar.device().type() == DeviceType::CPU:
+        return foreach_tensor_mul_scalar_kernel_cuda(tensors, scalar.item())
+
+    check_foreach_api_restrictions(tensors)
+
+    # 快速路径检查 (非除法操作)
+    if not (can_use_fast_route(tensors, div_op=false) and 
+            tensors[0].scalar_type() == scalar.scalar_type()):
+        return foreach_tensor_mul_tensor_kernel_slow(tensors, scalar)
+
+    return all_types_complex_bool_half_bfloat16<std::multiplies>(tensors, scalar)
+
+--------------------------------
+foreach_tensor_mul_tensor_kernel_cuda_ (原地)
+来源: aten/src/ATen/native/cuda/ForeachBinaryOpScalarTensor.cu:194-198
+--------------------------------
+
+【签名】
+    foreach_tensor_mul_tensor_kernel_cuda_(
+        tensors: TensorList,
+        scalar: Tensor
+    )
+
+【算法】
+    # 标量tensor在CPU时退化到scalar版本
+    if scalar.device().type() == DeviceType::CPU:
+        foreach_tensor_mul_scalar_kernel_cuda_(tensors, scalar.item())
+        return
+
+    check_foreach_api_restrictions(tensors)
+
+    # 快速路径检查 (非除法操作)
+    if not (can_use_fast_route(tensors, div_op=false) and 
+            tensors[0].scalar_type() == scalar.scalar_type()):
+        foreach_tensor_mul_tensor_kernel_slow_(tensors, scalar)
+        return
+
+    all_types_complex_bool_half_bfloat16_<std::multiplies>(tensors, scalar)
+
+--------------------------------
+foreach_tensor_div_tensor_kernel_cuda (非原地)
+来源: aten/src/ATen/native/cuda/ForeachBinaryOpScalarTensor.cu:200-204
+--------------------------------
+
+【签名】
+    foreach_tensor_div_tensor_kernel_cuda(
+        tensors: TensorList,
+        scalar: Tensor
+    ) -> List[Tensor]
+
+【算法】
+    # 标量tensor在CPU时退化到scalar版本
+    if scalar.device().type() == DeviceType::CPU:
+        return foreach_tensor_div_scalar_kernel_cuda(tensors, scalar.item())
+
+    check_foreach_api_restrictions(tensors)
+
+    # 快速路径检查 (除法操作)
+    if not (can_use_fast_route(tensors, div_op=true) and 
+            tensors[0].scalar_type() == scalar.scalar_type()):
+        return foreach_tensor_div_tensor_kernel_slow(tensors, scalar)
+
+    return all_types_complex_bool_half_bfloat16<std::divides>(tensors, scalar)
+
+--------------------------------
+foreach_tensor_div_tensor_kernel_cuda_ (原地)
+来源: aten/src/ATen/native/cuda/ForeachBinaryOpScalarTensor.cu:200-204
+--------------------------------
+
+【签名】
+    foreach_tensor_div_tensor_kernel_cuda_(
+        tensors: TensorList,
+        scalar: Tensor
+    )
+
+【算法】
+    # 标量tensor在CPU时退化到scalar版本
+    if scalar.device().type() == DeviceType::CPU:
+        foreach_tensor_div_scalar_kernel_cuda_(tensors, scalar.item())
+        return
+
+    check_foreach_api_restrictions(tensors)
+
+    # 快速路径检查 (除法操作)
+    if not (can_use_fast_route(tensors, div_op=true) and 
+            tensors[0].scalar_type() == scalar.scalar_type()):
+        foreach_tensor_div_tensor_kernel_slow_(tensors, scalar)
+        return
+
+    all_types_complex_bool_half_bfloat16_<std::divides>(tensors, scalar)
+
+--------------------------------
+all_types_complex_bool_half_bfloat16 (类型分发包装 - 非原地)
+来源: aten/src/ATen/native/cuda/ForeachBinaryOpScalarTensor.cu:159-173
+--------------------------------
+
+【签名】
+    all_types_complex_bool_half_bfloat16<Op>(
+        tensors: TensorList,
+        scalar: Tensor,
+        alpha: Scalar = 1
+    ) -> List[Tensor]
+
+【算法】
+    return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        kBool, kHalf, kBFloat16,
+        tensors[0].scalar_type(),
+        "foreach_binary_op_scalar_cuda",
+        foreach_binary_op<scalar_t, Op>(tensors, scalar, alpha)
+    )
+
+【备注】
+    - AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3: 类型分发宏，支持所有标准类型+复数+bool+half+bfloat16
+
+--------------------------------
+all_types_complex_bool_half_bfloat16_ (类型分发包装 - 原地)
+来源: aten/src/ATen/native/cuda/ForeachBinaryOpScalarTensor.cu:175-187
+--------------------------------
+
+【签名】
+    all_types_complex_bool_half_bfloat16_<Op>(
+        tensors: TensorList,
+        scalar: Tensor,
+        alpha: Scalar = 1
+    )
+
+【算法】
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        kBool, kHalf, kBFloat16,
+        tensors[0].scalar_type(),
+        "foreach_binary_op_scalar_cuda_",
+        foreach_binary_op_<scalar_t, Op>(tensors, scalar, alpha)
+    )

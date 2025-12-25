@@ -1,0 +1,217 @@
+--------------------------------
+addcmul_cuda_kernel
+来源: aten/src/ATen/native/cuda/PointwiseOpsKernel.cu:23-94
+--------------------------------
+
+【签名】
+    @host→device
+    addcmul_cuda_kernel(
+        iter: TensorIteratorBase,  # 4个操作数: output, self, tensor1, tensor2
+        value: Scalar              # alpha系数
+    )
+
+【算法】
+    dtype = iter.common_dtype()
+    
+    if is_complex(dtype):
+        alpha = value.to<dtype>
+        
+        if iter.is_cpu_scalar(3):  # tensor2是CPU标量
+            tensor2_val = iter.scalar_value<dtype>(3)
+            iter.remove_operand(3)
+            addcmul_cuda_scalar_tensor2_kernel(iter, tensor2_val, value)
+        else:
+            # 对于复数类型:
+            # CUDA >= 11.5: 使用 jitted_gpu_kernel 编译内联代码
+            # CUDA < 11.5: 使用 gpu_kernel 运行 lambda
+            # 公式: output = self + alpha * (tensor1 * tensor2)
+            gpu_kernel(iter, [alpha](self, tensor1, tensor2) -> dtype {
+                return self + alpha * tensor1 * tensor2
+            })
+    else:
+        if iter.is_cpu_scalar(3):  # tensor2是CPU标量
+            tensor2_val = iter.scalar_value<dtype>(3)
+            iter.remove_operand(3)
+            addcmul_cuda_scalar_tensor2_kernel(iter, tensor2_val, value)
+        else:
+            alpha = value.to<accscalar_t>  # fp16/bf16提升到fp32
+            gpu_kernel(iter, [alpha](self, tensor1, tensor2) -> dtype {
+                return self + alpha * (cast<accscalar_t>(tensor1) * cast<accscalar_t>(tensor2))
+            })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持 tensor2 为 CPU 标量的特殊优化路径
+    - fp16/bf16 使用 fp32 累加以提高精度
+    - 复数类型在 CUDA >= 11.5 时使用 jiterator 优化
+
+--------------------------------
+addcmul_cuda_scalar_tensor2_kernel
+来源: aten/src/ATen/native/cuda/PointwiseOpsKernel.cu:99-146
+--------------------------------
+
+【签名】
+    @host→device
+    addcmul_cuda_scalar_tensor2_kernel(
+        iter: TensorIteratorBase,  # 3个操作数: output, self, tensor1
+        scalar_tensor2: Scalar,    # tensor2的标量值
+        value: Scalar              # alpha系数
+    )
+
+【算法】
+    dtype = iter.common_dtype()
+    
+    if is_complex(dtype):
+        c = scalar_tensor2.to<dtype>
+        alpha = value.to<dtype>
+        
+        gpu_kernel(iter, [alpha, c](self, tensor1) -> dtype {
+            return self + alpha * (tensor1 * c)
+        })
+    else:
+        c = scalar_tensor2.to<accscalar_t>
+        alpha = value.to<accscalar_t>
+        
+        gpu_kernel(iter, [alpha, c](self, tensor1) -> dtype {
+            return self + alpha * (cast<accscalar_t>(tensor1) * c)
+        })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - tensor2 已确定为标量，将其捕获到 lambda 中
+    - fp16/bf16 使用 fp32 累加以提高精度
+
+--------------------------------
+addcdiv_cuda_kernel
+来源: aten/src/ATen/native/cuda/PointwiseOpsKernel.cu:152-194
+--------------------------------
+
+【签名】
+    @host→device
+    addcdiv_cuda_kernel(
+        iter: TensorIteratorBase,  # 4个操作数: output, self, tensor1, tensor2
+        value: Scalar              # alpha系数
+    )
+
+【算法】
+    dtype = iter.common_dtype()
+    
+    if is_complex(dtype):
+        alpha = value.to<dtype>
+        
+        gpu_kernel(iter, [alpha](self, tensor1, tensor2) -> dtype {
+            return self + alpha * (tensor1 / tensor2)
+        })
+    else:
+        alpha = value.to<accscalar_t>
+        
+        gpu_kernel(iter, [alpha](self, tensor1, tensor2) -> dtype {
+            return self + alpha * (tensor1 / cast<accscalar_t>(tensor2))
+        })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 公式: output = self + alpha * (tensor1 / tensor2)
+    - fp16/bf16 使用 fp32 除法以提高精度
+
+--------------------------------
+smooth_l1_backward_cuda_kernel
+来源: aten/src/ATen/native/cuda/PointwiseOpsKernel.cu:196-210
+--------------------------------
+
+【签名】
+    @host→device
+    smooth_l1_backward_cuda_kernel(
+        iter: TensorIterator,  # 4个操作数: grad_input, input, target, grad_output
+        norm: Scalar,          # 归一化系数
+        beta: float            # 平滑区间阈值
+    )
+
+【算法】
+    norm_val = norm.to<dtype>
+    beta_val = beta
+    
+    gpu_kernel(iter, [norm_val, beta_val](input, target, grad_output) -> dtype {
+        x = input - target
+        
+        if x < -beta_val:
+            return -norm_val * grad_output
+        else if x > beta_val:
+            return norm_val * grad_output
+        else:
+            return norm_val * x * grad_output / beta_val
+    })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - Smooth L1 损失的梯度计算
+    - |x| > beta 时为常数梯度, |x| <= beta 时为线性梯度
+
+--------------------------------
+huber_backward_cuda_kernel
+来源: aten/src/ATen/native/cuda/PointwiseOpsKernel.cu:212-227
+--------------------------------
+
+【签名】
+    @host→device
+    huber_backward_cuda_kernel(
+        iter: TensorIterator,  # 4个操作数: grad_input, input, target, grad_output
+        norm: Scalar,          # 归一化系数
+        delta: float           # Huber阈值
+    )
+
+【算法】
+    norm_val = norm.to<dtype>
+    delta_val = delta
+    
+    gpu_kernel(iter, [norm_val, delta_val](input, target, grad_output) -> dtype {
+        x = input - target
+        
+        if x < -delta_val:
+            return -norm_val * grad_output * delta_val
+        else if x > delta_val:
+            return norm_val * grad_output * delta_val
+        else:
+            return norm_val * x * grad_output
+    })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - Huber 损失的梯度计算
+    - |x| > delta 时梯度饱和为 ±delta, |x| <= delta 时为线性梯度
+
+--------------------------------
+mse_backward_cuda_kernel
+来源: aten/src/ATen/native/cuda/PointwiseOpsKernel.cu:229-236
+--------------------------------
+
+【签名】
+    @host→device
+    mse_backward_cuda_kernel(
+        iter: TensorIterator,  # 4个操作数: grad_input, input, target, grad_output
+        value: Scalar          # 归一化系数 (通常为 2/N)
+    )
+
+【算法】
+    alpha = value.to<dtype>
+    
+    gpu_kernel(iter, [alpha](input, target, grad_output) -> dtype {
+        return alpha * (input - target) * grad_output
+    })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - MSE 损失的梯度计算
+    - 公式: grad_input = alpha * (input - target) * grad_output

@@ -1,0 +1,30 @@
+--------------------------------
+asinh_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryGeometricAsinhKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    asinh_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    dtype = iter.common_dtype()
+    
+    if is_complex(dtype):
+        # 复数类型: ComplexHalf, ComplexFloat, ComplexDouble
+        gpu_kernel(iter, λ(a: complex) -> complex {
+            return ::asinh(cast<opmath_t>(a))
+        })
+    else:
+        # 浮点类型: Half, BFloat16, Float, Double
+        gpu_kernel(iter, λ(a: scalar) -> scalar {
+            return ::asinh(a)
+        })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 复数类型使用 opmath_t 提升精度计算
+    - JIT 编译路径已禁用（accuracy issues）
+    - 注册到 asinh_stub 分发表

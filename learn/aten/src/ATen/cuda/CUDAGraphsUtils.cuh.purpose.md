@@ -1,0 +1,6 @@
+- **文件用途**：为 ATen 库提供 CUDA 图（CUDA Graphs）相关的实用工具函数，补充 c10 库的通用工具
+- **主要内容**：
+  - `currentStreamCaptureStatus()`：检查当前 CUDA 流的捕获状态，不会创建不必要的 CUDA 上下文
+  - `assertNotCapturing()`：断言当前不在 CUDA 图捕获过程中，如果在捕获期间调用受限操作会抛出错误
+  - `errorIfCapturingCudnnBenchmark()`：检查是否在捕获期间尝试使用 cuDNN Benchmark，禁止这类操作（原因：需要预热迭代或动态 shape 问题）
+- **关键特性**：所有函数都是内联函数，避免上下文创建的开销，用于在 CUDA 图捕获期间进行安全性检查

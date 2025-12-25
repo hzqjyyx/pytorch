@@ -1,0 +1,522 @@
+--------------------------------
+promoteIndicesAndOffsets
+来源: aten/src/ATen/native/cuda/EmbeddingBag.cu
+--------------------------------
+
+【签名】
+    promoteIndicesAndOffsets(
+        indices: Tensor[N, int|long],
+        offsets: Tensor[B, int|long]
+    ) -> (Tensor[N], Tensor[B])
+
+【算法】
+    commonType = promote_types(offsets.dtype, indices.dtype)
+    
+    indices_promoted = indices if indices.dtype == commonType else indices.to(commonType)
+    offsets_promoted = offsets if offsets.dtype == commonType else offsets.to(commonType)
+    
+    return (indices_promoted, offsets_promoted)
+
+【备注】
+    - 确保 indices 和 offsets 使用相同的整数类型 (int32 或 int64)
+
+
+--------------------------------
+EmbeddingBag_updateOutputKernel_max
+来源: aten/src/ATen/native/cuda/EmbeddingBag.cu
+--------------------------------
+
+【签名】
+    @device
+    EmbeddingBag_updateOutputKernel_max(
+        input: Tensor[numIndices, index_t],
+        offsets: Tensor[numBags, index_t],
+        weight: Tensor[numRows, featureSize, scalar_t],
+        output: Tensor[numBags, featureSize, scalar_t],
+        offset2bag: Tensor[numIndices, index_t],
+        bag_size: Tensor[numBags, index_t],
+        max_indices: Tensor[numBags, featureSize, index_t],
+        padding_idx: index_t
+    )
+
+【算法】
+    # 每个 bag × feature 由一个线程处理
+    
+    parallel_for chunk in range(numBags * chunksPerBag):
+        featureDim = (chunk % chunksPerBag) * blockDim.x + threadIdx.x
+        
+        if featureDim < featureSize:
+            bag = chunk / chunksPerBag
+            begin = offsets[bag] if bag > 0 else 0
+            end = offsets[bag + 1] if bag < numBags - 1 else numIndices
+            
+            weightFeatMax = 0
+            bag_size_ = 0
+            maxWord = -1
+            
+            for emb in range(begin, end):
+                pad = (input[emb] == padding_idx)
+                weightValue = weight[input[emb], featureDim]
+                
+                if bag_size_ == 0 or weightValue > weightFeatMax:
+                    weightFeatMax = weightValue if not pad else weightFeatMax
+                    maxWord = input[emb] if not pad else maxWord
+                
+                bag_size_ += 0 if pad else 1
+                
+                if featureDim == 0:
+                    offset2bag[emb] = bag
+            
+            bag_size[bag] = bag_size_
+            max_indices[bag, featureDim] = maxWord
+            output[bag, featureDim] = weightFeatMax
+
+【并行模式】
+    grid: 1024
+    block: (32, 8) for CUDA, (64, 4) for ROCm
+    
+    - bag × feature 二维并行
+    - chunksPerBag = ceil(featureSize / blockDim.x)
+    - gridDim.x * blockDim.y 并行处理所有 chunks
+
+
+--------------------------------
+EmbeddingBag_updateOutputKernel_sum_mean
+来源: aten/src/ATen/native/cuda/EmbeddingBag.cu
+--------------------------------
+
+【签名】
+    @device
+    EmbeddingBag_updateOutputKernel_sum_mean(
+        input: Tensor[numIndices, index_t],
+        offsets: Tensor[numBags, index_t],
+        weight: Tensor[numRows, featureSize, scalar_t],
+        output: Tensor[numBags, featureSize, scalar_t],
+        offset2bag: Tensor[numIndices, index_t],
+        bag_size: Tensor[numBags, index_t],
+        mode: int,
+        per_sample_weights: Optional[Tensor[numIndices, scalar_t]],
+        padding_idx: index_t
+    )
+
+【算法】
+    # 每个 bag × feature 由一个线程处理
+    
+    parallel_for chunk in range(numBags * chunksPerBag):
+        featureDim = (chunk % chunksPerBag) * blockDim.x + threadIdx.x
+        
+        if featureDim < featureSize:
+            bag = chunk / chunksPerBag
+            begin = offsets[bag] if bag > 0 else 0
+            end = offsets[bag + 1] if bag < numBags - 1 else numIndices
+            
+            weightFeatSum = 0  # 使用累加精度类型
+            bag_size_ = 0
+            
+            for emb in range(begin, end):
+                input_idx = input[emb]
+                pad = (input_idx == padding_idx)
+                weightValue = weight[input_idx, featureDim]
+                weightValue = 0 if pad else weightValue
+                
+                if per_sample_weights is not None:
+                    weightFeatSum += per_sample_weights[emb] * weightValue
+                else:
+                    weightFeatSum += weightValue
+                
+                bag_size_ += 0 if pad else 1
+                
+                if featureDim == 0:
+                    offset2bag[emb] = bag
+            
+            if mode == EmbeddingBagMode::MEAN and bag_size_ != 0:
+                weightFeatSum = weightFeatSum / bag_size_
+            
+            bag_size[bag] = bag_size_
+            output[bag, featureDim] = weightFeatSum
+
+【并行模式】
+    grid: 1024
+    block: (32, 8) for CUDA, (64, 4) for ROCm
+    
+    - bag × feature 二维并行
+    - 使用 accscalar_t 累加以保持精度
+
+【备注】
+    - mode: EmbeddingBagMode::SUM 或 MEAN
+    - per_sample_weights: 可选的每样本权重
+
+
+--------------------------------
+embedding_bag_backward_cuda_sum_avg
+来源: aten/src/ATen/native/cuda/EmbeddingBag.cu
+--------------------------------
+
+【签名】
+    @host→device
+    embedding_bag_backward_cuda_sum_avg(
+        grad: Tensor[numBags, D, float],
+        indices: Tensor[N, index_t],
+        offset2bag: Tensor[N, index_t],
+        bag_size: Tensor[numBags, index_t],
+        num_weights: int64,
+        scale_grad_by_freq: bool,
+        mode: int64,
+        per_sample_weights: Optional[Tensor[N, float]],
+        padding_idx: int64
+    ) -> Tensor[num_weights, D]
+
+【算法】
+    indices = indices.contiguous()
+    
+    if indices.numel() == 0:
+        return at::zeros({num_weights, grad.size(1)}, grad.options())
+    
+    # Step 1: 对 indices 进行基数排序，同时记录原始位置
+    range = at::arange(indices.numel(), indices.options())
+    cuda::cub::radix_sort_pairs(
+        indices, sorted_indices,
+        range, orig_indices,
+        indices.numel()
+    )
+    
+    # Step 2: 如果需要按频率缩放梯度
+    if scale_grad_by_freq:
+        # 计算每个 unique index 的出现次数
+        # sorted: 2 5 5 5 7 7 8 9 9
+        #  count: 1 3 3 3 2 2 1 2 2
+        cuda::cub::inclusive_sum_by_key(sorted_indices, ones, count)
+        cuda::cub::inclusive_scan_by_key(
+            reverse(sorted_indices),
+            reverse(count),
+            reverse(count),
+            Max()
+        )
+    
+    # Step 3: 计算梯度
+    return embedding_backward_cuda_kernel(
+        grad, orig_indices, sorted_indices,
+        count, num_weights, padding_idx,
+        mode == EmbeddingBagMode::MEAN,
+        offset2bag, bag_size, per_sample_weights
+    )
+
+【备注】
+    - embedding_backward_cuda_kernel: 见 EmbeddingBackwardKernel.cuh
+    - CUB 排序和扫描操作确保相同 index 的梯度被正确聚合
+
+
+--------------------------------
+EmbeddingBag_accGradParametersKernel_max
+来源: aten/src/ATen/native/cuda/EmbeddingBag.cu
+--------------------------------
+
+【签名】
+    @device
+    EmbeddingBag_accGradParametersKernel_max(
+        max_indices: Tensor[numBags, stride, index_t],
+        gradOutput: Tensor[numBags, stride, scalar_t],
+        gradWeight: Tensor[numel, scalar_t],
+        stride: int64,
+        numBags: int64,
+        padding_idx: index_t
+    )
+
+【算法】
+    parallel_for chunk in range(numBags * chunksPerBag):
+        featureDim = (chunk % chunksPerBag) * blockDim.x + threadIdx.x
+        
+        if featureDim < stride:
+            bag = chunk / chunksPerBag
+            word_idx = max_indices[bag, featureDim]
+            
+            if word_idx >= 0 and word_idx != padding_idx:
+                atomic_add(
+                    gradWeight[word_idx * stride + featureDim],
+                    gradOutput[bag, featureDim]
+                )
+
+【并行模式】
+    grid: 1024
+    block: (32, 8) for CUDA, (64, 4) for ROCm
+    
+    - bag × feature 二维并行
+    - 使用 fastAtomicAdd 避免冲突
+
+【备注】
+    - 只对前向中选中的 max_indices 累加梯度
+    - 空 bag 的 max_indices 为 -1，跳过
+
+
+--------------------------------
+embedding_bag_backward_cuda_max
+来源: aten/src/ATen/native/cuda/EmbeddingBag.cu
+--------------------------------
+
+【签名】
+    @host→device
+    embedding_bag_backward_cuda_max(
+        grad: Tensor[numBags, D, float],
+        max_indices: Tensor[numBags, D, index_t],
+        num_weights: int64,
+        padding_idx: int64
+    ) -> Tensor[num_weights, D]
+
+【算法】
+    globalContext().alertNotDeterministic("embedding_bag_backward_cuda_max")
+    
+    grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options())
+    
+    EmbeddingBag_accGradParametersKernel_max<<<grid, block>>>(
+        max_indices, grad, grad_weight,
+        grad_weight.stride(0), grad.size(0), padding_idx, grad_weight.numel()
+    )
+    
+    return grad_weight
+
+【备注】
+    - 非确定性操作（原子加）
+    - 只对前向选中的 embedding 累加梯度
+
+
+--------------------------------
+_embedding_bag_forward_only_cuda
+来源: aten/src/ATen/native/cuda/EmbeddingBag.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _embedding_bag_forward_only_cuda(
+        weight: Tensor[num_embeddings, embedding_dim, float],
+        indices: Tensor[N, index_t],
+        offsets: Tensor[B, index_t],
+        scale_grad_by_freq: bool,
+        mode: int64,
+        sparse: bool,
+        per_sample_weights: Optional[Tensor[N, float]],
+        include_last_offset: bool,
+        padding_idx: int64
+    ) -> (Tensor[B, embedding_dim], Tensor[N], Tensor[B], Tensor[B, embedding_dim])
+
+【算法】
+    return _embedding_bag_cuda(
+        weight, indices, offsets,
+        scale_grad_by_freq, mode, sparse,
+        per_sample_weights, include_last_offset, padding_idx
+    )
+
+【备注】
+    - 仅前向传播的包装函数
+
+
+--------------------------------
+_embedding_bag_cuda
+来源: aten/src/ATen/native/cuda/EmbeddingBag.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _embedding_bag_cuda(
+        weight: Tensor[numRows, featureSize, float],
+        indices: Tensor[numIndices, int|long],
+        offsets: Tensor[numBags+?, int|long],
+        scale_grad_by_freq: bool,
+        mode: int64,
+        sparse: bool,
+        per_sample_weights: Optional[Tensor[numIndices, float]],
+        include_last_offset: bool,
+        padding_idx: int64
+    ) -> (output: Tensor[numBags, featureSize],
+          offset2bag: Tensor[numIndices],
+          bag_size: Tensor[numBags],
+          max_indices: Tensor[numBags, featureSize] | Tensor[0])
+
+    约束:
+    - indices.dim in [1, 2]
+    - offsets.dim == 1 (当 indices.dim == 1 时)
+    - weight.dim == 2
+
+【算法】
+    # Step 1: 类型提升
+    indices, offsets = promoteIndicesAndOffsets(indices, offsets)
+    
+    # Step 2: 计算 numBags
+    numBags = offsets.size(0)
+    if include_last_offset:
+        numBags -= 1
+    
+    # Step 3: 分配输出
+    output = at::empty({numBags, featureSize}, weight.options())
+    bag_size = at::empty({numBags}, indices.options())
+    offset2bag = at::empty({numIndices}, indices.options())
+    
+    if mode == EmbeddingBagMode::MAX:
+        max_indices = at::empty({numBags, featureSize}, indices.options())
+    else:
+        max_indices = at::empty({0}, indices.options())
+    
+    # Step 4: 调度 kernel
+    if mode == EmbeddingBagMode::MAX:
+        EmbeddingBag_updateOutputKernel_max<<<grid, block>>>(
+            indices, offsets, weight, output,
+            offset2bag, numIndices, numBags, featureSize,
+            weight.stride(0), weight.stride(1),
+            bag_size, max_indices, padding_idx, weight.size(0)
+        )
+    else:
+        EmbeddingBag_updateOutputKernel_sum_mean<<<grid, block>>>(
+            indices, offsets, weight, output,
+            offset2bag, numIndices, numBags, featureSize,
+            weight.stride(0), weight.stride(1), mode,
+            bag_size,
+            per_sample_weights if per_sample_weights.defined() else NULL,
+            per_sample_weights.stride(0) if per_sample_weights.defined() else 0,
+            padding_idx, weight.size(0)
+        )
+    
+    return (output, offset2bag, bag_size, max_indices)
+
+【并行模式】
+    grid: 1024
+    block: (32, 8) for CUDA, (64, 4) for ROCm
+
+【备注】
+    - mode: EmbeddingBagMode::SUM (0), MEAN (1), MAX (2)
+    - include_last_offset: 如果为 true，offsets 的最后一个元素应等于 numIndices
+    - offset2bag[i]: 第 i 个 index 属于哪个 bag
+
+
+--------------------------------
+_embedding_bag_dense_backward_cuda
+来源: aten/src/ATen/native/cuda/EmbeddingBag.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _embedding_bag_dense_backward_cuda(
+        grad: Tensor[numBags, D, float],
+        indices: Tensor[N, index_t],
+        offset2bag: Tensor[N, index_t],
+        bag_size: Tensor[numBags, index_t],
+        max_indices: Tensor[numBags, D, index_t] | Tensor[0],
+        num_weights: int64,
+        scale_grad_by_freq: bool,
+        mode: int64,
+        per_sample_weights: Optional[Tensor[N, float]],
+        padding_idx: int64
+    ) -> Tensor[num_weights, D]
+
+【算法】
+    grad = grad.contiguous()
+    
+    match mode:
+        EmbeddingBagMode::SUM | EmbeddingBagMode::MEAN:
+            return embedding_bag_backward_cuda_sum_avg(
+                grad, indices, offset2bag, bag_size,
+                num_weights, scale_grad_by_freq, mode,
+                per_sample_weights, padding_idx
+            )
+        
+        EmbeddingBagMode::MAX:
+            return embedding_bag_backward_cuda_max(
+                grad, max_indices, num_weights, padding_idx
+            )
+
+【备注】
+    - MEAN 模式不支持 per_sample_weights
+    - MAX 模式不支持 per_sample_weights
+
+
+--------------------------------
+_embedding_bag_per_sample_weights_backward_kernel
+来源: aten/src/ATen/native/cuda/EmbeddingBag.cu
+--------------------------------
+
+【签名】
+    @device
+    _embedding_bag_per_sample_weights_backward_kernel(
+        grad: Tensor[num_bags, embedding_features, scalar_t],
+        weight: Tensor[num_embeddings, embedding_features, scalar_t],
+        indices: Tensor[num_samples, index_t],
+        offset2bag: Tensor[num_samples, index_t],
+        output: Tensor[num_samples, scalar_t],
+        padding_idx: index_t
+    )
+
+【算法】
+    # 每个 warp 负责计算一个 sample 的梯度
+    # 即计算 grad[bag_idx] · weight[embedding_idx]
+    
+    parallel_for sample_idx in range(num_samples):  # warp级并行
+        bag_idx = offset2bag[sample_idx]
+        embedding_idx = indices[sample_idx]
+        
+        if embedding_idx != padding_idx:
+            result = 0
+            
+            for feature_idx in range(embedding_features):  # warp内并行
+                result += grad[bag_idx, feature_idx] * weight[embedding_idx, feature_idx]
+            
+            result = warp_reduce_sum(result)
+            
+            if thread_in_warp == 0:
+                output[sample_idx] = result
+
+【并行模式】
+    grid: (num_samples + warps_per_block - 1) / warps_per_block
+    block: 512
+    
+    - 每个 warp 处理一个 sample
+    - warp 内并行归约 dot product
+
+【备注】
+    - 计算 per_sample_weights 的梯度
+    - 使用 warp_reduce 提高效率
+
+
+--------------------------------
+_embedding_bag_per_sample_weights_backward_cuda
+来源: aten/src/ATen/native/cuda/EmbeddingBag.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _embedding_bag_per_sample_weights_backward_cuda(
+        grad: Tensor[num_bags, embedding_features, float],
+        weight: Tensor[num_embeddings, embedding_features, float],
+        indices: Tensor[num_samples, index_t],
+        offsets: Tensor[num_bags, index_t],
+        offset2bag: Tensor[num_samples, index_t],
+        mode: int64,
+        padding_idx: int64
+    ) -> Tensor[num_samples]
+
+    约束:
+    - mode == EmbeddingBagMode::SUM
+    - grad.dim == 2
+    - indices.dim == 1
+    - weight.dim == 2
+    - weight.size(1) == grad.size(1)
+
+【算法】
+    indices, offsets = promoteIndicesAndOffsets(indices, offsets)
+    
+    num_samples = indices.size(0)
+    embedding_features = grad.size(1)
+    
+    output = at::empty({num_samples}, grad.options())
+    
+    if num_samples == 0:
+        return output
+    
+    _embedding_bag_per_sample_weights_backward_kernel<<<grid, block>>>(
+        grad, weight, indices, offset2bag,
+        num_samples, embedding_features,
+        output, padding_idx
+    )
+    
+    return output
+
+【备注】
+    - 仅支持 SUM 模式
+    - 计算 per_sample_weights 参数的梯度

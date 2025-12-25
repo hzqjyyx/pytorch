@@ -1,0 +1,356 @@
+{
+  "version": 1,
+  "units": {
+    "Exceptions": {
+      "type": "group",
+      "hashes": {
+        "Exceptions.cpp": "6743a10a2b4eb170",
+        "Exceptions.h": "29e32be86aaca79a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDABlas": {
+      "type": "group",
+      "hashes": {
+        "CUDABlas.cpp": "7dd01f5f1e6343cb",
+        "CUDABlas.h": "f41f415df78ddad3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDAGeneratorImpl": {
+      "type": "group",
+      "hashes": {
+        "CUDAGeneratorImpl.cpp": "0e36e37728b8b032",
+        "CUDAGeneratorImpl.h": "8be2e0b7a029dcb9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Sleep": {
+      "type": "group",
+      "hashes": {
+        "Sleep.cu": "00d8c8a6d8f34e22",
+        "Sleep.h": "c83b5fc105ca7bf4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "jiterator": {
+      "type": "group",
+      "hashes": {
+        "jiterator.cu": "4561a2bb752a63a1",
+        "jiterator.h": "c9f3f44815c621ca"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDASparseDescriptors": {
+      "type": "group",
+      "hashes": {
+        "CUDASparseDescriptors.cpp": "6784b47cf403e701",
+        "CUDASparseDescriptors.h": "0a34174a1d01956c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "EmptyTensor": {
+      "type": "group",
+      "hashes": {
+        "EmptyTensor.cpp": "09150aaa973d0126",
+        "EmptyTensor.h": "c11a7c47aac2229f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PeerToPeerAccess": {
+      "type": "group",
+      "hashes": {
+        "PeerToPeerAccess.cpp": "badd25851963405b",
+        "PeerToPeerAccess.h": "d848a1ca39f3d58d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDAContext": {
+      "type": "group",
+      "hashes": {
+        "CUDAContext.cpp": "598fb923b3ab639b",
+        "CUDAContext.h": "220fbc11e28f3fad"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDAGraph": {
+      "type": "group",
+      "hashes": {
+        "CUDAGraph.cpp": "a30b1e386fe19cb1",
+        "CUDAGraph.h": "d6a12637c2a3520f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cub": {
+      "type": "group",
+      "hashes": {
+        "cub.cu": "fe5c2b3fe034c4d7",
+        "cub.h": "c212b9c6f6257d07"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CachingHostAllocator": {
+      "type": "group",
+      "hashes": {
+        "CachingHostAllocator.cpp": "04a910c3c34adfa8",
+        "CachingHostAllocator.h": "6f3b630b19f4ad6b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDASparseBlas": {
+      "type": "group",
+      "hashes": {
+        "CUDASparseBlas.cpp": "74c56f4f0e18008f",
+        "CUDASparseBlas.h": "2b0312d4ac7eff8c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nvrtc_stub/nvrtc_stub/ATenNVRTC": {
+      "type": "group",
+      "hashes": {
+        "nvrtc_stub/ATenNVRTC.cpp": "301920150529c0c4",
+        "nvrtc_stub/ATenNVRTC.h": "5e82bc78285ad667"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/detail/CUDAHooks": {
+      "type": "group",
+      "hashes": {
+        "detail/CUDAHooks.cpp": "dec3c35832b0bd3b",
+        "detail/CUDAHooks.h": "c19474fe68aa5391"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/detail/LazyNVRTC": {
+      "type": "group",
+      "hashes": {
+        "detail/LazyNVRTC.cpp": "1903d75bdd0b1c02",
+        "detail/LazyNVRTC.h": "9b110614ea0eefae"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "tunable/tunable/StreamTimer": {
+      "type": "group",
+      "hashes": {
+        "tunable/StreamTimer.cpp": "7f3fdd99b0a145a6",
+        "tunable/StreamTimer.h": "8de68415d1a14449"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "tunable/tunable/Tunable": {
+      "type": "group",
+      "hashes": {
+        "tunable/Tunable.cpp": "1e374b90dbd62a07",
+        "tunable/Tunable.h": "e0f166d61b4e05d9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AsmUtils.cuh": {
+      "type": "file",
+      "hashes": {
+        "AsmUtils.cuh": "2d0cd119839ede39"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DeviceUtils.cuh": {
+      "type": "file",
+      "hashes": {
+        "DeviceUtils.cuh": "33ac546de38905af"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cub_definitions.cuh": {
+      "type": "file",
+      "hashes": {
+        "cub_definitions.cuh": "9cbb88ebb1097a56"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ApplyGridUtils.cuh": {
+      "type": "file",
+      "hashes": {
+        "ApplyGridUtils.cuh": "3b39d7f1449ee137"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PhiloxUtils.cuh": {
+      "type": "file",
+      "hashes": {
+        "PhiloxUtils.cuh": "a559efb61b2e2078"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ScanUtils.cuh": {
+      "type": "file",
+      "hashes": {
+        "ScanUtils.cuh": "3a8954dea06c4c9b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NumericLimits.cuh": {
+      "type": "file",
+      "hashes": {
+        "NumericLimits.cuh": "3ee71fe12dd510bf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDATensorMethods.cuh": {
+      "type": "file",
+      "hashes": {
+        "CUDATensorMethods.cuh": "73242afc25be72a4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cub.cuh": {
+      "type": "file",
+      "hashes": {
+        "cub.cuh": "9ef22e99f6128120"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDAGraphsUtils.cuh": {
+      "type": "file",
+      "hashes": {
+        "CUDAGraphsUtils.cuh": "1fb02e6bce93245c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDAConfig.h.in": {
+      "type": "file",
+      "hashes": {
+        "CUDAConfig.h.in": "9788a0083102c63b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDAApplyUtils.cuh": {
+      "type": "file",
+      "hashes": {
+        "CUDAApplyUtils.cuh": "4113da0c299e08da"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Atomic.cuh": {
+      "type": "file",
+      "hashes": {
+        "Atomic.cuh": "458df3f604e0fd84"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/TensorInfo.cuh": {
+      "type": "file",
+      "hashes": {
+        "detail/TensorInfo.cuh": "3aad360fb03c6855"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/IntegerDivider.cuh": {
+      "type": "file",
+      "hashes": {
+        "detail/IntegerDivider.cuh": "a8f25f13f760d958"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/PhiloxCudaStateRaw.cuh": {
+      "type": "file",
+      "hashes": {
+        "detail/PhiloxCudaStateRaw.cuh": "0b9713cf64967cdb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/OffsetCalculator.cuh": {
+      "type": "file",
+      "hashes": {
+        "detail/OffsetCalculator.cuh": "fe0c57db27d25ea8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/IndexUtils.cuh": {
+      "type": "file",
+      "hashes": {
+        "detail/IndexUtils.cuh": "badef12cb8600e1c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/UnpackRaw.cuh": {
+      "type": "file",
+      "hashes": {
+        "detail/UnpackRaw.cuh": "64dc8c3fa182f876"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+--------------------------------
+_local_scalar_dense_cuda
+来源: aten/src/ATen/native/cuda/CUDAScalar.cu
+--------------------------------
+
+【签名】
+    _local_scalar_dense_cuda(self: Tensor[>=1]) -> Scalar
+
+    约束:
+    - self.numel() > 0
+
+【算法】
+    # Step 1: 创建固定内存的CPU tensor (避免可分页内存导致的隐式同步)
+    value = at::detail::empty_cpu(
+        size=[1],
+        dtype=self.dtype,
+        pin_memory=true
+    )
+
+    # Step 2: 异步拷贝并同步
+    stream = at::cuda::getCurrentCUDAStream()
+    at::cuda::memcpy_and_sync(
+        dst=value.data_ptr(),
+        src=self.data_ptr(),
+        count=sizeof(scalar_t),
+        kind=cudaMemcpyDeviceToHost,
+        stream=stream
+    )
+
+    # Step 3: 转换为Scalar
+    return Scalar(value[0])
+
+【备注】
+    - 支持所有标量类型: 整数、浮点、复数、half、bfloat16、float8、无符号整数等
+    - 使用固定内存避免CUDA库内部的隐式锁/同步
+    - ROCm平台: 如果设置环境变量 HIP_DOUBLE_SYNC_ON_LOCAL_SCALE_DENSE，则走同步模式 (self.cpu() + 读取)

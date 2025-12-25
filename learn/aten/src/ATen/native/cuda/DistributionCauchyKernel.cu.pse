@@ -1,0 +1,21 @@
+--------------------------------
+cauchy_kernel
+来源: aten/src/ATen/native/cuda/DistributionCauchyKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    cauchy_kernel(
+        iter: TensorIteratorBase,
+        median: float,
+        sigma: float,
+        gen: Optional[Generator]
+    )
+
+【算法】
+    generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator())
+    at::native::templates::cuda::cauchy_kernel(iter, median, sigma, generator)
+
+【备注】
+    - 注册到 cauchy_stub 分发器
+    - 实际采样逻辑由 templates::cuda::cauchy_kernel 实现（定义在 DistributionTemplates.h）

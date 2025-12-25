@@ -1,0 +1,29 @@
+--------------------------------
+shifted_chebyshev_polynomial_t_kernel_cuda
+来源: aten/src/ATen/native/cuda/shifted_chebyshev_polynomial_t.cu
+--------------------------------
+
+【签名】
+    @host→device
+    shifted_chebyshev_polynomial_t_kernel_cuda(iterator: TensorIterator)
+
+【算法】
+    if AT_USE_JITERATOR():
+        # JIT编译路径
+        opmath_jitted_gpu_kernel_with_scalars<shifted_chebyshev_polynomial_t_name, scalar_t, scalar_t>(
+            iterator, 
+            shifted_chebyshev_polynomial_t_string
+        )
+    else:
+        # 预编译路径
+        gpu_kernel_with_scalars(iterator, λ(x: scalar_t, n: scalar_t) -> scalar_t {
+            return shifted_chebyshev_polynomial_t_forward<scalar_t, true>(x, n)
+        })
+
+【并行模式】
+    elementwise: 对iterator中的每对(x, n)并行计算
+
+【备注】
+    - 支持 float 和 double 类型
+    - AT_USE_JITERATOR(): 运行时判断是否使用JIT编译kernel
+    - shifted_chebyshev_polynomial_t_forward: 实际的shifted Chebyshev多项式计算，定义在 ATen/native/Math.h

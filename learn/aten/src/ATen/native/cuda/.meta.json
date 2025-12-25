@@ -722,7 +722,8 @@
         "ForeachBinaryOpScalarTensor.cu": "f987f9bde7ef33ed"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "AdaptiveMaxPooling2d.cu": {
@@ -731,7 +732,8 @@
         "AdaptiveMaxPooling2d.cu": "8c6355454359f6ad"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Unique.cu": {
@@ -740,7 +742,8 @@
         "Unique.cu": "e123e931b1e98358"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "PointwiseOpsKernel.cu": {
@@ -749,7 +752,8 @@
         "PointwiseOpsKernel.cu": "b44b57db0e3b4b60"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "scaled_modified_bessel_k0.cu": {
@@ -758,7 +762,8 @@
         "scaled_modified_bessel_k0.cu": "2d5500cd2989ca47"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ReflectionPad.cu": {
@@ -767,7 +772,8 @@
         "ReflectionPad.cu": "4dd7d08d48c3419c"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ActivationHardswishKernel.cu": {
@@ -776,7 +782,8 @@
         "ActivationHardswishKernel.cu": "a0777335e123b9cd"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "UnarySignKernels.cu": {
@@ -785,7 +792,8 @@
         "UnarySignKernels.cu": "aff9074f77b12b48"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "DistributionCauchyKernel.cu": {
@@ -794,7 +802,8 @@
         "DistributionCauchyKernel.cu": "d4cd93eaf8d6b99c"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "DistributionBernoulli.cu": {
@@ -803,7 +812,8 @@
         "DistributionBernoulli.cu": "ce448ecd03a02de7"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "shifted_chebyshev_polynomial_t.cu": {
@@ -812,7 +822,8 @@
         "shifted_chebyshev_polynomial_t.cu": "b690f863cf92ffcf"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Randperm.cu": {
@@ -821,7 +832,8 @@
         "Randperm.cu": "e9b8e006c833ffe2"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "UnaryGeometricAsinhKernel.cu": {
@@ -830,7 +842,8 @@
         "UnaryGeometricAsinhKernel.cu": "f2ffb8d8403dca47"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "CUDAScalar.cu": {
@@ -839,7 +852,8 @@
         "CUDAScalar.cu": "fea9d15a7b299a87"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "CuFFTPlanCache.h": {
@@ -848,7 +862,8 @@
         "CuFFTPlanCache.h": "6e3f37122ee32a7f"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "UnaryGeometricCoshKernel.cu": {
@@ -857,7 +872,8 @@
         "UnaryGeometricCoshKernel.cu": "c044e5d32fccb96a"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "modified_bessel_i0.cu": {
@@ -866,7 +882,8 @@
         "modified_bessel_i0.cu": "0cc9ddfff4ddeeab"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "scaled_modified_bessel_k1.cu": {
@@ -875,7 +892,8 @@
         "scaled_modified_bessel_k1.cu": "b75953182c779f9c"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "RecordStream.cu": {
@@ -884,7 +902,8 @@
         "RecordStream.cu": "a161dbe684c9fd0a"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "DistributionUniform.cu": {
@@ -893,7 +912,8 @@
         "DistributionUniform.cu": "5763fda5967de4f9"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "shifted_chebyshev_polynomial_u.cu": {
@@ -902,7 +922,8 @@
         "shifted_chebyshev_polynomial_u.cu": "2d46702c21fbe0c5"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "EmbeddingBag.cu": {
@@ -911,7 +932,8 @@
         "EmbeddingBag.cu": "c6cfe1c6a7d98c0b"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "modified_bessel_i1.cu": {
@@ -920,7 +942,8 @@
         "modified_bessel_i1.cu": "85a8b520073d855e"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "TensorShape.cu": {
@@ -929,7 +952,8 @@
         "TensorShape.cu": "1834eae1f8f62596"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ReduceMomentKernel.cu": {
@@ -938,7 +962,8 @@
         "ReduceMomentKernel.cu": "259c039b52c3d44a"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "UnaryGeometricTanKernel.cu": {
@@ -956,7 +981,8 @@
         "fused_adamw_impl.cu": "2c03ca4e0320f372"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "MultiLabelMarginCriterion.cu": {

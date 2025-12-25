@@ -500,6 +500,256 @@
       "tasks": {
         "purpose": "done"
       }
+    },
+    "util/util/Optional": {
+      "type": "group",
+      "hashes": {
+        "util/Optional.cpp": "9f9da38eb4002e54",
+        "util/Optional.h": "2a4342bde674e0aa"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/StringUtil": {
+      "type": "group",
+      "hashes": {
+        "util/StringUtil.cpp": "247c4fa205fec29d",
+        "util/StringUtil.h": "66b5e9e89b420c03"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/thread_name": {
+      "type": "group",
+      "hashes": {
+        "util/thread_name.cpp": "2fa0da484f008822",
+        "util/thread_name.h": "7a46b29ce839e82b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/WaitCounter": {
+      "type": "group",
+      "hashes": {
+        "util/WaitCounter.cpp": "dee98ac00c35e1bc",
+        "util/WaitCounter.h": "adb254efad60e065"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/MathConstants": {
+      "type": "group",
+      "hashes": {
+        "util/MathConstants.cpp": "85e74d154b2d1031",
+        "util/MathConstants.h": "83265a54f63ac943"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/tempfile": {
+      "type": "group",
+      "hashes": {
+        "util/tempfile.cpp": "5b64732bc6eedc53",
+        "util/tempfile.h": "782b59fc8e572762"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/Unicode": {
+      "type": "group",
+      "hashes": {
+        "util/Unicode.cpp": "cfe55a7d2e587328",
+        "util/Unicode.h": "8420f0b0c11c008e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/Float8_e8m0fnu": {
+      "type": "group",
+      "hashes": {
+        "util/Float8_e8m0fnu.cpp": "f90a1cb9b625b3e7",
+        "util/Float8_e8m0fnu.h": "44573c2dee8f6d9f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/C++17": {
+      "type": "group",
+      "hashes": {
+        "util/C++17.cpp": "5ce496f25f1e1bd4",
+        "util/C++17.h": "05500401742460fb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/TypeCast": {
+      "type": "group",
+      "hashes": {
+        "util/TypeCast.cpp": "7defbee50a8617eb",
+        "util/TypeCast.h": "a94a7ff07dac0579"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/ThreadLocalDebugInfo": {
+      "type": "group",
+      "hashes": {
+        "util/ThreadLocalDebugInfo.cpp": "a53cd0355242fb91",
+        "util/ThreadLocalDebugInfo.h": "2f706e48209d4726"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/TypeList": {
+      "type": "group",
+      "hashes": {
+        "util/TypeList.cpp": "7505f3991dcd4443",
+        "util/TypeList.h": "600de9b2e25d8b21"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/NetworkFlow": {
+      "type": "group",
+      "hashes": {
+        "util/NetworkFlow.cpp": "baa5a4bd80fd4e1b",
+        "util/NetworkFlow.h": "e63edc0aa05635fb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/Metaprogramming": {
+      "type": "group",
+      "hashes": {
+        "util/Metaprogramming.cpp": "c3e6fdf83ca4f8dc",
+        "util/Metaprogramming.h": "456ae3c9b13e6e30"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/UniqueVoidPtr": {
+      "type": "group",
+      "hashes": {
+        "util/UniqueVoidPtr.cpp": "bcd8d94012cea200",
+        "util/UniqueVoidPtr.h": "e059dac7dccf296d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/int128": {
+      "type": "group",
+      "hashes": {
+        "util/int128.cpp": "bb4ce9f1b7f0a769",
+        "util/int128.h": "e81f8e6a9275f3c7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/SmallVector": {
+      "type": "group",
+      "hashes": {
+        "util/SmallVector.cpp": "9e4d6d5e40cf49a9",
+        "util/SmallVector.h": "bc45e83b06d348d5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/ApproximateClock": {
+      "type": "group",
+      "hashes": {
+        "util/ApproximateClock.cpp": "f8aa5eee0105444e",
+        "util/ApproximateClock.h": "4ec97a3e48dea89f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/complex_math": {
+      "type": "group",
+      "hashes": {
+        "util/complex_math.cpp": "62d7aa02b504f9a0",
+        "util/complex_math.h": "2be95800e81fa915"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/DynamicCounter": {
+      "type": "group",
+      "hashes": {
+        "util/DynamicCounter.cpp": "ab00c26326e5b84b",
+        "util/DynamicCounter.h": "a1ac260c619ffde0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/cuda/driver_api": {
+      "type": "group",
+      "hashes": {
+        "cuda/driver_api.cpp": "3efff729bcbea642",
+        "cuda/driver_api.h": "1aa5c03d1cfbe2ec"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/cuda/CUDAException": {
+      "type": "group",
+      "hashes": {
+        "cuda/CUDAException.cpp": "1b196badfd60a407",
+        "cuda/CUDAException.h": "1099754d8b2b1b13"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/cuda/CUDAStream": {
+      "type": "group",
+      "hashes": {
+        "cuda/CUDAStream.cpp": "eb50937ac132e7e9",
+        "cuda/CUDAStream.h": "2c9610d21a6f8c9b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/cuda/CUDAMiscFunctions": {
+      "type": "group",
+      "hashes": {
+        "cuda/CUDAMiscFunctions.cpp": "b2a49a4ea60eecd7",
+        "cuda/CUDAMiscFunctions.h": "5588c612543aa44f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/cuda/CUDACachingAllocator": {
+      "type": "group",
+      "hashes": {
+        "cuda/CUDACachingAllocator.cpp": "b26a23acc1660607",
+        "cuda/CUDACachingAllocator.h": "1af51a54e92e33e3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
     }
   }
 }

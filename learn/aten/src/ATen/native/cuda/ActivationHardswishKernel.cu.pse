@@ -1,0 +1,54 @@
+--------------------------------
+hardswish_kernel
+来源: aten/src/ATen/native/cuda/ActivationHardswishKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    hardswish_kernel(iter: TensorIterator)
+
+【算法】
+    # Hardswish: x * min(max(x + 3, 0), 6) / 6
+    
+    gpu_kernel(iter, lambda x:
+        x * min(max(x + 3, 0), 6) / 6
+    )
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: float, double, half, bfloat16
+    - 使用 opmath_t 进行计算以保持精度
+
+--------------------------------
+hardswish_backward_kernel
+来源: aten/src/ATen/native/cuda/ActivationHardswishKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    hardswish_backward_kernel(iter: TensorIterator)
+
+【算法】
+    # Hardswish 反向传播
+    # grad_input = grad_output * derivative
+    
+    gpu_kernel(iter, lambda grad, x:
+        if x < -3:
+            0
+        elif x <= 3:
+            grad * (x / 3 + 0.5)
+        else:
+            grad
+    )
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: float, double, half, bfloat16
+    - 分段导数: 
+      * x < -3: 导数为0
+      * -3 <= x <= 3: 导数为 x/3 + 0.5
+      * x > 3: 导数为1

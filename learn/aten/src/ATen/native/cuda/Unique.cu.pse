@@ -1,0 +1,263 @@
+--------------------------------
+compute_unique
+来源: aten/src/ATen/native/cuda/Unique.cu
+--------------------------------
+
+【签名】
+    compute_unique(
+        policy: thrust::execution_policy,
+        data: scalar_t*,                      # 输入数据，会被原地修改为unique结果
+        num_inp: int64,
+        sorted_indices: Tensor[num_inp, int64],
+        return_inverse: bool,
+        return_counts: bool,
+        options: TensorOptions,
+        equal: Callable,                      # 相等比较器
+        not_equal: Callable                   # 不等比较器
+    ) -> (inverse_indices: Tensor[num_inp], counts: Tensor[num_out], num_out: int64)
+
+【算法】
+    # Step 1: 计算 inverse_indices
+    if not return_inverse or num_inp == 0:
+        inverse_indices = empty({0}, options)
+    else:
+        # 使用 adjacent_difference 计算每个元素与前一个是否不同
+        inv_loc = empty({num_inp}, options)
+        inverse_indices = empty({num_inp}, options)
+        
+        thrust::adjacent_difference(policy, data, data + num_inp, inv_loc, not_equal)
+        inv_loc[0] = 0
+        
+        # inclusive_scan 得到每个位置的唯一索引
+        thrust::inclusive_scan(policy, inv_loc, inv_loc + num_inp, inv_loc)
+        
+        # scatter 将唯一索引映射回原始顺序
+        thrust::scatter(policy, inv_loc, inv_loc + num_inp, sorted_indices, inverse_indices)
+
+    # Step 2: 计算 unique 和 counts
+    if not return_counts:
+        num_out = thrust::unique(policy, data, data + num_inp, equal) - data
+        counts = empty({0}, options)
+    else:
+        # 使用 range 辅助数组计算每个unique值的数量
+        range = at::arange(0, num_inp + 1, options)
+        
+        # unique_by_key 同时处理 data 和 range
+        num_out = thrust::unique_by_key(policy, data, data + num_inp, range, equal).first - data
+        range[num_out] = num_inp
+        
+        # adjacent_difference 得到每个unique值的计数
+        counts = empty({num_out}, options)
+        thrust::adjacent_difference(policy, range + 1, range + num_out + 1, counts)
+
+    return (inverse_indices, counts, num_out)
+
+【并行模式】
+    使用 thrust 并行原语：
+    - adjacent_difference: 并行计算相邻差分
+    - inclusive_scan: 并行前缀和
+    - scatter: 并行散射
+    - unique / unique_by_key: 并行去重
+
+【备注】
+    - data 会被原地修改，前 num_out 个元素是unique结果
+    - inverse_indices 保持原始输入的索引顺序
+
+
+--------------------------------
+unique_dim_cuda_template
+来源: aten/src/ATen/native/cuda/Unique.cu
+--------------------------------
+
+【签名】
+    @host→device
+    unique_dim_cuda_template<scalar_t>(
+        self: Tensor[*shape],
+        dim: int64,
+        consecutive: bool,
+        return_inverse: bool,
+        return_counts: bool
+    ) -> (output: Tensor, inverse_indices: Tensor, counts: Tensor)
+
+【算法】
+    # Step 0: 处理空维度情况
+    num_zero_dims = count(sizes, 0)
+    
+    if self.size(dim) == 0:
+        assert num_zero_dims == 1, "多个零维度时无法应用unique"
+        return (empty(sizes), empty({0}, dtype=int64), empty({0}, dtype=int64))
+    
+    assert num_zero_dims == 0, "存在零维度且未被选中时无法应用unique"
+
+    # Step 1: 重排输入，将 dim 移到第一维
+    num_inp = self.size(dim)
+    input_flat = self.moveaxis(dim, 0).contiguous().view({num_inp, -1})
+    n = input_flat.size(1)  # 每行的元素数
+
+    # Step 2: 创建索引数组
+    indices = at::arange(0, num_inp, dtype=int64)
+    
+    # Step 3: 如果非连续模式，需要先排序
+    if not consecutive:
+        thrust::sort(policy, indices, indices + num_inp,
+            lambda (a, b):
+                # 逐元素比较两行
+                for i in range(n):
+                    lhs = input_flat[a, i]
+                    rhs = input_flat[b, i]
+                    if lhs < rhs: return true
+                    if lhs > rhs: return false
+                return false
+        )
+
+    # Step 4: 对索引应用 unique，使用自定义比较器
+    (inverse_indices, counts, num_out) = compute_unique(
+        policy, indices, num_inp, indices,
+        return_inverse, return_counts, options,
+        equal = lambda (a, b):
+            # 检查两个索引对应的行是否完全相等
+            for i in range(n):
+                if input_flat[a, i] != input_flat[b, i]:
+                    return false
+            return true,
+        not_equal = lambda (a, b):
+            # 检查两个索引对应的行是否有任意不等
+            for i in range(n):
+                if input_flat[a, i] != input_flat[b, i]:
+                    return 1
+            return 0
+    )
+    
+    indices.resize_(num_out)
+
+    # Step 5: 使用 unique 后的索引选择原始数据
+    return (self.index_select(dim, indices), inverse_indices, counts)
+
+【并行模式】
+    - thrust::sort: 并行排序，使用自定义逐行比较器
+    - compute_unique: 内部使用 thrust 并行原语
+    - 自定义 lambda 在 device 上并行执行
+
+【备注】
+    - consecutive=true 时跳过排序，只对连续重复去重
+    - consecutive=false 时先排序，对所有重复去重
+    - 通过操作索引数组并使用自定义比较器，避免直接比较多维数据
+
+
+--------------------------------
+_unique_cuda
+来源: aten/src/ATen/native/cuda/Unique.cu
+--------------------------------
+
+【签名】
+    _unique_cuda(
+        self: Tensor,
+        sorted: bool,
+        return_inverse: bool
+    ) -> (output: Tensor, inverse: Tensor)
+
+【算法】
+    AT_DISPATCH_V2(self.scalar_type(), "unique", [&] {
+        (output, inverse, _) = internal::unique_cuda_template<scalar_t>(self, false, return_inverse, false)
+        return (output, inverse)
+    }, AT_ALL_TYPES, kBool, kBFloat16, kHalf, AT_BAREBONES_UNSIGNED_TYPES)
+
+【备注】
+    - sorted 参数被忽略，CUDA实现总是排序（thrust缺少哈希表实现）
+    - 调用 internal::unique_cuda_template（定义在 UniqueCub.cuh）
+
+
+--------------------------------
+_unique2_cuda
+来源: aten/src/ATen/native/cuda/Unique.cu
+--------------------------------
+
+【签名】
+    _unique2_cuda(
+        self: Tensor,
+        sorted: bool,
+        return_inverse: bool,
+        return_counts: bool
+    ) -> (output: Tensor, inverse: Tensor, counts: Tensor)
+
+【算法】
+    AT_DISPATCH_V2(self.scalar_type(), "unique", [&] {
+        return internal::unique_cuda_template<scalar_t>(self, false, return_inverse, return_counts)
+    }, AT_ALL_TYPES, kBool, kBFloat16, kHalf, AT_BAREBONES_UNSIGNED_TYPES)
+
+【备注】
+    - sorted 参数被忽略，CUDA实现总是排序
+    - 调用 internal::unique_cuda_template（定义在 UniqueCub.cuh）
+
+
+--------------------------------
+unique_dim_cuda
+来源: aten/src/ATen/native/cuda/Unique.cu
+--------------------------------
+
+【签名】
+    unique_dim_cuda(
+        self: Tensor,
+        dim: int64,
+        sorted: bool,
+        return_inverse: bool,
+        return_counts: bool
+    ) -> (output: Tensor, inverse: Tensor, counts: Tensor)
+
+【算法】
+    AT_DISPATCH_V2(self.scalar_type(), "unique_dim", [&] {
+        return unique_dim_cuda_template<scalar_t>(self, dim, false, return_inverse, return_counts)
+    }, AT_ALL_TYPES, kBool, kBFloat16, kHalf, AT_BAREBONES_UNSIGNED_TYPES)
+
+【备注】
+    - consecutive=false，进行全局去重（含排序）
+
+
+--------------------------------
+unique_dim_consecutive_cuda
+来源: aten/src/ATen/native/cuda/Unique.cu
+--------------------------------
+
+【签名】
+    unique_dim_consecutive_cuda(
+        self: Tensor,
+        dim: int64,
+        return_inverse: bool,
+        return_counts: bool
+    ) -> (output: Tensor, inverse: Tensor, counts: Tensor)
+
+【算法】
+    AT_DISPATCH_V2(self.scalar_type(), "unique_dim", [&] {
+        return unique_dim_cuda_template<scalar_t>(self, dim, true, return_inverse, return_counts)
+    }, AT_ALL_TYPES, kBool, kBFloat16, kHalf, AT_BAREBONES_UNSIGNED_TYPES)
+
+【备注】
+    - consecutive=true，仅对连续重复去重（无排序）
+
+
+--------------------------------
+unique_consecutive_cuda
+来源: aten/src/ATen/native/cuda/Unique.cu
+--------------------------------
+
+【签名】
+    unique_consecutive_cuda(
+        self: Tensor,
+        return_inverse: bool,
+        return_counts: bool,
+        dim: Optional[int64]
+    ) -> (output: Tensor, inverse: Tensor, counts: Tensor)
+
+【算法】
+    if not dim.has_value():
+        # 无维度参数：展平后处理
+        AT_DISPATCH_V2(self.scalar_type(), "unique", [&] {
+            return internal::unique_cuda_template<scalar_t>(self, true, return_inverse, return_counts)
+        }, AT_ALL_TYPES, kBool, kBFloat16, kHalf, AT_BAREBONES_UNSIGNED_TYPES)
+    else:
+        # 有维度参数：调用 unique_dim_consecutive
+        return unique_dim_consecutive_cuda(self, dim.value(), return_inverse, return_counts)
+
+【备注】
+    - dim 为空时处理展平tensor
+    - dim 有值时调用 unique_dim_consecutive_cuda

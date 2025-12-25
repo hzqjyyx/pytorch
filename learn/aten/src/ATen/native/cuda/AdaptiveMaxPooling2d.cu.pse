@@ -1,0 +1,320 @@
+--------------------------------
+start_index
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling2d.cu:30
+--------------------------------
+
+【签名】
+    @device
+    start_index(a: int64, b: int64, c: int64) -> int64
+
+【算法】
+    return (a / b) * c + ((a % b) * c) / b
+
+--------------------------------
+end_index
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling2d.cu:34
+--------------------------------
+
+【签名】
+    @device
+    end_index(a: int64, b: int64, c: int64) -> int64
+
+【算法】
+    return 1 + ((a + 1) * c - 1) / b
+
+--------------------------------
+adaptivemaxpool
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling2d.cu:46
+--------------------------------
+
+【签名】
+    @device
+    adaptivemaxpool(
+        input: Tensor[D, isizeH, isizeW],
+        output: Tensor[D, osizeH, osizeW],
+        indices: Tensor[D, osizeH, osizeW, int64],
+        isizeH: int64, isizeW: int64,
+        osizeH: int64, osizeW: int64,
+        istrideD: int64, istrideH: int64, istrideW: int64
+    )
+
+【算法】
+    # 计算当前线程处理的平面索引
+    o_plane = blockIdx.x
+    i_plane = o_plane
+
+    # 每个线程处理输出中的多个位置
+    for oh in range(ostartH, osizeH, ostepH):
+        istartH = start_index(oh, osizeH, isizeH)
+        iendH = end_index(oh, osizeH, isizeH)
+        kH = iendH - istartH
+
+        for ow in range(ostartW, osizeW, ostepW):
+            istartW = start_index(ow, osizeW, isizeW)
+            iendW = end_index(ow, osizeW, isizeW)
+            kW = iendW - istartW
+
+            # 在输入窗口中找最大值
+            max_val = -Infinity
+            argmax = istartH * isizeW + istartW
+
+            for ih in range(kH):
+                for iw in range(kW):
+                    val = input[i_plane, istartH + ih, istartW + iw]
+                    if val > max_val or isnan(val):
+                        max_val = val
+                        argmax = (istartH + ih) * isizeW + (istartW + iw)
+
+            output[o_plane, oh, ow] = max_val
+            indices[o_plane, oh, ow] = argmax
+
+【并行模式】
+    grid: (sizeD, blocksH) 对于3D输入
+          (sizeB * sizeD, blocksH) 对于4D输入
+    block: (32, 8)
+
+    - o_plane (D维度): blockIdx.x 并行
+    - oh (H维度): blockIdx.y * blockDim.y + threadIdx.y 并行，步长为 blockDim.y * gridDim.y
+    - ow (W维度): threadIdx.x 并行，步长为 blockDim.x
+
+【备注】
+    - 每个线程负责输出的多个位置，使用步长循环
+    - NaN 值优先作为最大值（NaN 传播）
+
+--------------------------------
+adaptivemaxgradinput
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling2d.cu:112
+--------------------------------
+
+【签名】
+    @device
+    adaptivemaxgradinput(
+        gradInput: Tensor[D, isizeH, isizeW],
+        gradOutput: Tensor[D, osizeH, osizeW],
+        indices: Tensor[D, osizeH, osizeW, int64],
+        isizeH: int64, isizeW: int64,
+        osizeH: int64, osizeW: int64
+    )
+
+【算法】
+    o_plane = blockIdx.x
+    i_plane = o_plane
+
+    for oh in range(ostartH, osizeH, ostepH):
+        for ow in range(ostartW, osizeW, ostepW):
+            grad = gradOutput[o_plane, oh, ow]
+            argmax = indices[o_plane, oh, ow]
+            gradInput[i_plane, argmax] += grad
+
+【并行模式】
+    grid: (sizeD, blocksH) 对于3D输入
+          (sizeB * sizeD, blocksH) 对于4D输入
+    block: (32, 8)
+
+【备注】
+    - 非原子操作版本，理论上需要不同输出位置映射到不同输入位置
+    - 实际代码中注释表明这个版本有问题，总是使用原子版本
+
+--------------------------------
+atomicadaptivemaxgradinput
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling2d.cu:159
+--------------------------------
+
+【签名】
+    @device
+    atomicadaptivemaxgradinput(
+        gradInput: Tensor[D, isizeH, isizeW],
+        gradOutput: Tensor[D, osizeH, osizeW],
+        indices: Tensor[D, osizeH, osizeW, int64],
+        isizeH: int64, isizeW: int64,
+        osizeH: int64, osizeW: int64
+    )
+
+【算法】
+    o_plane = blockIdx.x
+    i_plane = o_plane
+
+    for oh in range(ostartH, osizeH, ostepH):
+        for ow in range(ostartW, osizeW, ostepW):
+            grad = gradOutput[o_plane, oh, ow]
+            argmax = indices[o_plane, oh, ow]
+            gpuAtomicAddNoReturn(&gradInput[i_plane, argmax], grad)
+
+【并行模式】
+    grid: (sizeD, blocksH) 对于3D输入
+          (sizeB * sizeD, blocksH) 对于4D输入
+    block: (32, 8)
+
+    优化:
+    - atomic_add: 避免多个线程更新同一输入位置时的冲突
+
+【备注】
+    - 使用原子加法处理梯度累加
+    - 适用于多个输出位置映射到同一输入位置的情况
+
+--------------------------------
+adaptive_max_pool2d_out_cuda
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling2d.cu:204
+--------------------------------
+
+【签名】
+    @host→device
+    adaptive_max_pool2d_out_cuda(
+        input: Tensor[*B, D, isizeH, isizeW],
+        output_size: [osizeH, osizeW],
+        output: Tensor[*B, D, osizeH, osizeW],
+        indices: Tensor[*B, D, osizeH, osizeW, int64]
+    )
+
+    约束:
+    - input, output, indices 必须在同一 GPU 上
+    - input.ndim == 3 或 4
+
+【算法】
+    if input.numel == 0:
+        return
+
+    osizeH, osizeW = output_size
+
+    # 确保输出连续
+    output_c = output if output.is_contiguous() else at::empty(output.sizes(), output.options())
+    indices_c = indices if indices.is_contiguous() else at::empty(indices.sizes(), indices.options())
+
+    if input.ndim == 3:
+        # 3D 输入: [D, H, W]
+        sizeD = input.size(0)
+        isizeH, isizeW = input.size(1), input.size(2)
+        istrideD, istrideH, istrideW = input.stride(0), input.stride(1), input.stride(2)
+
+        blocksH = max(1, 16 // sizeD)
+        grid = (sizeD, blocksH)
+        threads = (32, 8)
+
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), [&] {
+            adaptivemaxpool<<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                input_data, output_data, indices_data,
+                isizeH, isizeW, osizeH, osizeW,
+                istrideD, istrideH, istrideW)
+            C10_CUDA_KERNEL_LAUNCH_CHECK()
+        })
+
+    else:
+        # 4D 输入: [B, D, H, W]
+        input_ = input.contiguous()
+        sizeB, sizeD = input_.size(0), input_.size(1)
+        isizeH, isizeW = input_.size(2), input_.size(3)
+
+        istrideD = isizeH * isizeW
+        istrideH, istrideW = input_.stride(2), input_.stride(3)
+
+        blocksH = max(1, 16 // sizeD)
+        grid = (sizeB * sizeD, blocksH)
+        threads = (32, 8)
+
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input_.scalar_type(), [&] {
+            adaptivemaxpool<<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                input_data, output_data, indices_data,
+                isizeH, isizeW, osizeH, osizeW,
+                istrideD, istrideH, istrideW)
+            C10_CUDA_KERNEL_LAUNCH_CHECK()
+        })
+
+    # 拷贝回非连续输出
+    if not output.is_contiguous():
+        output.copy_(output_c)
+    if not indices.is_contiguous():
+        indices.copy_(indices_c)
+
+【备注】
+    - 3D 输入时，batch 和 channel 维度被视为 channel 维度
+    - 4D 输入时，batch 和 channel 维度被展平为单一并行维度
+    - blocksH 计算确保 GPU 占用率，最小值为 1
+    - 支持 float32, float16, bfloat16
+
+--------------------------------
+adaptive_max_pool2d_backward_out_cuda
+来源: aten/src/ATen/native/cuda/AdaptiveMaxPooling2d.cu:323
+--------------------------------
+
+【签名】
+    @host→device
+    adaptive_max_pool2d_backward_out_cuda(
+        gradOutput: Tensor[*B, D, osizeH, osizeW],
+        input: Tensor[*B, D, isizeH, isizeW],
+        indices: Tensor[*B, D, osizeH, osizeW, int64],
+        gradInput: Tensor[*B, D, isizeH, isizeW]
+    )
+
+    约束:
+    - 所有张量必须在同一 GPU 上
+    - input.ndim == 3 或 4
+
+【算法】
+    globalContext().alertNotDeterministic("adaptive_max_pool2d_backward_cuda")
+
+    if gradOutput.numel == 0:
+        return
+
+    atomic = true  # 总是使用原子操作
+
+    gradOutput_ = gradOutput.contiguous()
+    indices_ = indices.contiguous()
+    gradInput_c = gradInput if gradInput.is_contiguous() else at::empty(gradInput.sizes(), gradInput.options())
+
+    if input.ndim == 3:
+        # 3D 输入
+        sizeD = input.size(0)
+        isizeH, isizeW = input.size(1), input.size(2)
+        osizeH, osizeW = gradOutput_.size(1), gradOutput_.size(2)
+
+        gradInput_c.zero_()
+
+        blocksH = max(1, 16 // sizeD)
+        grid = (sizeD, blocksH)
+        threads = (32, 8)
+
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), [&] {
+            if atomic:
+                atomicadaptivemaxgradinput<<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                    gradInput_data, gradOutput_data, indices_data,
+                    isizeH, isizeW, osizeH, osizeW)
+            else:
+                adaptivemaxgradinput<<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                    gradInput_data, gradOutput_data, indices_data,
+                    isizeH, isizeW, osizeH, osizeW)
+            C10_CUDA_KERNEL_LAUNCH_CHECK()
+        })
+
+    else:
+        # 4D 输入
+        sizeB, sizeD = input.size(0), input.size(1)
+        isizeH, isizeW = input.size(2), input.size(3)
+        osizeH, osizeW = gradOutput_.size(2), gradOutput_.size(3)
+
+        gradInput_c.zero_()
+
+        blocksH = max(1, 16 // sizeD)
+        grid = (sizeB * sizeD, blocksH)
+        threads = (32, 8)
+
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), [&] {
+            if atomic:
+                atomicadaptivemaxgradinput<<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                    gradInput_data, gradOutput_data, indices_data,
+                    isizeH, isizeW, osizeH, osizeW)
+            else:
+                adaptivemaxgradinput<<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                    gradInput_data, gradOutput_data, indices_data,
+                    isizeH, isizeW, osizeH, osizeW)
+            C10_CUDA_KERNEL_LAUNCH_CHECK()
+        })
+
+    if not gradInput.is_contiguous():
+        gradInput.copy_(gradInput_c)
+
+【备注】
+    - atomic 总是为 true，因为非原子版本无法通过测试
+    - gradInput 在计算前被清零
+    - 代码中存在冗余：394-408行和456-469行的 else 分支实际调用同一 kernel
+    - 支持 float32, float16, bfloat16
+    - 非确定性操作，会触发全局警告

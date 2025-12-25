@@ -1,0 +1,38 @@
+--------------------------------
+cosh_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryGeometricCoshKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    cosh_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    dtype = iter.common_dtype()
+    
+    if dtype is complex:
+        # 复数类型: ComplexHalf, ComplexFloat, ComplexDouble
+        if USE_JITERATOR:
+            # JIT编译: std::cosh(a)
+            jitted_gpu_kernel<cosh_name, scalar_t, scalar_t, arity=1>(
+                iter, 
+                "template <typename T> T cosh_impl(T a) { return std::cosh(a); }"
+            )
+        else:
+            # 直接kernel
+            gpu_kernel(iter, λ(a: scalar_t) -> scalar_t {
+                return cosh(cast<opmath_t>(a))
+            })
+    else:
+        # 实数类型: Half, BFloat16, Float, Double
+        gpu_kernel(iter, λ(a: scalar_t) -> scalar_t {
+            return cosh(a)
+        })
+
+【并行模式】
+    elementwise (via TensorIterator)
+
+【备注】
+    - 复数类型需要 opmath_t 提升精度计算
+    - JIT 路径在编译时生成 kernel，避免模板实例化开销
+    - 注册到 cosh_stub 分发表

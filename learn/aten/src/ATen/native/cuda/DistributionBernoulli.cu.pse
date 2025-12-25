@@ -1,0 +1,40 @@
+--------------------------------
+bernoulli_tensor_kernel:
+来源: aten/src/ATen/native/cuda/DistributionBernoulli.cu
+--------------------------------
+
+【签名】
+    bernoulli_tensor_kernel(
+        self: Tensor,
+        p_: Tensor,
+        gen_: Optional[Generator]
+    )
+
+【算法】
+    generator = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator())
+    at::native::templates::cuda::bernoulli_kernel(self, p_, generator)
+
+【备注】
+    - 使用概率张量 p_ 的逐元素值进行伯努利采样
+    - bernoulli_kernel: 实际的 CUDA kernel，见 DistributionTemplates.h
+
+--------------------------------
+bernoulli_scalar_kernel:
+来源: aten/src/ATen/native/cuda/DistributionBernoulli.cu
+--------------------------------
+
+【签名】
+    bernoulli_scalar_kernel(
+        self: Tensor,
+        p: float,
+        gen: Optional[Generator]
+    )
+
+【算法】
+    iter = TensorIterator::borrowing_nullary_op(self)
+    generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator())
+    at::native::templates::cuda::bernoulli_kernel(iter, p, generator)
+
+【备注】
+    - 使用标量概率 p 对整个张量进行伯努利采样
+    - bernoulli_kernel: 实际的 CUDA kernel，见 DistributionTemplates.h

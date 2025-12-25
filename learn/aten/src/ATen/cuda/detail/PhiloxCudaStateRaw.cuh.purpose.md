@@ -1,0 +1,8 @@
+- **PhiloxCudaState 结构体**：存储 CUDA 随机数生成器的状态值，作为内核参数传递
+- **两种初始化模式**：
+  - 非图捕获模式：直接存储 seed 和 offset 的值
+  - 图捕获模式：存储指向这些值的指针，支持动态更新
+- **Payload 联合体**：用 `uint64_t` 值或 `int64_t*` 指针灵活表示 seed 和 offset
+- **设计目的**：支持 CUDA Graph 安全的 RNG 状态管理，允许 JIT codegen 直接复制原始定义
+- **访问方式**：公开成员变量，可被 `at::cuda::philox::unpack` 直接访问
+- **状态标记**：`captured_` 标记当前是否处于图捕获状态，`offset_intragraph_` 记录图内偏移量
