@@ -1,0 +1,137 @@
+--------------------------------
+smooth_l1_kernel_cuda
+来源: aten/src/ATen/native/cuda/BinaryMiscOpsKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    smooth_l1_kernel_cuda(iter: TensorIteratorBase, beta: double)
+
+【算法】
+    # 逐元素计算 smooth L1 loss
+    # iter 遍历两个输入 tensor (a, b)
+    
+    beta_val = beta as scalar_t
+    
+    for each (a, b) in iter:
+        z = abs(a - b)
+        output = where(z < beta_val, 
+                      0.5 * z * z / beta_val,
+                      z - 0.5 * beta_val)
+
+【并行模式】
+    elementwise
+    调用: gpu_kernel(iter, lambda)
+
+【备注】
+    - 支持 float16, bfloat16, float32, float64
+    - beta 控制平滑区域大小
+
+--------------------------------
+huber_kernel_cuda
+来源: aten/src/ATen/native/cuda/BinaryMiscOpsKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    huber_kernel_cuda(iter: TensorIterator, delta: double)
+
+【算法】
+    # 逐元素计算 Huber loss
+    
+    delta_val = delta as scalar_t
+    
+    for each (a, b) in iter:
+        z = abs(a - b)
+        output = where(z < delta_val,
+                      0.5 * z * z,
+                      delta_val * (z - 0.5 * delta_val))
+
+【并行模式】
+    elementwise
+    调用: gpu_kernel(iter, lambda)
+
+【备注】
+    - 支持 float16, bfloat16, float32, float64
+    - delta 控制二次区域与线性区域的分界
+
+--------------------------------
+mse_kernel_cuda
+来源: aten/src/ATen/native/cuda/BinaryMiscOpsKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    mse_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    # 逐元素计算均方误差
+    
+    for each (a, b) in iter:
+        diff = a - b
+        output = diff * diff
+
+【并行模式】
+    elementwise
+    调用: gpu_kernel(iter, lambda)
+
+【备注】
+    - 支持 float16, bfloat16, float32, float64
+
+--------------------------------
+xlogy_kernel_cuda
+来源: aten/src/ATen/native/cuda/BinaryMiscOpsKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    xlogy_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    # 逐元素计算 x * log(y)
+    
+    for each (x, y) in iter:
+        if isnan(y):
+            output = NAN
+        elif x == 0:
+            output = 0
+        else:
+            output = x * log(y)
+
+【并行模式】
+    elementwise
+    调用: gpu_kernel_with_scalars(iter, lambda)
+
+【备注】
+    - 支持 float16, bfloat16, float32, float64
+    - 支持 scalar 输入
+    - 特殊情况: 0 * log(y) = 0 (即使 y=0)
+
+--------------------------------
+xlog1py_kernel_cuda
+来源: aten/src/ATen/native/cuda/BinaryMiscOpsKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    xlog1py_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    # 逐元素计算 x * log1p(y) = x * log(1 + y)
+    
+    for each (x, y) in iter:
+        if isnan(y):
+            output = NAN
+        elif x == 0:
+            output = 0
+        else:
+            output = x * log1p(y)
+
+【并行模式】
+    elementwise
+    调用: gpu_kernel_with_scalars(iter, lambda)
+
+【备注】
+    - 支持 float16, bfloat16, float32, float64
+    - 支持 scalar 输入
+    - 使用 log1p 提高数值稳定性

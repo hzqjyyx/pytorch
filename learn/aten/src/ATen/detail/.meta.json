@@ -40,6 +40,92 @@
       "tasks": {
         "purpose": "done"
       }
+    },
+    "MPSHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "MPSHooksInterface.cpp": "3e8f02c3a36a0ca2",
+        "MPSHooksInterface.h": "823d8972fdf6d39a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "HIPHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "HIPHooksInterface.cpp": "749a27cc332152e8",
+        "HIPHooksInterface.h": "a632addcb55d36bd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MTIAHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "MTIAHooksInterface.cpp": "4567df6b77fba035",
+        "MTIAHooksInterface.h": "99ecdb9527738d7a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "IPUHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "IPUHooksInterface.cpp": "6594453b3075241c",
+        "IPUHooksInterface.h": "ebdf60cb86666bc1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "HPUHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "HPUHooksInterface.cpp": "331a007390b412f3",
+        "HPUHooksInterface.h": "0bd9c5badab6cd27"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MetaGuardImpl.cpp": {
+      "type": "file",
+      "hashes": {
+        "MetaGuardImpl.cpp": "e737a4fd5c5f6d2a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AcceleratorHooksInterface.h": {
+      "type": "file",
+      "hashes": {
+        "AcceleratorHooksInterface.h": "eb3d344fd83088bd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CPUGuardImpl.cpp": {
+      "type": "file",
+      "hashes": {
+        "CPUGuardImpl.cpp": "bc50be6a052712a6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FunctionTraits.h": {
+      "type": "file",
+      "hashes": {
+        "FunctionTraits.h": "857c64c4c1046257"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
     }
   }
 }

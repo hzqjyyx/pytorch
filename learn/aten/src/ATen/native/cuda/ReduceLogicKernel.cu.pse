@@ -1,0 +1,56 @@
+--------------------------------
+and_kernel_cuda
+来源: aten/src/ATen/native/cuda/ReduceLogicKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    and_kernel_cuda(iter: TensorIterator)
+
+【算法】
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        kHalf, kBFloat16, kBool, iter.common_dtype(), "and_cuda", [&]() {
+            gpu_reduce_kernel<scalar_t, bool>(
+                iter,
+                func_wrapper<bool>([] GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+                    return (static_cast<bool>(a) && static_cast<bool>(b));
+                }),
+                true);
+        });
+
+【并行模式】
+    reduce(op=and, init=true)
+
+【备注】
+    - 支持所有数值类型、复数类型、half、bfloat16、bool
+    - 归约操作：逻辑与，初始值为 true
+    - 实际并行归约由 gpu_reduce_kernel 实现
+
+
+--------------------------------
+or_kernel_cuda
+来源: aten/src/ATen/native/cuda/ReduceLogicKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    or_kernel_cuda(iter: TensorIterator)
+
+【算法】
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        kHalf, kBFloat16, kBool, iter.common_dtype(), "or_cuda", [&]() {
+            gpu_reduce_kernel<scalar_t, bool>(
+                iter,
+                func_wrapper<bool>([] GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+                    return (static_cast<bool>(a) || static_cast<bool>(b));
+                }),
+                false);
+        });
+
+【并行模式】
+    reduce(op=or, init=false)
+
+【备注】
+    - 支持所有数值类型、复数类型、half、bfloat16、bool
+    - 归约操作：逻辑或，初始值为 false
+    - 实际并行归约由 gpu_reduce_kernel 实现

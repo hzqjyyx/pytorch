@@ -1,0 +1,296 @@
+--------------------------------
+bitwise_not_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryOpsKernel.cu:23-35
+--------------------------------
+
+【签名】
+    @host→device
+    bitwise_not_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    if iter.dtype() == Bool:
+        gpu_kernel(iter, λ(a: bool) -> bool: !a)
+    else:
+        # 整数类型
+        gpu_kernel(iter, λ(a: integral_t) -> integral_t: ~a)
+
+【并行模式】
+    elementwise
+
+--------------------------------
+exp_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryOpsKernel.cu:37-69
+--------------------------------
+
+【签名】
+    @host→device
+    exp_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    if iter.common_dtype() is complex:
+        if AT_USE_JITERATOR:
+            jitted_gpu_kernel(iter, "template<T> T exp_kernel(T x) { return std::exp(x); }")
+        else:
+            gpu_kernel(iter, λ(a: complex_t) -> complex_t: std::exp(opmath_t(a)))
+    else:
+        gpu_kernel(iter, λ(a: float_t) -> float_t: std::exp(a))
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 复数类型时可选择 JIT 编译或直接 lambda
+    - 非 JIT 模式下使用 opmath_t 提升精度
+
+--------------------------------
+expm1_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryOpsKernel.cu:71-80
+--------------------------------
+
+【签名】
+    @host→device
+    expm1_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    y = expm1(x)
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持浮点和复数类型 (包括 BFloat16, Half)
+
+--------------------------------
+rsqrt_wrapper (设备函数)
+来源: aten/src/ATen/native/cuda/UnaryOpsKernel.cu:83-93
+--------------------------------
+
+【签名】
+    @host @device
+    rsqrt_wrapper<T>(v: T) -> T
+
+【算法】
+    if T is complex:
+        return 1 / sqrt(v)
+    else:
+        return ::rsqrt(v)
+
+【备注】
+    - 复数类型手动实现 1/sqrt
+    - 实数类型调用 CUDA 内置 rsqrt
+
+--------------------------------
+rsqrt_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryOpsKernel.cu:95-132
+--------------------------------
+
+【签名】
+    @host→device
+    rsqrt_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    if iter.common_dtype() is complex:
+        if AT_USE_JITERATOR:
+            jitted_gpu_kernel(iter, "template<T> T rsqrt_kernel(T x) { return T{1} / std::sqrt(x); }")
+        else:
+            gpu_kernel(iter, λ(a: complex_t) -> complex_t: rsqrt_wrapper(opmath_t(a)))
+    else:
+        gpu_kernel(iter, λ(a: float_t) -> float_t: rsqrt_wrapper(a))
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 复数类型时可选择 JIT 编译或直接 lambda
+    - 非 JIT 模式下使用 opmath_t 提升精度
+
+--------------------------------
+sqrt_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryOpsKernel.cu:134-166
+--------------------------------
+
+【签名】
+    @host→device
+    sqrt_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    if iter.common_dtype() is complex:
+        if AT_USE_JITERATOR:
+            jitted_gpu_kernel(iter, "template<T> T sqrt_kernel(T x) { return std::sqrt(x); }")
+        else:
+            gpu_kernel(iter, λ(a: complex_t) -> complex_t: sqrt(opmath_t(a)))
+    else:
+        gpu_kernel(iter, λ(a: float_t) -> float_t: std::sqrt(a))
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 复数类型时可选择 JIT 编译或直接 lambda
+    - 非 JIT 模式下使用 opmath_t 提升精度
+
+--------------------------------
+clamp_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryOpsKernel.cu:168-181
+--------------------------------
+
+【签名】
+    @host→device
+    clamp_kernel_cuda(iter: TensorIteratorBase, min_value: Scalar, max_value: Scalar)
+
+【算法】
+    lower = min_value.to<scalar_t>()
+    upper = max_value.to<scalar_t>()
+    
+    gpu_kernel(iter, λ(v: scalar_t) -> scalar_t:
+        if _isnan(v):
+            return v
+        else:
+            return min(max(v, lower), upper)
+    )
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 显式处理 NaN 传播 (ROCm 不自动传播)
+
+--------------------------------
+clamp_min_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryOpsKernel.cu:183-195
+--------------------------------
+
+【签名】
+    @host→device
+    clamp_min_kernel_cuda(iter: TensorIteratorBase, min_value: Scalar)
+
+【算法】
+    lower = min_value.to<scalar_t>()
+    
+    gpu_kernel(iter, λ(v: scalar_t) -> scalar_t:
+        if _isnan(v):
+            return v
+        else:
+            return max(v, lower)
+    )
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 显式处理 NaN 传播 (ROCm 不自动传播)
+
+--------------------------------
+clamp_max_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryOpsKernel.cu:197-209
+--------------------------------
+
+【签名】
+    @host→device
+    clamp_max_kernel_cuda(iter: TensorIteratorBase, max_value: Scalar)
+
+【算法】
+    upper = max_value.to<scalar_t>()
+    
+    gpu_kernel(iter, λ(v: scalar_t) -> scalar_t:
+        if _isnan(v):
+            return v
+        else:
+            return min(v, upper)
+    )
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 显式处理 NaN 传播 (ROCm 不自动传播)
+
+--------------------------------
+_nan_to_num_replace (设备函数)
+来源: aten/src/ATen/native/cuda/UnaryOpsKernel.cu:211-220
+--------------------------------
+
+【签名】
+    @host @device
+    _nan_to_num_replace<T>(
+        a: T,
+        nan_replacement: T,
+        pos_inf_replacement: T,
+        neg_inf_replacement: T
+    ) -> T
+
+【算法】
+    if _isnan(a):
+        return nan_replacement
+    else if a == +inf:
+        return pos_inf_replacement
+    else if a == -inf:
+        return neg_inf_replacement
+    else:
+        return a
+
+--------------------------------
+nan_to_num_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryOpsKernel.cu:222-262
+--------------------------------
+
+【签名】
+    @host→device
+    nan_to_num_kernel_cuda(
+        iter: TensorIteratorBase,
+        nan: Optional[double] = None,
+        pos_inf: Optional[double] = None,
+        neg_inf: Optional[double] = None
+    )
+
+【算法】
+    if iter.dtype() is complex:
+        # 对实部和虚部分别处理
+        nan_repl = nan.value_or(0.0)
+        posinf_repl = pos_inf.value_or(value_t::max())
+        neginf_repl = neg_inf.value_or(value_t::lowest())
+        
+        gpu_kernel(iter, λ(a: complex_t) -> complex_t:
+            real = _nan_to_num_replace(a.real(), nan_repl, posinf_repl, neginf_repl)
+            imag = _nan_to_num_replace(a.imag(), nan_repl, posinf_repl, neginf_repl)
+            return complex(real, imag)
+        )
+    else:
+        # 浮点类型
+        nan_repl = nan.value_or(0.0)
+        posinf_repl = pos_inf.value_or(scalar_t::max())
+        neginf_repl = neg_inf.value_or(scalar_t::lowest())
+        
+        gpu_kernel(iter, λ(a: scalar_t) -> scalar_t:
+            return _nan_to_num_replace(a, nan_repl, posinf_repl, neginf_repl)
+        )
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 复数类型需对实部和虚部分别替换
+    - 默认替换值: nan→0, +inf→max, -inf→lowest
+
+--------------------------------
+frexp_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryOpsKernel.cu:264-276
+--------------------------------
+
+【签名】
+    @host→device
+    frexp_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    gpu_kernel_multiple_outputs(iter, λ(a: float_t) -> (float_t, int32):
+        exponent: int32
+        mantissa = std::frexp(a, &exponent)
+        return (mantissa, exponent)
+    )
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 输出两个 tensor: mantissa (尾数) 和 exponent (指数)
+    - 支持 Half, BFloat16 和标准浮点类型

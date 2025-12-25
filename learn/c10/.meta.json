@@ -450,6 +450,56 @@
       "tasks": {
         "purpose": "done"
       }
+    },
+    "util/util/Exception": {
+      "type": "group",
+      "hashes": {
+        "util/Exception.cpp": "25dcd6b7ee528ef2",
+        "util/Exception.h": "eab3ff710ddc7a5c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/Backtrace": {
+      "type": "group",
+      "hashes": {
+        "util/Backtrace.cpp": "61033678241e7416",
+        "util/Backtrace.h": "9595e16b8a73e61f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/Float8_e5m2": {
+      "type": "group",
+      "hashes": {
+        "util/Float8_e5m2.cpp": "be367d2c27748ca4",
+        "util/Float8_e5m2.h": "8f339b4f7ba8cdf7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/LeftRight": {
+      "type": "group",
+      "hashes": {
+        "util/LeftRight.cpp": "4fda17b47775d45b",
+        "util/LeftRight.h": "a7569901dda7a332"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/util/Float8_e4m3fnuz": {
+      "type": "group",
+      "hashes": {
+        "util/Float8_e4m3fnuz.cpp": "907af2325483c505",
+        "util/Float8_e4m3fnuz.h": "bdbb037adf0c7c61"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
     }
   }
 }

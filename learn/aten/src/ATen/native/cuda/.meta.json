@@ -682,7 +682,8 @@
         "BinaryMiscOpsKernels.cu": "b9a72b70683a7c64"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "UnaryOpsKernel.cu": {
@@ -691,7 +692,8 @@
         "UnaryOpsKernel.cu": "ae9e870121de229f"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ReduceLogicKernel.cu": {
@@ -700,7 +702,8 @@
         "ReduceLogicKernel.cu": "f19464d164f9baa8"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "bessel_y0.cu": {
@@ -709,7 +712,8 @@
         "bessel_y0.cu": "5789bfea319a04d7"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ForeachBinaryOpScalarTensor.cu": {

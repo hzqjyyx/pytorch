@@ -1,0 +1,25 @@
+--------------------------------
+bessel_y0_kernel_cuda
+来源: aten/src/ATen/native/cuda/bessel_y0.cu
+--------------------------------
+
+【签名】
+    @host→device
+    bessel_y0_kernel_cuda(iterator: TensorIteratorBase)
+
+【算法】
+    if AT_USE_JITERATOR():
+        # 使用JIT编译的GPU kernel
+        jitted_gpu_kernel<bessel_y0_name, scalar_t, scalar_t, 1>(iterator, bessel_y0_string)
+    else:
+        # 使用预编译的GPU kernel
+        gpu_kernel(iterator, lambda a: bessel_y0_forward(a))
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: float, double
+    - bessel_y0_forward: 第二类贝塞尔函数Y₀的实际数值计算
+    - 通过 REGISTER_DISPATCH 注册为 special_bessel_y0_stub 的 CUDA 实现
+    - JIT路径使用 bessel_y0_string (外部定义的公式字符串)
