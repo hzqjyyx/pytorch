@@ -1,0 +1,427 @@
+--------------------------------
+mode_kernel_impl
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cpp
+--------------------------------
+
+【签名】
+    mode_kernel_impl(
+        values: Tensor[*],           # 输出: 众数值
+        indices: Tensor[*, int64],   # 输出: 众数首次出现索引
+        self: Tensor[*],             # 输入张量
+        dim: int64,                  # 计算众数的维度
+        keepdim: bool                # 是否保留维度
+    )
+
+【算法】
+    # Step 1: 准备输出形状 (dim维度变为1)
+    output_shape = self.shape
+    output_shape[dim] = 1
+    
+    slice_size = self.size(dim)
+    slices = self.numel / slice_size
+    
+    # Step 2: 调整输出张量维度
+    if not keepdim:
+        values.unsqueeze_(dim)
+        indices.unsqueeze_(dim)
+    
+    at::native::resize_output(values, output_shape)
+    at::native::resize_output(indices, output_shape)
+    
+    # Step 3: 退化情况 (dim维度长度为1)
+    if slice_size == 1:
+        values.copy_(self)
+        indices.fill_(0)
+        if not keepdim:
+            values.squeeze_(dim)
+            indices.squeeze_(dim)
+        return
+    
+    # Step 4: 转置并连续化
+    # 将 dim 移到最后一维，便于按行处理
+    transposed = self.transpose(dim, self.dim - 1)
+    contiguous = transposed.contiguous()
+    
+    values_transposed = values.transpose(dim, self.dim - 1)
+    indices_transposed = indices.transpose(dim, self.dim - 1)
+    
+    # Step 5: 选择kernel实现
+    if slice_size <= 2 * MAX_BLOCK_SIZE and
+       slices <= MAX_GRID_SIZE³ and
+       canUse32BitIndexMath(self):
+        # 小规模: 使用融合kernel
+        launch_fused_mode_kernel(
+            values_transposed, indices_transposed, contiguous, 
+            slice_size, slices)
+    else:
+        # 大规模: 使用Thrust实现
+        if transposed.is_same(contiguous):
+            contiguous = contiguous.clone()  # 避免修改原始数据
+        
+        launch_apply_mode_kernel(
+            values_transposed, indices_transposed, contiguous, 
+            dim, self.dim)
+    
+    # Step 6: 恢复维度
+    if not keepdim:
+        values.squeeze_(dim)
+        indices.squeeze_(dim)
+
+【备注】
+    - MAX_BLOCK_SIZE: ROCm=256, CUDA=1024
+    - MAX_GRID_SIZE: 65535 (compute capability >= 2.0)
+    - 融合kernel适用于中小规模数据
+    - Thrust实现适用于大规模或无法使用32位索引的情况
+
+--------------------------------
+launch_fused_mode_kernel
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_fused_mode_kernel(
+        values: Tensor[slices, 1, *],
+        indices: Tensor[slices, 1, *, int64],
+        self: Tensor[slices, slice_size, *],
+        slice_size: int64,
+        slices: int64
+    )
+
+【算法】
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, self.scalar_type(), "cuda_mode", [&] {
+        fused_mode<scalar_t>(values, indices, self, slice_size, slices)
+    })
+
+【备注】
+    - 类型分发到 fused_mode 模板函数
+    - 支持所有数值类型、bool、bfloat16、half
+
+--------------------------------
+fused_mode<scalar_t>
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    fused_mode<scalar_t>(
+        values: Tensor[slices, 1, *],
+        indices: Tensor[slices, 1, *, int64],
+        self: Tensor[slices, slice_size, *],
+        slice_size: int64,
+        slices: int64
+    )
+
+【算法】
+    # 创建TensorInfo用于kernel访问
+    ti_values = cuda::detail::getTensorInfo<scalar_t, unsigned int>(values)
+    ti_indices = cuda::detail::getTensorInfo<int64_t, unsigned int>(indices)
+    
+    # 计算grid配置: 每个block处理一个slice
+    grid = getGridFromTiles(slices)
+    
+    # 计算block配置: 向上取2的幂次
+    ceilPowerOf2 = nextHighestPowerOf2(slice_size)
+    
+    # 根据大小选择模板实例化
+    match ceilPowerOf2:
+        2048:
+            handle_fused_mode<2048, scalar_t>(grid, self, ti_values, ti_indices, slice_size, slices)
+        1024 | 512 | 256:
+            handle_fused_mode<1024, scalar_t>(grid, self, ti_values, ti_indices, slice_size, slices)
+        128 | 64 | 32 | 16 | 8 | 4 | 2:
+            handle_fused_mode<128, scalar_t>(grid, self, ti_values, ti_indices, slice_size, slices)
+        default:
+            assert(false)
+
+【并行模式】
+    grid: (slices_x, slices_y, slices_z)  # 每个block处理一个slice
+    block: size/2 threads                  # 每个线程处理2个元素
+
+【备注】
+    - 编译时间权衡: 仅实例化3个size模板 (2048, 1024, 128)
+    - shared_memory: sizeof(scalar_t)*size + 2*size*sizeof(unsigned int)
+
+--------------------------------
+handle_fused_mode<size, scalar_t>
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    handle_fused_mode<size, scalar_t>(
+        grid: dim3,
+        self: Tensor[slices, slice_size, *],
+        ti_values: TensorInfo<scalar_t, unsigned int>,
+        ti_indices: TensorInfo<int64_t, unsigned int>,
+        slice_size: int64,
+        slices: int64
+    )
+
+【算法】
+    num_threads = size / 2
+    warp_size = at::cuda::warp_size()
+    
+    # 验证配置
+    assert num_threads % warp_size == 0
+    assert num_threads <= cuda_utils::kCUDABlockReduceMaxThreads
+    
+    # 计算shared memory需求
+    memsize = sizeof(scalar_t) * size + 2 * size * sizeof(unsigned int)
+    
+    # 启动kernel
+    compute_mode<scalar_t, size>
+        <<<grid, num_threads, memsize, at::cuda::getCurrentCUDAStream()>>>(
+            self.const_data_ptr<scalar_t>(), 
+            ti_values, 
+            ti_indices, 
+            slice_size, 
+            slices)
+
+【备注】
+    - compute_mode: 定义在 TensorModeKernel.cuh 中的device kernel
+
+--------------------------------
+launch_apply_mode_kernel
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_apply_mode_kernel(
+        values: Tensor[*],
+        indices: Tensor[*, int64],
+        self: Tensor[*],           # 已连续化并转置
+        dim: int64,
+        ndim: int64
+    )
+
+【算法】
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, self.scalar_type(), "cuda_mode", [&] {
+        position = vector<int64_t>(ndim - 1, 0)
+        apply_mode<scalar_t>(values, indices, self, position, dim, 0)
+    })
+
+【备注】
+    - 递归遍历除最后一维外的所有维度
+    - position: 当前处理的多维索引
+
+--------------------------------
+apply_mode<scalar_t>
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    apply_mode<scalar_t>(
+        values: Tensor[*],
+        indices: Tensor[*, int64],
+        self: Tensor[*],           # 连续存储
+        position: vector<int64_t>, # 当前多维索引
+        dim: int64,
+        curDim: int64              # 当前递归层级
+    )
+
+【算法】
+    ndim = ensure_nonempty_dim(self.dim)
+    
+    if curDim == ndim - 1:
+        # 到达最内层维度，计算该slice的mode
+        calculate_mode<scalar_t>(values, indices, self, position, dim)
+    else:
+        # 递归遍历当前维度
+        for i in range(self.size(curDim)):
+            position[curDim] = i
+            apply_mode<scalar_t>(values, indices, self, position, dim, curDim + 1)
+
+【备注】
+    - 递归深度: ndim - 1
+    - 叶子节点调用 calculate_mode 处理一维数组
+
+--------------------------------
+calculate_mode<scalar_t>
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    calculate_mode<scalar_t>(
+        values: Tensor[*],
+        indices: Tensor[*, int64],
+        self: Tensor[*],           # 连续存储
+        position: vector<int64_t>, # 目标slice的多维索引
+        dim: int64
+    )
+
+【算法】
+    # Step 1: 计算输入数据指针偏移
+    data = self.mutable_data_ptr<scalar_t>()
+    for i in range(position.size):
+        data += position[i] * ensure_nonempty_stride(self, i)
+    
+    n_element = ensure_nonempty_size(self, self.dim - 1)
+    iter_begin = data
+    iter_end = data + n_element
+    
+    # Step 2: 调用Thrust实现计算mode
+    (mode, index) = ModeImpl<scalar_t>{}(iter_begin, iter_end)
+    
+    # Step 3: 计算输出数据指针偏移
+    values_data = values.mutable_data_ptr<scalar_t>()
+    indices_data = indices.mutable_data_ptr<int64_t>()
+    
+    for i in range(position.size):
+        values_data += ensure_nonempty_stride(values, i) * position[i]
+        indices_data += ensure_nonempty_stride(indices, i) * position[i]
+    
+    # Step 4: 异步拷贝结果到device
+    stream = at::cuda::getCurrentCUDAStream()
+    AT_CUDA_CHECK(cudaMemcpyAsync(
+        values_data, &mode, sizeof(scalar_t), cudaMemcpyHostToDevice, stream))
+    at::cuda::memcpy_and_sync(
+        indices_data, &index, sizeof(int64_t), cudaMemcpyHostToDevice, stream)
+
+【备注】
+    - 在host侧执行，每次处理一个一维slice
+    - memcpy_and_sync: 同步等待结果拷贝完成
+
+--------------------------------
+ModeImpl<scalar_t>
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    ModeImpl<scalar_t>::operator()(
+        iter_begin: scalar_t*,
+        iter_end: scalar_t*
+    ) -> (scalar_t, int64_t)  # (众数值, 原始索引)
+
+【算法】
+    thrust_allocator = at::cuda::ThrustAllocator()
+    stream = at::cuda::getCurrentCUDAStream()
+    policy = thrust::cuda::par(thrust_allocator).on(stream)
+    
+    n_element = iter_end - iter_begin
+    cuda_allocator = at::cuda::getCUDADeviceAllocator()
+    
+    # Step 1: 创建索引缓冲区 [0, 1, 2, ..., n-1]
+    sort_buffer = c10::DeviceArray<int64_t>(cuda_allocator, n_element)
+    sort_buffer_ptr = thrust::device_pointer_cast(sort_buffer.get())
+    count_from_zero_iter = thrust::make_counting_iterator(0)
+    thrust::copy_n(policy, count_from_zero_iter, n_element, sort_buffer_ptr)
+    
+    # Step 2: 排序数据，同时记录原始索引
+    thrust::sort_by_key(policy, iter_begin, iter_end, sort_buffer_ptr)
+    
+    # Step 3: 统计唯一元素个数
+    unique = 1 + thrust::inner_product(
+        policy,
+        iter_begin, iter_end - 1,
+        iter_begin + 1,
+        0,
+        thrust::plus<int>(),
+        thrust::not_equal_to<scalar_t>())
+    
+    # Step 4: 统计每个唯一值的频次
+    keys = c10::DeviceArray<scalar_t>(cuda_allocator, unique)
+    counts = c10::DeviceArray<int64_t>(cuda_allocator, unique)
+    
+    keys_ptr = thrust::device_pointer_cast(keys.get())
+    counts_ptr = thrust::device_pointer_cast(counts.get())
+    
+    thrust::reduce_by_key(
+        policy,
+        iter_begin, iter_end,
+        thrust::constant_iterator<int>(1),
+        keys_ptr,
+        counts_ptr)
+    
+    # Step 5: 找到最大频次对应的值
+    it = thrust::max_element(policy, counts_ptr, counts_ptr + unique)
+    mode = keys_ptr[it - counts_ptr]
+    
+    # Step 6: 找到该值在排序后数组中的位置
+    position_iter = thrust::find(policy, iter_begin, iter_end, mode)
+    
+    # Step 7: 转换为原始未排序位置
+    assert position_iter != iter_end
+    index = sort_buffer_ptr[position_iter - iter_begin]
+    
+    return (mode, index)
+
+【并行模式】
+    - thrust::sort_by_key: 并行排序
+    - thrust::inner_product: 并行计数唯一元素
+    - thrust::reduce_by_key: 并行归约统计频次
+    - thrust::max_element: 并行找最大值
+    - thrust::find: 并行查找
+
+【备注】
+    - 算法复杂度: O(n log n) (排序主导)
+    - 空间复杂度: O(n + unique)
+
+--------------------------------
+ModeImpl<bool>
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    ModeImpl<bool>::operator()(
+        first: const bool*,
+        last: const bool*
+    ) -> (bool, int64_t)  # (众数值, 首次出现索引)
+
+【算法】
+    thrust_allocator = at::cuda::ThrustAllocator()
+    stream = at::cuda::getCurrentCUDAStream()
+    policy = thrust::cuda::par(thrust_allocator).on(stream)
+    
+    # Step 1: 统计true的个数
+    # NOTE: bool在内存中以uint8存储
+    first_bytes = reinterpret_cast<const uint8_t*>(first)
+    last_bytes = reinterpret_cast<const uint8_t*>(last)
+    
+    numel = last - first
+    num_true = thrust::count_if(
+        policy,
+        first_bytes, last_bytes,
+        [] GPU_LAMBDA (uint8_t x) {
+            return static_cast<bool>(x)
+        })
+    
+    # Step 2: 计算众数
+    num_false = numel - num_true
+    mode = num_true > num_false
+    
+    # Step 3: 找到首次出现位置
+    position_iter = thrust::find_if(
+        policy, first_bytes, last_bytes, EqualsMode{mode})
+    index = position_iter - first_bytes
+    
+    return (mode, index)
+
+【并行模式】
+    - thrust::count_if: 并行统计
+    - thrust::find_if: 并行查找
+
+【备注】
+    - bool类型优化: 只有两种值，跳过排序和归约
+    - 算法复杂度: O(n)
+
+--------------------------------
+EqualsMode
+来源: aten/src/ATen/native/cuda/TensorModeKernel.cu
+--------------------------------
+
+【签名】
+    @device
+    EqualsMode::operator()(x: uint8_t) -> bool
+
+【算法】
+    return static_cast<bool>(x) == mode
+
+【备注】
+    - 用于 thrust::find_if 的谓词
+    - mode: 成员变量，目标bool值

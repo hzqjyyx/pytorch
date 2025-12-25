@@ -1,0 +1,384 @@
+## TorchPseudo: aten/src/ATen/native/cuda/Sorting
+
+--------------------------------
+kthvalue_out_cuda
+来源: aten/src/ATen/native/cuda/Sorting.cpp
+--------------------------------
+
+【签名】
+    kthvalue_out_cuda(
+        self: Tensor[*D],
+        k: int64,
+        dim: int64,
+        keepdim: bool,
+        values: Tensor,
+        indices: Tensor[int64]
+    ) -> (Tensor, Tensor[int64])
+
+    约束:
+    - 1 <= k <= self.size(dim)
+    - self.dim <= MAX_TENSORINFO_DIMS
+
+【算法】
+    dim = maybe_wrap_dim(dim, self.dim)
+    slicesize = self.size(dim) if self.dim > 0 else 1
+
+    # 分配输出张量
+    _reduction_with_indices_allocate_or_resize_output(values, indices, self, dim, keepdim)
+
+    # 0维1元素的特殊情况
+    if self.dim == 0 and self.numel == 1:
+        values.copy_(self)
+        indices.zero_()
+        return (values, indices)
+
+    # 调用kernel
+    if self.numel != 0:
+        launch_kthvalue_kernel(values, indices, self.contiguous(), dim, k)
+
+    # 去除维度
+    if not keepdim:
+        values.squeeze_(dim)
+        indices.squeeze_(dim)
+
+    namedinference::propagate_names_for_reduction(values, self, dim, keepdim)
+    namedinference::propagate_names_for_reduction(indices, self, dim, keepdim)
+
+    return (values, indices)
+
+【备注】
+    - 非确定性: 当第k大的值有重复时，返回哪个索引是不确定的
+    - 要求输入连续 (contiguous)
+
+--------------------------------
+median_out_cuda / nanmedian_out_cuda
+来源: aten/src/ATen/native/cuda/Sorting.cpp
+--------------------------------
+
+【签名】
+    median_out_cuda(
+        self: Tensor[*D],
+        dim: int64,
+        keepdim: bool,
+        values: Tensor,
+        indices: Tensor[int64]
+    ) -> (Tensor, Tensor[int64])
+
+    nanmedian_out_cuda(...) -> (Tensor, Tensor[int64])
+
+【算法】
+    dim = maybe_wrap_dim(dim, self.dim)
+    in = self.contiguous() if self.dim > 0 else self.unsqueeze(0)
+
+    # 计算输出形状
+    out_shape = self.sizes()
+    if self.dim > 0:
+        if keepdim:
+            out_shape[dim] = 1
+        else:
+            out_shape = remove(out_shape, dim)
+
+    values.resize_(out_shape)
+    indices.resize_(out_shape)
+
+    # 调用kernel
+    if self.numel > 0:
+        vals = values if (keepdim and self.dim > 0) else values.unsqueeze(dim)
+        inds = indices if (keepdim and self.dim > 0) else indices.unsqueeze(dim)
+
+        # median: ignore_nan=false, nanmedian: ignore_nan=true
+        launch_median_kernel(vals, inds, in, dim, ignore_nan)
+
+    namedinference::propagate_names_for_reduction(values, self, dim, keepdim)
+    namedinference::propagate_names_for_reduction(indices, self, dim, keepdim)
+
+    return (values, indices)
+
+【备注】
+    - 非确定性: 当中位数有重复时，返回哪个索引是不确定的
+    - self.dim <= MAX_TENSORINFO_DIMS
+
+--------------------------------
+median_cuda / nanmedian_cuda
+来源: aten/src/ATen/native/cuda/Sorting.cpp
+--------------------------------
+
+【签名】
+    median_cuda(self: Tensor[*D]) -> Scalar
+    nanmedian_cuda(self: Tensor[*D]) -> Scalar
+
+【算法】
+    size = self.numel()
+
+    # 空张量返回 NaN
+    if size <= 0:
+        return NaN
+
+    # 排序后选择中位数
+    sorted = self.flatten().sort()[0]
+
+    if not ignore_nan:
+        # median: 如果有NaN则返回NaN (排序后NaN在最后)
+        k = (size - 1) / 2
+        return where(sorted[-1].isnan(), sorted[-1], sorted[k])
+    else:
+        # nanmedian: 忽略NaN，从非NaN值中选择中位数
+        nan_count = sorted.isnan().sum()
+        k = ((size - nan_count - 1) / 2).to(int64)
+        return sorted[k]
+
+【备注】
+    - 整体中位数 (无dim参数)
+    - ignore_nan: false for median, true for nanmedian
+
+--------------------------------
+gatherKthValue
+来源: aten/src/ATen/native/cuda/Sorting.cu
+--------------------------------
+
+【签名】
+    @device
+    gatherKthValue<scalar_t, index_t, Dim>(
+        input: TensorInfo[scalar_t, index_t],
+        inputSliceSize: index_t,
+        k: index_t,
+        numInputSlices: index_t,
+        inputWithinSliceStride: index_t,
+        kthValue: TensorInfo[scalar_t, index_t],
+        indices: TensorInfo[int64, index_t]
+    )
+
+【算法】
+    slice = blockIdx (linear)
+    if slice >= numInputSlices:
+        return
+
+    # 定位当前slice的数据起点
+    inputSliceStart = &input.data[IndexToOffset(slice, input)]
+    kthValueSliceStart = &kthValue.data[IndexToOffset(slice, kthValue)]
+    indicesSliceStart = &indices.data[IndexToOffset(slice, indices)]
+
+    # Step 1: 使用radix select找到第k大的值
+    kValue = 0
+    radixSelect<scalar_t, RadixType, index_t>(
+        inputSliceStart,
+        k,
+        false,  # descending=false
+        inputSliceSize,
+        inputWithinSliceStride,
+        smem,  # shared memory
+        &kValue
+    )
+
+    # Step 2: 找到第k大值的索引 (找到第一个等于kValue的位置)
+    kValueIndex = 0
+    foundKValue = false
+
+    for i in parallel_for(threadIdx.x, inputSliceSize, blockDim.x):
+        v = inputSliceStart[i * inputWithinSliceStride]
+        if v == kValue or (isnan(v) and isnan(kValue)):
+            kValueIndex = i
+            foundKValue = true
+            break
+
+    if foundKValue:
+        kthValueSliceStart[0] = kValue
+        indicesSliceStart[0] = kValueIndex
+
+【并行模式】
+    grid: (num_slices)
+    block: min(round_up(slice_size, warp_size), 1024)
+
+    - 每个block处理一个slice
+    - radixSelect内部使用warp级并行
+    - 索引查找使用线程级并行
+
+【备注】
+    - smem: 每个warp一个int (最多C10_WARP_SIZE个)
+    - 返回第一个匹配的索引 (非确定性)
+
+--------------------------------
+gatherMedian
+来源: aten/src/ATen/native/cuda/Sorting.cu
+--------------------------------
+
+【签名】
+    @device
+    gatherMedian<scalar_t, index_t, Dim>(
+        values: TensorInfo[scalar_t, index_t],
+        indices: TensorInfo[int64, index_t],
+        input: TensorInfo[scalar_t, index_t],
+        inputSliceSize: index_t,
+        numInputSlices: index_t,
+        inputWithinSliceStride: index_t,
+        ignore_nan: bool
+    )
+
+【算法】
+    slice = blockIdx (linear)
+    if slice >= numInputSlices:
+        return
+
+    # 定位当前slice的数据起点
+    valuesSliceStart = &values.data[IndexToOffset(slice, values)]
+    indicesSliceStart = &indices.data[IndexToOffset(slice, indices)]
+    inputSliceStart = &input.data[IndexToOffset(slice, input)]
+
+    # Step 1: 统计NaN数量 (并行归约)
+    nan_count = 0
+    for i in parallel_for(threadIdx.x, inputSliceSize, blockDim.x):
+        val = inputSliceStart[i * inputWithinSliceStride]
+        nan_count += isnan(val) ? 1 : 0
+
+    # block级归约nan_count到共享内存
+    __shared__ num_nan
+    if threadIdx.x == 0:
+        num_nan = 0
+    __syncthreads()
+    if nan_count > 0:
+        gpuAtomicAddNoReturn(&num_nan, nan_count)
+    __syncthreads()
+
+    # Step 2: 计算中位数位置k
+    if not ignore_nan and num_nan > 0:
+        k = inputSliceSize - 1  # 有NaN时返回NaN (最后一个元素)
+    else:
+        k = (inputSliceSize - num_nan - 1) / 2  # 非NaN值的中位数
+
+    # Step 3: 使用radix select找到中位数
+    median = 0
+    radixSelect<scalar_t, RadixType, index_t>(
+        inputSliceStart,
+        k + 1,  # radixSelect使用1-based索引
+        false,
+        inputSliceSize,
+        inputWithinSliceStride,
+        smem,
+        &median
+    )
+
+    valuesSliceStart[0] = median
+
+    # Step 4: 找到中位数的索引
+    for i in parallel_for(threadIdx.x, inputSliceSize, blockDim.x):
+        val = inputSliceStart[i * inputWithinSliceStride]
+        if val == median or (isnan(val) and isnan(median)):
+            indicesSliceStart[0] = i
+            break
+
+【并行模式】
+    grid: (num_slices)
+    block: min(round_up(slice_size, warp_size), 1024)
+
+    - 每个block处理一个slice
+    - NaN计数使用线程级并行 + atomic归约
+    - radixSelect内部使用warp级并行
+    - 索引查找使用线程级并行
+
+【备注】
+    - ignore_nan=false (median): 有NaN时返回NaN
+    - ignore_nan=true (nanmedian): 忽略NaN计算中位数
+
+--------------------------------
+launch_kthvalue_kernel
+来源: aten/src/ATen/native/cuda/Sorting.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_kthvalue_kernel(
+        values: TensorBase,
+        indices: TensorBase,
+        self: TensorBase,
+        dim: int64,
+        k: int64
+    )
+
+【算法】
+    AT_DISPATCH_ALL_TYPES_AND2(Half, BFloat16, self.scalar_type(), "kthvalue_cuda", [&] {
+        AT_DISPATCH_INDEX_TYPES(
+            canUse32BitIndexMath(self, values, indices) ? Int : Long,
+            "kth_value_launcher", [&] {
+                run_launcher<scalar_t, index_t>(
+                    values, indices, self, dim, KthValueLauncher(k)
+                )
+            }
+        )
+    })
+
+【备注】
+    - 支持类型: 所有数值类型 + Half + BFloat16
+    - 索引类型: 根据张量大小选择 uint32 或 uint64
+
+--------------------------------
+launch_median_kernel
+来源: aten/src/ATen/native/cuda/Sorting.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_median_kernel(
+        vals: TensorBase,
+        inds: TensorBase,
+        self: TensorBase,
+        dim: int64,
+        ignore_nan: bool
+    )
+
+【算法】
+    AT_DISPATCH_ALL_TYPES_AND2(Half, BFloat16, self.scalar_type(), "median_out_impl", [&] {
+        if canUse32BitIndexMath(vals, inds, self):
+            run_launcher<scalar_t, uint32>(
+                vals, inds, self, dim, MedianLauncher(ignore_nan)
+            )
+        else:
+            run_launcher<scalar_t, uint64>(
+                vals, inds, self, dim, MedianLauncher(ignore_nan)
+            )
+    })
+
+【备注】
+    - 支持类型: 所有数值类型 + Half + BFloat16
+    - 索引类型: 根据张量大小选择 uint32 或 uint64
+
+--------------------------------
+KthValueLauncher / MedianLauncher
+来源: aten/src/ATen/native/cuda/Sorting.cu
+--------------------------------
+
+【签名】
+    KthValueLauncher(k: int64)
+    MedianLauncher(ignore_nan: bool)
+
+【算法】
+    launch<scalar_t, index_t, all_dims>(
+        values_info: TensorInfo,
+        collapse_values_dim: int,
+        indices_info: TensorInfo,
+        collapse_indices_dim: int,
+        self_info: TensorInfo,
+        collapse_self_dim: int,
+        num_slices: int64,
+        slice_size: int64
+    ):
+        # 计算grid和block配置
+        grid = getGridFromTiles(num_slices)
+        block = min(round_up(slice_size, warp_size), 1024)
+
+        # 调用对应kernel
+        if KthValueLauncher:
+            gatherKthValue<scalar_t, index_t, all_dims><<<grid, block>>>(
+                self_info, slice_size, k, num_slices,
+                self_info.strides[collapse_self_dim],
+                values_info, indices_info
+            )
+        else:  # MedianLauncher
+            gatherMedian<scalar_t, index_t, all_dims><<<grid, block>>>(
+                values_info, indices_info, self_info,
+                slice_size, num_slices,
+                self_info.strides[collapse_self_dim],
+                ignore_nan
+            )
+
+【备注】
+    - run_launcher 的辅助类，封装kernel启动配置

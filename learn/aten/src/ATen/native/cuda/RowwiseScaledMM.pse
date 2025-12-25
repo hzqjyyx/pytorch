@@ -1,0 +1,485 @@
+--------------------------------
+f8f8bf16_rowwise
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【签名】
+    @host→device
+    f8f8bf16_rowwise(
+        XQ: Tensor[M, K, float8],           # 输入矩阵，FP8格式 (e4m3fn或e5m2)
+        WQ: Tensor[K, N, float8_e4m3fn],    # 权重矩阵，FP8格式 (e4m3fn)
+        x_scale: Tensor[M, 1, float32],     # 输入行级缩放因子
+        w_scale: Tensor[1, N, float32],     # 权重列级缩放因子
+        bias: Optional[Tensor[N, float32|bfloat16]],  # 可选偏置
+        use_fast_accum: bool,               # 是否使用快速累加
+        out: Tensor[M, N, bfloat16]         # 输出矩阵
+    )
+
+    约束:
+    - XQ.dtype in {float8_e4m3fn, float8_e5m2}
+    - WQ.dtype == float8_e4m3fn
+    - x_scale.dtype == float32, w_scale.dtype == float32
+    - out.dtype == bfloat16
+    - XQ 行优先 (stride[1] == 1)，WQ 列优先 (stride[0] == 1)
+    - x_scale 列优先 (stride[0] == 1)，w_scale 行优先 (stride[1] == 1)
+    - 仅支持 SM89/SM90/SM100 架构
+
+【算法】
+    check_inputs(XQ, WQ, x_scale, w_scale, bias, out)
+    dispatch_fp8_rowwise_kernel_on_bias_dtype(XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out)
+
+【备注】
+    - 平台检测: SM89使用不同kernel实现 (f8f8bf16_rowwise_impl_sm89)
+    - SM90/SM100: 根据矩阵形状选择 TileShape 和 ClusterShape
+    - M不是256倍数时会对 x_scale 进行padding (workaround for issue #133334)
+    - 支持转置优化: 某些形状下会交换 XQ/WQ 并转置以提高性能
+    - Cutlass 3.x EVT (Epilogue Visitor Tree) 实现融合的行列缩放和偏置加法:
+      out = (accum * x_scale * w_scale + bias).cast(bfloat16)
+
+--------------------------------
+dispatch_fp8_rowwise_kernel_on_bias_dtype
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【签名】
+    dispatch_fp8_rowwise_kernel_on_bias_dtype(...) -> void
+
+【算法】
+    if bias.has_value() and bias.dtype == bfloat16:
+        dispatch_fp8_rowwise_kernel_on_input_dtypes<cutlass::bfloat16_t>(...)
+    else:
+        dispatch_fp8_rowwise_kernel_on_input_dtypes<float>(...)
+
+【备注】
+    - 根据 bias 数据类型选择模板参数
+    - bias 为空或 float32 类型时使用 float 模板
+
+--------------------------------
+dispatch_fp8_rowwise_kernel_on_input_dtypes
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【签名】
+    dispatch_fp8_rowwise_kernel_on_input_dtypes<DtypeBias>(...) -> void
+
+【算法】
+    if XQ.dtype == float8_e5m2:
+        dispatch_fp8_rowwise_kernel_on_fast_accum<cutlass::float_e5m2_t, cutlass::float_e4m3_t, DtypeBias>(...)
+    else:
+        dispatch_fp8_rowwise_kernel_on_fast_accum<cutlass::float_e4m3_t, cutlass::float_e4m3_t, DtypeBias>(...)
+
+【备注】
+    - XQ 支持 e5m2 或 e4m3fn
+    - WQ 始终为 e4m3fn
+
+--------------------------------
+dispatch_fp8_rowwise_kernel_on_fast_accum
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【签名】
+    dispatch_fp8_rowwise_kernel_on_fast_accum<DtypeA, DtypeB, DtypeBias>(...) -> void
+
+【算法】
+    if use_fast_accum:
+        dispatch_fp8_rowwise_kernel_on_sm<std::true_type, DtypeA, DtypeB, DtypeBias>(...)
+    else:
+        dispatch_fp8_rowwise_kernel_on_sm<std::false_type, DtypeA, DtypeB, DtypeBias>(...)
+
+【备注】
+    - fast_accum 影响 MMA 指令选择 (OpMultiplyAddFastAccum vs OpMultiplyAdd)
+
+--------------------------------
+dispatch_fp8_rowwise_kernel_on_sm
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【签名】
+    dispatch_fp8_rowwise_kernel_on_sm<FastAccum, DtypeA, DtypeB, DtypeBias>(...) -> void
+
+【算法】
+    properties = at::cuda::getCurrentDeviceProperties()
+    sm89 = (properties.major == 8 and properties.minor == 9)
+    sm9x = (properties.major == 9)
+    sm10x = (properties.major == 10)
+
+    if not (sm89 or sm9x or sm10x):
+        TORCH_CHECK(false, "Rowwise scaling is not currently supported on your device")
+
+    if sm9x or sm10x:
+        dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<FastAccum, DtypeA, DtypeB, DtypeBias>(...)
+    else:
+        f8f8bf16_rowwise_impl_sm89<FastAccum, DtypeA, DtypeB, DtypeBias>(...)
+
+【备注】
+    - SM89 (Ada Lovelace) 使用独立实现
+    - SM90/100 (Hopper/Blackwell) 使用 TMA 和 Cluster 优化
+
+--------------------------------
+dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【签名】
+    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<FastAccum, DtypeA, DtypeB, DtypeBias>(...) -> void
+
+【算法】
+    M = round_up_to_nearest_multiple(M, 64)
+    N = round_up_to_nearest_multiple(N, 64)
+
+    # 特殊形状优化 (skinny matrices)
+    if M == 64 and N >= 3072:
+        return handle_transposition<ClusterShape=<1,2,1>, Transposed=false, ...>(...)
+    if N == 64 and M >= 3072:
+        return handle_transposition<ClusterShape=<1,2,1>, Transposed=true, ...>(...)
+    if M == 192 and N >= 4096:
+        return handle_transposition<ClusterShape=<1,2,1>, Transposed=true, ...>(...)
+    if N == 192 and M >= 4096:
+        return handle_transposition<ClusterShape=<1,2,1>, Transposed=false, ...>(...)
+
+    # 奇数倍128优化 (中小规模)
+    if M*N <= 4096*4096:
+        if M%256 > 0 and N%256 == 0:
+            return handle_transposition<ClusterShape=<2,1,1>, Transposed=true, ...>(...)
+        if N%256 > 0 and M%256 == 0:
+            return handle_transposition<ClusterShape=<2,1,1>, Transposed=false, ...>(...)
+
+    if M%256 > 0 and N%256 > 0:
+        if (M <= N) xor (M*N <= 1024*1024):
+            return handle_transposition<ClusterShape=<2,1,1>, Transposed=true, ...>(...)
+        else:
+            return handle_transposition<ClusterShape=<2,1,1>, Transposed=false, ...>(...)
+
+    # 通用大矩阵
+    if M >= 4096 and N >= 4096:
+        if M >= N:
+            return handle_transposition<ClusterShape=<2,1,1>, Transposed=false, swizzle=8>(...)
+        return handle_transposition<ClusterShape=<2,1,1>, Transposed=true, swizzle=8>(...)
+
+    if (M <= N) xor (M >= 2048 and N >= 2048):
+        return handle_transposition<ClusterShape=<1,2,1>, Transposed=true, ...>(...)
+    else:
+        return handle_transposition<ClusterShape=<2,1,1>, Transposed=true, ...>(...)
+
+【备注】
+    - ClusterShape 控制 SM 分组 (形如 <M_cluster, N_cluster, K_cluster>)
+    - Transposed 决定是否交换输入矩阵以优化内存访问
+    - swizzle 参数控制 warp 调度 (默认1，大矩阵用8)
+
+--------------------------------
+handle_transposition
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【签名】
+    handle_transposition<ClusterShape, Transposed, FastAccum, DtypeA, DtypeB, DtypeBias>(...) -> void
+
+【算法】
+    if not Transposed:
+        dispatch_fp8_rowwise_kernel_on_tile_size<ClusterShape, Transposed, FastAccum, DtypeA, DtypeB, DtypeBias>(
+            XQ, WQ, x_scale, w_scale, bias, out, swizzle)
+    else:
+        # 交换输入和缩放因子，转置输出
+        dispatch_fp8_rowwise_kernel_on_tile_size<ClusterShape, Transposed, FastAccum, DtypeB, DtypeA, DtypeBias>(
+            WQ.t(), XQ.t(), w_scale.t(), x_scale.t(), bias, out.t(), swizzle)
+
+【备注】
+    - 转置优化: 某些形状下 (WQ @ XQ.t()).t() 比 XQ @ WQ.t() 更高效
+    - DtypeA/DtypeB 参数顺序也随之交换
+
+--------------------------------
+dispatch_fp8_rowwise_kernel_on_tile_size
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【签名】
+    dispatch_fp8_rowwise_kernel_on_tile_size<ClusterShape, Transposed, FastAccum, DtypeA, DtypeB, DtypeBias>(...) -> void
+
+【算法】
+    smTarget = at::cuda::getDeviceProperties(out.device().index()).multiProcessorCount
+    if at::globalContext()._SMCarveout_EXPERIMENTAL().has_value():
+        smTarget -= at::globalContext()._SMCarveout_EXPERIMENTAL().value()
+
+    properties = at::cuda::getCurrentDeviceProperties()
+    sm10x = (properties.major == 10)
+
+    # Wave quantization 检测
+    num_blocks_small = ceildiv(M, 64 * ClusterShape[0]) * ceildiv(N, 128 * ClusterShape[1])
+    use_smaller_tiles = (num_blocks_small <= smTarget / size(ClusterShape))
+
+    if use_smaller_tiles:
+        if sm10x:
+            f8f8bf16_rowwise_impl_sm100<TileShape=<64,128,128>, ClusterShape, ...>(...)
+        else:
+            f8f8bf16_rowwise_impl<TileShape=<64,128,128>, ClusterShape, ...>(...)
+    else:
+        if sm10x:
+            f8f8bf16_rowwise_impl_sm100<TileShape=<128,128,128>, ClusterShape, ...>(...)
+        else:
+            f8f8bf16_rowwise_impl<TileShape=<128,128,128>, ClusterShape, ...>(...)
+
+【备注】
+    - TileShape 控制每个 CTA 的工作块大小 (MxNxK)
+    - 避免 wave quantization: block数超过SM数时切换到大tile
+    - SM100 使用单独模板以支持新架构特性
+
+--------------------------------
+f8f8bf16_rowwise_impl (SM90)
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【签名】
+    @host→device
+    f8f8bf16_rowwise_impl<TileShape, ClusterShape, Transposed, FastAccum, DtypeA, DtypeB, DtypeBias>(...) -> void
+
+【算法】
+    M = XQ.size(0)
+    N = WQ.size(1)
+    K = XQ.size(1)
+
+    # Workaround for issue #133334
+    if M % 256 > 0:
+        padded_M = ceildiv(M, 256) * 256
+        padded_x_scale = x_scale.new_empty(padded_M, 1)
+        padded_x_scale[:M, :] = x_scale
+        x_scale = padded_x_scale
+
+    # Cutlass 3.x Epilogue EVT 定义
+    # EVT 树结构: Cast(Add(Bias, Multiply(WScale, Multiply(XScale, Accum))))
+    XScale = Sm90ColBroadcast<TileShape, float>(x_scale)
+    WScale = Sm90RowBroadcast<TileShape, float>(w_scale)
+    Bias = Sm90RowBroadcast/ColBroadcast<TileShape, DtypeBias>(bias)  # 根据 Transposed 选择
+    Accum = Sm90AccFetch()
+
+    AccumScale = Multiply(WScale, Multiply(XScale, Accum))
+    EpilogueEVT = Cast<bfloat16>(Add(Bias, AccumScale))
+
+    # Cutlass CollectiveBuilder 构建 GEMM kernel
+    large_tile = (TileShape == <128,128,128>)
+    Schedule = Schedule<large_tile, FastAccum>
+
+    CollectiveMainloop = cutlass::gemm::collective::CollectiveBuilder<
+        Sm90, OpClassTensorOp, DtypeA, RowMajor, DtypeB, ColumnMajor,
+        float, TileShape, ClusterShape, StageCountAuto, Schedule.type>
+
+    CollectiveEpilogue = cutlass::epilogue::collective::CollectiveBuilder<
+        Sm90, OpClassTensorOp, TileShape, ClusterShape, EpilogueTileAuto,
+        float, float, bfloat16, LayoutOutput, Schedule.epilogue_type, EpilogueEVT>
+
+    GemmKernel = cutlass::gemm::kernel::GemmUniversal<
+        Shape<int,int,int>, CollectiveMainloop, CollectiveEpilogue>
+
+    # 配置并启动 kernel
+    arguments = {
+        mode: kGemm,
+        problem_size: {M, N, K},
+        mainloop: {XQ.data_ptr(), stride_a, WQ.data_ptr(), stride_b},
+        epilogue: {
+            x_scale.data_ptr(), w_scale.data_ptr(),
+            bias.data_ptr() if bias else nullptr,
+            out.data_ptr(), stride_output
+        },
+        hw_info.sm_count: sm_count - carveout,
+        scheduler.max_swizzle_size: swizzle
+    }
+
+    workspace = XQ.new_empty(GemmKernel.get_workspace_size(arguments), dtype=byte)
+
+    gemm = GemmUniversalAdapter<GemmKernel>()
+    gemm.can_implement(arguments)
+    gemm.initialize(arguments, workspace.data_ptr())
+    gemm(at::cuda::getCurrentCUDAStream())
+
+【并行模式】
+    CTA grid: ceil(M/TileShape[0]/ClusterShape[0]) × ceil(N/TileShape[1]/ClusterShape[1])
+    CTA cluster: ClusterShape
+    Threads per CTA: 由 CollectiveBuilder 自动确定
+
+    Mainloop 策略 (根据 large_tile 和 FastAccum):
+    - <64,128,128, FastAccum=false>: KernelTmaWarpSpecialized
+    - <128,128,128, FastAccum=false>: KernelTmaWarpSpecializedCooperative
+    - <64,128,128, FastAccum=true>: KernelTmaWarpSpecializedFP8FastAccum
+    - <128,128,128, FastAccum=true>: KernelTmaWarpSpecializedPingpongFP8FastAccum
+
+    Epilogue 策略:
+    - Cooperative kernel: TmaWarpSpecializedCooperative
+    - 其他: TmaWarpSpecialized
+
+【备注】
+    - TMA (Tensor Memory Accelerator): Hopper 硬件加速的全局内存访问
+    - Pingpong schedule: 双缓冲减少 stall
+    - FastAccum: FP8 MMA 指令的快速累加模式 (损失少量精度)
+    - SM_carveout: 为 NCCL 等后台任务预留 SM
+
+--------------------------------
+f8f8bf16_rowwise_impl_sm100 (SM100)
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【签名】
+    @host→device
+    f8f8bf16_rowwise_impl_sm100<TileShape, ClusterShape, Transposed, FastAccum, DtypeA, DtypeB, DtypeBias>(...) -> void
+
+【算法】
+    # 与 SM90 实现类似，主要区别:
+    - ArchTag = Sm100
+    - MainloopScheduleType = KernelScheduleAuto (由 Cutlass 自动选择)
+    - EpilogueScheduleType = EpilogueScheduleAuto
+
+    # 其余逻辑同 f8f8bf16_rowwise_impl
+
+【备注】
+    - Blackwell 架构特性: 自动调度策略替代手动 Schedule 选择
+    - Cutlass 自动适配新架构的优化指令
+
+--------------------------------
+f8f8bf16_rowwise_impl_sm89 (SM89)
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【签名】
+    @host→device
+    f8f8bf16_rowwise_impl_sm89<FastAccum, DtypeA, DtypeB, DtypeBias>(...) -> void
+
+【算法】
+    M = XQ.size(0)
+    N = WQ.size(1)
+    K = XQ.size(1)
+
+    # 使用 Cutlass 2.x EVT (Sm80EVT)
+    ThreadblockShape = GemmShape<64, 128, 64>
+    WarpShape = GemmShape<32, 64, 64>
+    InstructionShape = GemmShape<16, 8, 32>
+    NumStages = 4
+
+    Operator = OpMultiplyAddFastAccum if FastAccum else OpMultiplyAdd
+
+    # Epilogue Visitor Tree (Cutlass 2.x 风格)
+    Accum = VisitorAccFetch()
+    XScale = VisitorColBroadcast<DtypeScale>(x_scale)
+    WScale = VisitorRowBroadcast<DtypeScale>(w_scale)
+    Bias = VisitorRowBroadcast<DtypeBias>(bias)
+
+    EVTApplyXScale = Sm80EVT<Compute<multiplies>, Accum, XScale>
+    EVTApplyWScale = Sm80EVT<Compute<multiplies>, EVTApplyXScale, WScale>
+    EVTApplyBias = Sm80EVT<Compute<plus>, EVTApplyWScale, Bias>
+    EVTOutput = Sm80EVT<VisitorAuxStore<bfloat16>, EVTApplyBias>
+
+    EVTKernel = DefaultGemmWithVisitor<
+        DtypeA, RowMajor, DtypeB, ColumnMajor,
+        bfloat16, RowMajor, float, float,
+        Sm89, ThreadblockShape, WarpShape, InstructionShape,
+        EVTOutput, ThreadblockSwizzleStreamK, NumStages, Operator>
+
+    # 配置并启动
+    callback_arguments = {
+        EVTApplyBias: {
+            EVTApplyWScale: {
+                EVTApplyXScale: {
+                    Accum: {},
+                    XScale: {x_scale.data_ptr(), 1, stride={1, 0, M}}
+                },
+                WScale: {w_scale.data_ptr(), 1, stride={0, 1, N}}
+            },
+            Bias: {bias.data_ptr() if bias else nullptr, 0, stride={0, 1, N}}
+        },
+        Output: {out.data_ptr(), stride={N, 1, M*N}}
+    }
+
+    arguments = {
+        mode: kGemm,
+        problem_size: {M, N, K},
+        split_k_factor: 1,
+        epilogue: callback_arguments,
+        A: XQ.data_ptr(), stride_A: K,
+        B: WQ.data_ptr(), stride_B: K,
+        C: nullptr, D: nullptr
+    }
+
+    workspace = XQ.new_empty(Gemm.get_workspace_size(arguments), dtype=byte)
+    gemm = GemmUniversalAdapter<EVTKernel>()
+    gemm.can_implement(arguments)
+    gemm.initialize(arguments, workspace.data_ptr())
+    gemm(at::cuda::getCurrentCUDAStream())
+
+【并行模式】
+    Threadblock shape: 64 × 128 × 64
+    Warp shape: 32 × 64 × 64
+    Instruction shape: 16 × 8 × 32 (IMMA)
+
+    Swizzle: ThreadblockSwizzleStreamK (动态负载均衡)
+
+【备注】
+    - Ada Lovelace (SM89) 无 TMA 支持，使用传统 ldgsts 指令
+    - Cutlass 2.x EVT API: visitor 嵌套树结构
+    - StreamK swizzle: 减少 tail effect
+
+--------------------------------
+check_inputs
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【签名】
+    check_inputs(
+        a: Tensor, b: Tensor,
+        scale_a: Tensor, scale_b: Tensor,
+        bias: Optional[Tensor], out: Tensor
+    ) -> void
+
+【算法】
+    # 设备检查
+    assert a.is_cuda()
+    assert a.device == b.device == scale_a.device == scale_b.device == out.device
+    if bias.has_value():
+        assert bias.device == b.device
+
+    # 数据类型检查
+    assert a.dtype in {float8_e4m3fn, float8_e5m2}
+    assert b.dtype == float8_e4m3fn
+    assert scale_a.dtype == float32
+    assert scale_b.dtype == float32
+    assert out.dtype == bfloat16
+    if bias.has_value():
+        assert bias.dtype in {float32, bfloat16}
+
+    # 形状检查
+    assert a.dim == 2 and b.dim == 2
+    assert a.size(1) == b.size(0)  # K维度
+    assert scale_a.shape == [a.size(0), 1]  # [M, 1]
+    assert scale_b.shape == [1, b.size(1)]  # [1, N]
+    assert out.shape == [a.size(0), b.size(1)]  # [M, N]
+    if bias.has_value():
+        assert bias.dim == 1
+        assert bias.size(0) == b.size(1)
+
+    # Stride检查 (确保正确的内存布局)
+    assert a.stride(1) == 1  # 行优先
+    assert a.stride(0) >= a.size(1)
+    assert b.stride(0) == 1  # 列优先
+    assert b.stride(1) >= b.size(0)
+    assert scale_a.stride(0) == 1
+    assert scale_b.stride(1) == 1
+    assert out.stride(1) == 1
+    assert out.stride(0) >= out.size(1)
+    if bias.has_value():
+        assert bias.stride(0) == 1
+
+【备注】
+    - 使用 TORCH_CHECK 宏，失败时抛出异常
+
+--------------------------------
+辅助函数
+来源: aten/src/ATen/native/cuda/RowwiseScaledMM.cu
+--------------------------------
+
+【函数】
+    ceildiv(a: int, b: int) -> int
+        用途: 向上整除
+        算法: return (a + b - 1) / b
+
+    round_up_to_nearest_multiple(a: int, b: int) -> int
+        用途: 向上对齐到 b 的倍数
+        算法: return ceildiv(a, b) * b
+
+【备注】
+    - 用于 tile size 和 padding 计算

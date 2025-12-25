@@ -1,0 +1,311 @@
+# ScaledGroupMM 伪代码
+
+来源: aten/src/ATen/native/cuda/ScaledGroupMM.cu, ScaledGroupMM.h
+
+--------------------------------
+prepare_gemm_data (数据准备Kernel)
+--------------------------------
+
+【签名】
+    @device
+    prepare_gemm_data<DtypeA, DtypeB, DtypeOutput, DtypeScale, ProblemShape, StrideA, StrideB, StrideOutput>(
+        A: DtypeA*,
+        B: DtypeB*,
+        output: DtypeOutput*,
+        scale_A: DtypeScale*,
+        scale_B: DtypeScale*,
+        A_ptrs: DtypeA**[group_count],           # 输出: 每组A指针
+        B_ptrs: DtypeB**[group_count],           # 输出: 每组B指针
+        output_ptrs: DtypeOutput**[group_count], # 输出: 每组output指针
+        inputA_scale_ptrs: DtypeScale**[group_count],
+        inputB_scale_ptrs: DtypeScale**[group_count],
+        problem_sizes: ProblemShape*[group_count],  # 输出: 每组(M,N,K)
+        stride_A: StrideA*[group_count],         # 输出: cutlass stride
+        stride_B: StrideB*[group_count],
+        stride_output: StrideOutput*[group_count],
+        offs: int32*[group_count-1] | nullptr,   # 累积偏移量
+        M: int32,  # <0表示动态
+        N: int32,  # <0表示动态
+        K: int32,  # <0表示动态
+        tensor_StrideA: [3]int64,
+        tensor_StrideB: [3]int64,
+        tensor_StrideOutput: [3]int64,
+        a_scale_stride: int64,
+        b_scale_stride: int64
+    )
+
+【算法】
+    tid = threadIdx.x  # 每个thread处理一个group
+    
+    # 计算动态维度的delta
+    if offs != nullptr:
+        start = (tid == 0) ? 0 : offs[tid - 1]
+        delta = offs[tid] - start
+        assert delta % 16 == 0
+    
+    # 根据哪个维度是动态的(-1)，分4种情况设置指针和问题规模
+    if M < 0:  # A和output的行数动态
+        M = delta
+        lda = tensor_StrideA[0]
+        ldb = tensor_StrideB[2]
+        ldoutput = tensor_StrideOutput[0]
+        
+        A_ptrs[tid] = (tid == 0) ? A : A + offs[tid-1] * lda
+        inputA_scale_ptrs[tid] = (tid == 0) ? scale_A : scale_A + offs[tid-1]
+        output_ptrs[tid] = (tid == 0) ? output : output + offs[tid-1] * ldoutput
+        B_ptrs[tid] = B + tid * tensor_StrideB[0]
+        inputB_scale_ptrs[tid] = scale_B + tid * b_scale_stride
+        
+    else if N < 0:  # B和output的列数动态
+        N = delta
+        lda = tensor_StrideA[1]
+        ldb = tensor_StrideB[1]
+        ldoutput = tensor_StrideOutput[0]
+        
+        A_ptrs[tid] = A + tid * tensor_StrideA[0]
+        inputA_scale_ptrs[tid] = scale_A + tid * a_scale_stride
+        output_ptrs[tid] = (tid == 0) ? output : output + offs[tid-1]
+        B_ptrs[tid] = (tid == 0) ? B : B + offs[tid-1] * ldb
+        inputB_scale_ptrs[tid] = (tid == 0) ? scale_B : scale_B + offs[tid-1]
+        
+    else if K < 0:  # K维度动态
+        K = delta
+        lda = tensor_StrideA[0]
+        ldb = tensor_StrideB[1]
+        ldoutput = tensor_StrideOutput[1]
+        
+        A_ptrs[tid] = (tid == 0) ? A : A + offs[tid-1]
+        B_ptrs[tid] = (tid == 0) ? B : B + offs[tid-1]
+        inputA_scale_ptrs[tid] = scale_A + tid * M
+        inputB_scale_ptrs[tid] = scale_B + tid * N
+        output_ptrs[tid] = output + tid * tensor_StrideOutput[0]
+        
+    else:  # 所有维度静态，标准批次GEMM
+        lda = tensor_StrideA[1]
+        ldb = tensor_StrideB[2]
+        ldoutput = tensor_StrideOutput[1]
+        
+        A_ptrs[tid] = A + tid * tensor_StrideA[0]
+        B_ptrs[tid] = B + tid * tensor_StrideB[0]
+        inputA_scale_ptrs[tid] = scale_A + tid * a_scale_stride
+        inputB_scale_ptrs[tid] = scale_B + tid * b_scale_stride
+        output_ptrs[tid] = output + tid * tensor_StrideOutput[0]
+    
+    # 设置问题规模和cutlass stride
+    problem_sizes[tid] = ProblemShape(M, N, K)
+    stride_A[tid] = cutlass::make_cute_packed_stride(StrideA{}, {M, lda, 1})
+    stride_B[tid] = cutlass::make_cute_packed_stride(StrideB{}, {N, ldb, 1})
+    stride_output[tid] = cutlass::make_cute_packed_stride(StrideOutput{}, {M, ldoutput, 1})
+
+【并行模式】
+    grid: (1)
+    block: (group_count)
+    每个thread处理一组GEMM的元数据准备
+
+【备注】
+    - B矩阵是转置的 (ColumnMajor)
+    - offs是累积偏移量，offs[i]表示前i+1组的总元素数
+
+--------------------------------
+f8f8bf16_grouped_gemm_impl_sm90 (核心GEMM实现)
+--------------------------------
+
+【签名】
+    @host→device
+    f8f8bf16_grouped_gemm_impl_sm90<FastAccum, BiasType, Pong, TB_M, TB_N, TB_K>(
+        mat_a: Tensor[*, M, K, float_e4m3],
+        mat_b: Tensor[*, N, K, float_e4m3],   # 转置布局
+        scale_a: Tensor[*, M, 1, float32],    # 行级缩放
+        scale_b: Tensor[*, 1, N, float32],    # 列级缩放
+        offs: Optional[Tensor[group_count-1, int32]],
+        bias: Optional[Tensor[N, BiasType]],
+        use_fast_accum: bool,
+        out: Tensor[*, M, N, bfloat16]
+    )
+
+【算法】
+    # Step 1: 确定group_count和动态维度
+    M = mat_a.size(-2)
+    K = mat_a.size(-1)
+    N = mat_b.size(-1)
+    
+    if mat_a.dim == 2 and mat_b.dim == 2:
+        group_count = offs.size(0)
+        K = -1  # K动态
+    else if mat_a.dim == 2:
+        group_count = mat_b.size(0)
+        M = -1  # M动态
+    else if mat_b.dim == 2:
+        group_count = mat_a.size(0)
+        N = -1  # N动态
+    else:
+        group_count = mat_a.size(0)  # 标准批次
+    
+    # Step 2: 分配device内存用于指针数组和元数据
+    aligned_group_count = ceil(group_count / group_alignment) * group_alignment
+    input_args_size = aligned_group_count * 5 * sizeof(void*) + 
+                      group_count * (sizeof(ProblemShape) + 3 * sizeof(Stride))
+    
+    input_buf = allocator.allocate(input_args_size)
+    
+    # 指针数组布局:
+    # [A_ptrs, B_ptrs, output_ptrs, scale_A_ptrs, scale_B_ptrs, 
+    #  stride_A, stride_B, stride_output, problem_sizes]
+    
+    # Step 3: 启动prepare_gemm_data kernel准备元数据
+    prepare_gemm_data<<<1, group_count, 0, stream>>>(
+        mat_a.data_ptr(), mat_b.data_ptr(), out.data_ptr(),
+        scale_a.data_ptr(), scale_b.data_ptr(),
+        A_ptrs, B_ptrs, output_ptrs, scale_A_ptrs, scale_B_ptrs,
+        problem_sizes, stride_A, stride_B, stride_output,
+        offs.has_value() ? offs.data_ptr() : nullptr,
+        M, N, K,
+        tensor_StrideA, tensor_StrideB, tensor_StrideOutput,
+        a_scale_stride, b_scale_stride
+    )
+    
+    # Step 4: 配置Cutlass GEMM
+    # Epilogue: out = Cast(ScaleB * (ScaleA * Accum))
+    # 类型配置: DtypeA=float_e4m3, DtypeB=float_e4m3, DtypeOutput=bfloat16
+    # Tile形状: (TB_M, TB_N, TB_K)
+    # Cluster形状: (2, 2, 1)
+    # Schedule: FastAccum ? FastPong/FastCooperative : Pong/Cooperative
+    
+    arguments = {
+        mode: kGrouped,
+        problem_shape: {group_count, problem_sizes, nullptr},
+        mainloop: {A_ptrs, stride_A, B_ptrs, stride_B},
+        epilogue: {
+            {{{scale_B_ptrs}, {scale_A_ptrs}}},
+            output_ptrs, stride_output,
+            output_ptrs, stride_output
+        },
+        hw_info: {sm_count}
+    }
+    
+    workspace_size = Gemm::get_workspace_size(arguments)
+    workspace = allocator.allocate(workspace_size)
+    
+    # Step 5: 执行GEMM
+    gemm.initialize(arguments, workspace)
+    gemm(stream)
+
+【备注】
+    - 仅在 CUDA >= 12.0 且非Windows且非ROCm时编译
+    - 使用Cutlass 3.x的grouped GEMM API
+    - TileShape和Schedule根据问题规模和FastAccum模板参数选择
+    - group_count < 1024 (由于使用单block准备元数据)
+    - Epilogue实现了per-row和per-col的缩放: out = (A @ B^T) * scale_A * scale_B
+
+--------------------------------
+dispatch_fp8_grouped_gemm_on_tile_size (Tile尺寸调度)
+--------------------------------
+
+【签名】
+    @host→device
+    dispatch_fp8_grouped_gemm_on_tile_size<FastAccum, BiasType>(
+        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out
+    )
+
+【算法】
+    # 估算单个GEMM的平均规模
+    M = mat_a.size(-2)
+    K = mat_a.size(-1)
+    N = mat_b.size(-1)
+    
+    if mat_a.dim == 2 and mat_b.dim == 2:
+        group_count = offs.size(0)
+        K = K / group_count
+    else if mat_a.dim == 2:
+        group_count = mat_b.size(0)
+        M = M / group_count
+    else if mat_b.dim == 2:
+        group_count = mat_a.size(0)
+        N = N / group_count
+    
+    large = (M >= 2048 and K >= 2048) or (M >= 2048 and N >= 2048) or (K >= 2048 and N >= 2048)
+    small = (M <= 128 or N <= 128)
+    
+    # 根据规模选择Tile配置
+    if small:
+        f8f8bf16_grouped_gemm_impl_sm90<FastAccum, BiasType, Pong=true, 64, 128, 128>(...)
+    else if large and FastAccum:
+        f8f8bf16_grouped_gemm_impl_sm90<FastAccum, BiasType, Pong=false, 256, 128, 128>(...)
+    else if large:
+        f8f8bf16_grouped_gemm_impl_sm90<FastAccum, BiasType, Pong=false, 128, 128, 128>(...)
+    else:
+        f8f8bf16_grouped_gemm_impl_sm90<FastAccum, BiasType, Pong=false, 128, 256, 64>(...)
+
+【备注】
+    - small: 使用Pingpong调度 + 小M维度Tile (64x128x128)
+    - large+FastAccum: 使用Cooperative调度 + 大M维度Tile (256x128x128)
+    - large+!FastAccum: 使用Cooperative调度 + 中等Tile (128x128x128) 避免寄存器溢出
+    - 默认: 使用Cooperative调度 + 大N维度Tile (128x256x64)
+
+--------------------------------
+dispatch_fp8_grouped_gemm_on_fast_accum (FastAccum调度)
+--------------------------------
+
+【签名】
+    @host→device
+    dispatch_fp8_grouped_gemm_on_fast_accum<BiasType>(
+        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out
+    )
+
+【算法】
+    if use_fast_accum:
+        dispatch_fp8_grouped_gemm_on_tile_size<true, BiasType>(...)
+    else:
+        dispatch_fp8_grouped_gemm_on_tile_size<false, BiasType>(...)
+
+--------------------------------
+dispatch_fp8_grouped_gemm_on_bias_dtype (Bias类型调度)
+--------------------------------
+
+【签名】
+    @host→device
+    dispatch_fp8_grouped_gemm_on_bias_dtype(
+        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out
+    )
+
+【算法】
+    if bias.has_value() and bias.dtype == bfloat16:
+        dispatch_fp8_grouped_gemm_on_fast_accum<cutlass::bfloat16_t>(...)
+    else:
+        dispatch_fp8_grouped_gemm_on_fast_accum<float>(...)
+
+【备注】
+    - 当前实现bias参数未使用，仅根据dtype选择模板实例
+
+--------------------------------
+f8f8bf16_grouped_mm (公开API)
+来源: ScaledGroupMM.h
+--------------------------------
+
+【签名】
+    @host→device
+    at::cuda::detail::f8f8bf16_grouped_mm(
+        mat_a: Tensor[*, M, K, float8_e4m3fn | float8_e5m2],
+        mat_b: Tensor[*, N, K, float8_e4m3fn],  # 转置
+        scale_a: Tensor[*, M, 1, float32],
+        scale_b: Tensor[*, 1, N, float32],
+        offs: Optional[Tensor[group_count-1, int32]],
+        bias: Optional[Tensor[N, float32 | bfloat16]],
+        use_fast_accum: bool,
+        out: Tensor[*, M, N, bfloat16]
+    )
+
+【算法】
+    dispatch_fp8_grouped_gemm_on_bias_dtype(
+        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out
+    )
+
+【备注】
+    - 支持三种模式:
+      1. 标准批次GEMM: mat_a[B,M,K], mat_b[B,N,K]
+      2. M动态: mat_a[total_M,K], mat_b[B,N,K], offs指示分割点
+      3. N动态: mat_a[B,M,K], mat_b[total_N,K], offs指示分割点
+      4. K动态: mat_a[M,total_K], mat_b[N,total_K], offs指示分割点
+    - 仅SM90及以上架构支持
+    - 输出dtype固定为bfloat16
+    - 缩放是element-wise: out[i,j] = (A @ B^T)[i,j] * scale_a[i] * scale_b[j]

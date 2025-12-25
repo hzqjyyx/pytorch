@@ -1,0 +1,381 @@
+--------------------------------
+float16_copy_kernel_cuda
+来源: aten/src/ATen/native/cuda/Copy.cu:33
+--------------------------------
+
+【签名】
+    @host→device
+    float16_copy_kernel_cuda(iter: TensorIterator[src=float, dst=float16])
+
+【算法】
+    gpu_kernel_nocast(iter, λ(value: float) -> Half {
+        return static_cast<Half>(value)
+    })
+
+【并行模式】
+    elementwise
+
+--------------------------------
+bfloat16_copy_kernel_cuda
+来源: aten/src/ATen/native/cuda/Copy.cu:39
+--------------------------------
+
+【签名】
+    @host→device
+    bfloat16_copy_kernel_cuda(iter: TensorIterator[src=float, dst=bfloat16])
+
+【算法】
+    gpu_kernel_nocast(iter, λ(value: float) -> BFloat16 {
+        return static_cast<BFloat16>(value)
+    })
+
+【并行模式】
+    elementwise
+
+--------------------------------
+float8_copy_kernel_cuda
+来源: aten/src/ATen/native/cuda/Copy.cu:45
+--------------------------------
+
+【签名】
+    @host→device
+    float8_copy_kernel_cuda(iter: TensorIterator[dst=float8_*, src=*])
+
+【算法】
+    dst_dtype = iter.dtype(0)
+    src_dtype = iter.dtype(1)
+    
+    match (dst_dtype, src_dtype):
+        (kFloat8_e4m3fn, kFloat):
+            gpu_kernel_nocast(iter, λ(v: float) -> Float8_e4m3fn { Float8_e4m3fn(v) })
+        (kFloat8_e4m3fn, kHalf):
+            gpu_kernel_nocast(iter, λ(v: Half) -> Float8_e4m3fn { Float8_e4m3fn(v) })
+        (kFloat8_e4m3fn, kBFloat16):
+            gpu_kernel_nocast(iter, λ(v: BFloat16) -> Float8_e4m3fn { Float8_e4m3fn(v) })
+        (kFloat8_e4m3fn, _):
+            gpu_kernel(iter, λ(x: Float8_e4m3fn) -> Float8_e4m3fn { x })
+            
+        (kFloat8_e5m2, kFloat):
+            gpu_kernel_nocast(iter, λ(v: float) -> Float8_e5m2 {
+                ifdef AT_USE_NV_CVT_INTRINSICS:
+                    x = __nv_cvt_float_to_fp8(v, __NV_NOSAT, __NV_E5M2)
+                    return Float8_e5m2(x, from_bits())
+                else:
+                    return Float8_e5m2(v)
+            })
+        (kFloat8_e5m2, kHalf):
+            gpu_kernel_nocast(iter, λ(v: Half) -> Float8_e5m2 {
+                ifdef AT_USE_NV_CVT_INTRINSICS:
+                    x = __nv_cvt_halfraw_to_fp8(v, __NV_NOSAT, __NV_E5M2)
+                    return Float8_e5m2(x, from_bits())
+                else:
+                    return Float8_e5m2(v)
+            })
+        (kFloat8_e5m2, kBFloat16):
+            gpu_kernel_nocast(iter, λ(v: BFloat16) -> Float8_e5m2 {
+                ifdef AT_USE_NV_CVT_INTRINSICS:
+                    x = __nv_cvt_bfloat16raw_to_fp8(v, __NV_NOSAT, __NV_E5M2)
+                    return Float8_e5m2(x, from_bits())
+                else:
+                    return Float8_e5m2(v)
+            })
+        (kFloat8_e5m2, _):
+            gpu_kernel(iter, λ(x: Float8_e5m2) -> Float8_e5m2 { x })
+            
+        (kFloat8_e4m3fnuz, kFloat):
+            gpu_kernel_nocast(iter, λ(v: float) -> Float8_e4m3fnuz { Float8_e4m3fnuz(v) })
+        (kFloat8_e4m3fnuz, kHalf):
+            gpu_kernel_nocast(iter, λ(v: Half) -> Float8_e4m3fnuz { Float8_e4m3fnuz(v) })
+        (kFloat8_e4m3fnuz, kBFloat16):
+            gpu_kernel_nocast(iter, λ(v: BFloat16) -> Float8_e4m3fnuz { Float8_e4m3fnuz(v) })
+        (kFloat8_e4m3fnuz, _):
+            gpu_kernel(iter, λ(x: Float8_e4m3fnuz) -> Float8_e4m3fnuz { x })
+            
+        (kFloat8_e5m2fnuz, kFloat):
+            gpu_kernel_nocast(iter, λ(v: float) -> Float8_e5m2fnuz { Float8_e5m2fnuz(v) })
+        (kFloat8_e5m2fnuz, kHalf):
+            gpu_kernel_nocast(iter, λ(v: Half) -> Float8_e5m2fnuz { Float8_e5m2fnuz(v) })
+        (kFloat8_e5m2fnuz, kBFloat16):
+            gpu_kernel_nocast(iter, λ(v: BFloat16) -> Float8_e5m2fnuz { Float8_e5m2fnuz(v) })
+        (kFloat8_e5m2fnuz, _):
+            gpu_kernel(iter, λ(x: Float8_e5m2fnuz) -> Float8_e5m2fnuz { x })
+            
+        (kFloat8_e8m0fnu, kFloat):
+            gpu_kernel_nocast(iter, λ(v: float) -> Float8_e8m0fnu { Float8_e8m0fnu(v) })
+        (kFloat8_e8m0fnu, kHalf):
+            gpu_kernel_nocast(iter, λ(v: Half) -> Float8_e8m0fnu { Float8_e8m0fnu(v) })
+        (kFloat8_e8m0fnu, kBFloat16):
+            gpu_kernel_nocast(iter, λ(v: BFloat16) -> Float8_e8m0fnu { Float8_e8m0fnu(v) })
+        (kFloat8_e8m0fnu, _):
+            gpu_kernel(iter, λ(x: Float8_e8m0fnu) -> Float8_e8m0fnu { x })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - AT_USE_NV_CVT_INTRINSICS: 使用NVIDIA硬件转换指令（cuda_fp8.h）
+    - 非Float/Half/BFloat16源类型走同类型拷贝路径
+
+--------------------------------
+direct_copy_kernel_cuda
+来源: aten/src/ATen/native/cuda/Copy.cu:176
+--------------------------------
+
+【签名】
+    @host→device
+    direct_copy_kernel_cuda(iter: TensorIterator[dst=dtype, src=*])
+
+【算法】
+    dst_dtype = iter.dtype(0)
+    src_dtype = iter.dtype(1)
+    
+    if isQIntType(dst_dtype):
+        AT_DISPATCH_QINT_TYPES(dst_dtype, {
+            gpu_kernel(iter, λ(x: scalar_t) -> scalar_t { x })
+        })
+    else if isFloat8Type(dst_dtype):
+        float8_copy_kernel_cuda(iter)
+    else if src_dtype == kFloat and (dst_dtype == kBFloat16 or dst_dtype == kHalf):
+        if dst_dtype == kBFloat16:
+            bfloat16_copy_kernel_cuda(iter)
+        else:
+            float16_copy_kernel_cuda(iter)
+    else if isBitsType(dst_dtype):
+        assert dst_dtype == src_dtype
+        AT_DISPATCH_BIT_TYPES(dst_dtype, {
+            gpu_kernel_nocast(iter, λ(x: scalar_t) -> scalar_t { x })
+        })
+    else:
+        AT_DISPATCH_V2(dst_dtype, {
+            gpu_kernel(iter, λ(x: scalar_t) -> scalar_t { x })
+        }, AT_ALL_TYPES_AND_COMPLEX, kHalf, kBool, kBFloat16, kComplexHalf, AT_BAREBONES_UNSIGNED_TYPES)
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 量化类型(QInt)、浮点8类型、位类型有专门处理路径
+    - float->half/bfloat16转换优化
+    - bits类型禁止跨类型转换
+
+--------------------------------
+neg_conj_kernel_cuda
+来源: aten/src/ATen/native/cuda/Copy.cu:204
+--------------------------------
+
+【签名】
+    @host→device
+    neg_conj_kernel_cuda(iter: TensorIterator[dtype=complex])
+
+【算法】
+    gpu_kernel(iter, λ(x: complex) -> complex {
+        return -conj(x)
+    })
+
+【并行模式】
+    elementwise
+
+--------------------------------
+copy_device_to_device
+来源: aten/src/ATen/native/cuda/Copy.cu:213
+--------------------------------
+
+【签名】
+    copy_device_to_device(
+        iter: TensorIterator[dst=Tensor, src=Tensor],
+        non_blocking: bool,
+        p2p_enabled: bool
+    )
+
+【算法】
+    numel = iter.numel()
+    same_type = iter.dtype(0) == iter.dtype(1)
+    same_conj = iter.tensor(0).is_conj() == iter.tensor(1).is_conj()
+    same_neg = iter.tensor(0).is_neg() == iter.tensor(1).is_neg()
+    memcpy_eligible = same_type and same_conj and same_neg and iter.is_contiguous()
+    
+    dst_device = iter.device(0)
+    src_device = iter.device(1)
+    
+    CUDAGuard(src_device)
+    copy_stream = getCurrentCUDAStream(src_device.index())
+    
+    # 跨设备拷贝：双向同步
+    if src_device != dst_device:
+        dst_ready = CUDAEvent()
+        dst_ready.record(getCurrentCUDAStream(dst_device.index()))
+        dst_ready.block(copy_stream)
+    
+    # 执行拷贝
+    if memcpy_eligible:
+        dst_ptr = iter.data_ptr(0)
+        src_ptr = iter.data_ptr(1)
+        size = numel * iter.element_size(0)
+        
+        if src_ptr != dst_ptr or src_device != dst_device:
+            CUDACachingAllocator::memcpyAsync(
+                dst_ptr, dst_device.index(),
+                src_ptr, src_device.index(),
+                size, copy_stream, p2p_enabled
+            )
+    else:
+        # 类型转换路径
+        if same_neg:
+            if not same_conj:
+                conj_kernel_cuda(iter)
+            else:
+                direct_copy_kernel_cuda(iter)
+        else:
+            if not same_conj:
+                neg_conj_kernel_cuda(iter)
+            else:
+                neg_kernel_cuda(iter)
+    
+    # 跨设备拷贝：等待完成
+    if src_device != dst_device:
+        src_ready = CUDAEvent()
+        src_ready.record(copy_stream)
+        src_ready.block(getCurrentCUDAStream(dst_device.index()))
+
+【备注】
+    - 拷贝在源设备执行
+    - 跨设备拷贝需双向同步（避免write-after-write/write-after-read冲突）
+    - cudaMallocAsync内存跨非P2P设备需用cudaMemcpyPeerAsync
+
+--------------------------------
+copy_requires_temporaries
+来源: aten/src/ATen/native/cuda/Copy.cu:297
+--------------------------------
+
+【签名】
+    copy_requires_temporaries(iter: TensorIterator, p2p_enabled: bool) -> bool
+
+【算法】
+    dst_device = iter.device(0)
+    src_device = iter.device(1)
+    
+    if dst_device == src_device:
+        return false
+    
+    same_dtype = iter.dtype(0) == iter.dtype(1)
+    if same_dtype and iter.is_contiguous():
+        return false
+    else if dst_device.is_cuda() and src_device.is_cuda():
+        return not p2p_enabled
+    else:
+        return true
+
+【备注】
+    - 同设备拷贝不需要临时张量
+    - 跨设备连续同类型拷贝可直接cudaMemcpyAsync
+    - GPU间拷贝需P2P支持，否则需临时张量
+    - CPU-GPU非连续/异类型拷贝需临时张量
+
+--------------------------------
+maybe_enable_p2p_access
+来源: aten/src/ATen/native/cuda/Copy.cu:321
+--------------------------------
+
+【签名】
+    maybe_enable_p2p_access(dst_device: Device, src_device: Device) -> bool
+
+【算法】
+    if dst_device.is_cpu() or src_device.is_cpu():
+        return false
+    return at::cuda::get_p2p_access(src_device.index(), dst_device.index())
+
+--------------------------------
+copy_kernel_cuda
+来源: aten/src/ATen/native/cuda/Copy.cu:328
+--------------------------------
+
+【签名】
+    copy_kernel_cuda(iter: TensorIterator[dst=Tensor, src=Tensor], non_blocking: bool)
+
+【算法】
+    dst_device = iter.device(0)
+    src_device = iter.device(1)
+    
+    p2p_enabled = maybe_enable_p2p_access(dst_device, src_device)
+    
+    # 路径1: 需要临时张量
+    if copy_requires_temporaries(iter, p2p_enabled):
+        dst = iter.tensor(0)
+        conversion_device = kCUDA if non_blocking else kCPU
+        
+        if iter.device_type(1) == conversion_device:
+            # GPU转换
+            dst_contig = dst if dst.is_contiguous() else empty_like(dst)
+            src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous()
+        else:
+            # CPU转换
+            same_type = iter.dtype(0) == iter.dtype(1)
+            dst_contig = dst if (dst.is_contiguous() and same_type) else empty_like(dst, iter.dtype(1))
+            src_contig = iter.tensor(1).expand_as(dst).contiguous()
+        
+        # 传播conj/neg标志
+        dst_contig._set_conj(dst.is_conj())
+        src_contig._set_conj(iter.tensor(1).is_conj())
+        dst_contig._set_neg(dst.is_neg())
+        src_contig._set_neg(iter.tensor(1).is_neg())
+        
+        dst_contig.copy_(src_contig, non_blocking)
+        
+        if not dst_contig.is_same(dst):
+            dst.copy_(dst_contig, non_blocking)
+        return
+    
+    # 路径2: GPU到GPU
+    if dst_device.is_cuda() and src_device.is_cuda():
+        copy_device_to_device(iter, non_blocking, p2p_enabled)
+        return
+    
+    # 路径3: CPU-GPU
+    CUDAGuard device_guard
+    if dst_device.is_cuda() and src_device.is_cpu():
+        device_guard.set_device(dst_device)
+        kind = cudaMemcpyHostToDevice
+    else if dst_device.is_cpu() and src_device.is_cuda():
+        device_guard.set_device(src_device)
+        kind = cudaMemcpyDeviceToHost
+    
+    dst_ptr = iter.data_ptr(0)
+    src_ptr = iter.data_ptr(1)
+    nbytes = iter.numel() * iter.element_size(0)
+    stream = getCurrentCUDAStream()
+    
+    if non_blocking:
+        cudaMemcpyAsync(dst_ptr, src_ptr, nbytes, kind, stream)
+        
+        # 记录pinned memory事件（用于缓存host allocator）
+        host_tensor = iter.tensor(0) if dst_device == kCPU else iter.tensor(1)
+        ptr = dst_ptr if dst_device == kCPU else src_ptr
+        ctx = host_tensor.storage().data_ptr().get_context()
+        CachingHostAllocator_recordEvent(ptr, ctx, stream)
+    else:
+        at::cuda::memcpy_and_sync(dst_ptr, src_ptr, nbytes, kind, stream)
+    
+    # 处理conj/neg差异
+    if iter.tensor(0).is_conj() != iter.tensor(1).is_conj():
+        iter.tensor(0).conj_physical_()
+    if iter.tensor(0).is_neg() != iter.tensor(1).is_neg():
+        iter.tensor(0).neg_()
+
+【备注】
+    - 三条路径：临时张量路径、GPU-GPU、CPU-GPU
+    - non_blocking=true: GPU转换，异步拷贝
+    - non_blocking=false: CPU转换，同步拷贝
+    - CPU-GPU异步拷贝需记录pinned memory事件
+    - conj/neg标志可能需物理转换
+
+--------------------------------
+direct_copy_kernel_cuda (头文件声明)
+来源: aten/src/ATen/native/cuda/Copy.h:8
+--------------------------------
+
+【签名】
+    @host→device
+    direct_copy_kernel_cuda(iter: TensorIteratorBase&)
+
+【备注】
+    - 外部可见接口，实现见Copy.cu:176

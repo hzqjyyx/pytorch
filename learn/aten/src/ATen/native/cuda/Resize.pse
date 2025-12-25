@@ -1,0 +1,165 @@
+--------------------------------
+内存与Tensor调整工具
+来源: aten/src/ATen/native/cuda/Resize.h, aten/src/ATen/native/cuda/Resize.cpp
+--------------------------------
+
+【函数】
+    resize_bytes_cuda(storage: StorageImpl*, size_bytes: size_t)
+        用途: 调整CUDA存储大小，保留旧数据（异步复制）
+        调用: cudaMemcpyAsync(cudaMemcpyDeviceToDevice)
+
+    maybe_resize_storage_cuda(self: TensorImpl*, new_size_bytes: size_t)
+        用途: 按需扩容存储（仅当新尺寸大于当前容量时）
+
+    resize_impl_cuda_(
+        self: TensorImpl*, 
+        size: IntArrayRef, 
+        stride: OptionalIntArrayRef
+    ) -> TensorImpl*
+        用途: 调整tensor形状和步长，必要时扩容存储
+
+    resize_cuda_(
+        self: Tensor, 
+        size: IntArrayRef, 
+        optional_memory_format: Optional[MemoryFormat]
+    ) -> Tensor
+        用途: CUDA tensor调整大小的公开接口
+
+【依赖】
+    c10::cuda::CUDAGuard                        # 设备上下文管理
+    at::detail::computeStorageNbytes            # 计算存储字节数
+    at::native::resize_named_tensor_            # 具名tensor处理
+    at::native::fill_resize_deterministic_      # 确定性模式下填充新内存
+
+--------------------------------
+resize_bytes_cuda
+来源: aten/src/ATen/native/cuda/Resize.cpp:17
+--------------------------------
+
+【签名】
+    resize_bytes_cuda(storage: StorageImpl*, size_bytes: size_t)
+
+【算法】
+    # Step 1: 验证
+    assert storage.resizable()
+    assert storage.allocator() != nullptr
+
+    device = storage.device()
+
+    # Step 2: 处理零大小
+    if size_bytes == 0:
+        storage.set_data_ptr_noswap(nullptr, device)
+        storage.set_nbytes(0)
+        return
+
+    # Step 3: 分配新内存
+    with CUDAGuard(device.index()):
+        new_data = allocator.allocate(size_bytes)
+
+        # Step 4: 异步复制旧数据
+        if storage.data_ptr() != nullptr:
+            globalContext().lazyInitDevice(CUDA)
+            cudaMemcpyAsync(
+                dst=new_data.get(),
+                src=storage.data(),
+                size=min(storage.nbytes(), size_bytes),
+                kind=cudaMemcpyDeviceToDevice,
+                stream=getCurrentCUDAStream()
+            )
+
+        # Step 5: 替换存储指针
+        storage.set_data_ptr_noswap(new_data)
+        storage.set_nbytes(size_bytes)
+
+--------------------------------
+maybe_resize_storage_cuda
+来源: aten/src/ATen/native/cuda/Resize.h:12
+--------------------------------
+
+【签名】
+    maybe_resize_storage_cuda(self: TensorImpl*, new_size_bytes: size_t)
+
+【算法】
+    # 跳过空tensor
+    if self.numel() == 0:
+        return
+
+    storage = self.unsafe_storage()
+    assert storage != nullptr
+
+    # 仅在需要扩容时调用
+    if new_size_bytes > storage.nbytes():
+        resize_bytes_cuda(storage.unsafeGetStorageImpl(), new_size_bytes)
+
+--------------------------------
+resize_impl_cuda_
+来源: aten/src/ATen/native/cuda/Resize.h:29
+--------------------------------
+
+【签名】
+    resize_impl_cuda_(
+        self: TensorImpl*, 
+        size: IntArrayRef, 
+        stride: OptionalIntArrayRef
+    ) -> TensorImpl*
+
+【算法】
+    # Step 1: 形状未变则跳过
+    if self.sizes() == size and (stride is None or self.strides() == stride):
+        return self
+
+    # Step 2: 计算新存储需求
+    itemsize = self.dtype().itemsize()
+    storage_offset = self.storage_offset()
+
+    if stride is not None:
+        self.set_sizes_and_strides(size, stride)
+        storage_size = computeStorageNbytes(size, stride, itemsize, storage_offset)
+    else:
+        self.set_sizes_contiguous(size)
+        storage_size = computeStorageNbytesContiguous(size, itemsize, storage_offset)
+
+    # Step 3: 按需扩容
+    maybe_resize_storage_cuda(self, storage_size)
+
+    return self
+
+--------------------------------
+resize_cuda_
+来源: aten/src/ATen/native/cuda/Resize.cpp:49
+--------------------------------
+
+【签名】
+    resize_cuda_(
+        self: Tensor, 
+        size: IntArrayRef, 
+        optional_memory_format: Optional[MemoryFormat]
+    ) -> Tensor
+
+【算法】
+    # Step 1: 处理具名tensor
+    if self.has_names():
+        return resize_named_tensor_(self, size, optional_memory_format)
+
+    # Step 2: 调整形状和存储
+    self_impl = self.unsafeGetTensorImpl()
+    old_storage_nbytes = self_impl.unsafe_storage().nbytes() if self_impl.unsafe_storage() else 0
+    
+    resize_impl_cuda_(self_impl, size, stride=None)
+
+    # Step 3: 应用内存格式
+    if optional_memory_format is not None:
+        memory_format = optional_memory_format.value()
+        assert memory_format != MemoryFormat.Preserve
+        self_impl.empty_tensor_restride(memory_format)
+
+    # Step 4: 确定性模式填充
+    if globalContext().deterministicAlgorithms() and globalContext().deterministicFillUninitializedMemory():
+        fill_resize_deterministic_(self, old_storage_nbytes)
+
+    return self
+
+【备注】
+    - 新分配的内存在确定性模式下会被填充
+    - 不支持 MemoryFormat.Preserve
+    - 具名tensor走单独路径处理

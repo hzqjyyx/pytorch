@@ -1,0 +1,754 @@
+--------------------------------
+masked_select_out_cuda_impl
+来源: aten/src/ATen/native/cuda/IndexKernel.cpp
+--------------------------------
+
+【签名】
+    masked_select_out_cuda_impl(
+        result: Tensor[?, dtype],
+        self: Tensor[*D, dtype],
+        mask: Tensor[*D, bool]
+    ) -> Tensor[?, dtype]
+
+    约束:
+    - self.dtype == result.dtype
+    - mask.dtype == bool
+
+【算法】
+    # Step 1: 处理0维tensor (转为1维)
+    if mask.dim == 0:
+        mask_temp = mask.unsqueeze(0)
+    else:
+        mask_temp = mask
+
+    if self.dim == 0:
+        self_temp = self.unsqueeze(0)
+    else:
+        self_temp = self
+
+    # Step 2: 广播到相同形状
+    mask_expanded, self_expanded = expand_outplace(mask_temp, self_temp)
+
+    # Step 3: 执行索引操作
+    at::cuda::index_out(result, self_expanded, [mask_expanded])
+
+    return result
+
+【备注】
+    - index_out: 内部调用的高级索引函数
+    - expand_outplace: 返回可能是borrowed或owned的tensor
+
+--------------------------------
+masked_select_cuda
+来源: aten/src/ATen/native/cuda/IndexKernel.cpp
+--------------------------------
+
+【签名】
+    masked_select_cuda(
+        self: Tensor[*D, dtype],
+        mask: Tensor[*D, bool]
+    ) -> Tensor[?, dtype]
+
+【算法】
+    namedinference::compute_broadcast_outnames(self, mask)
+    result = at::empty([0], dtype=self.dtype, device=self.device)
+    return masked_select_out_cuda_impl(result, self, mask)
+
+--------------------------------
+masked_select_out_cuda
+来源: aten/src/ATen/native/cuda/IndexKernel.cpp
+--------------------------------
+
+【签名】
+    masked_select_out_cuda(
+        self: Tensor[*D, dtype],
+        mask: Tensor[*D, bool],
+        result: Tensor[?, dtype]
+    ) -> Tensor[?, dtype]
+
+【算法】
+    namedinference::compute_broadcast_outnames(self, mask)
+    return masked_select_out_cuda_impl(result, self, mask)
+
+--------------------------------
+masked_scatter__cuda
+来源: aten/src/ATen/native/cuda/IndexKernel.cpp
+--------------------------------
+
+【签名】
+    masked_scatter__cuda(
+        self: Tensor[*D, dtype],
+        mask: Tensor[*D, bool],
+        source: Tensor[S, dtype]
+    ) -> Tensor[*D, dtype]
+
+    约束:
+    - self.dtype == source.dtype
+    - mask.dtype == bool
+    - sum(mask) <= source.numel
+
+【算法】
+    # Step 1: 验证与广播
+    at::assert_no_internal_overlap(self)
+    b_mask = expand_inplace(self, mask)
+
+    if self.numel == 0:
+        return self
+
+    # Step 2: 计算前缀和并执行scatter
+    maskPrefixSum = at::empty(self.sizes(), dtype=int64, device=mask.device)
+    launch_masked_scatter_kernel(self, b_mask, maskPrefixSum, source)
+
+    return self
+
+【备注】
+    - expand_inplace: 将mask广播到self的形状
+    - launch_masked_scatter_kernel: 定义在IndexKernel.cu中
+
+--------------------------------
+index_elementwise_kernel
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @device
+    index_elementwise_kernel<nt, vt, func_t>(N: int64, f: func_t)
+
+    模板参数:
+    - nt: 每block的线程数
+    - vt: 每线程处理的元素数
+
+【算法】
+    tid = threadIdx.x
+    nv = nt * vt
+    idx = nv * blockIdx.x + tid
+
+    for i in range(vt):
+        if idx < N:
+            f(idx)
+            idx += nt
+
+【并行模式】
+    grid: (ceil(N / (nt * vt)),)
+    block: (nt,)
+    - 每个线程处理vt个元素，步长为nt
+
+--------------------------------
+launch_kernel
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_kernel<nt, vt, func_t>(N: int64, f: func_t)
+
+【算法】
+    if N == 0:
+        return
+
+    grid = (ceil(N / (nt * vt)),)
+    block = (nt,)
+    stream = at::cuda::getCurrentCUDAStream()
+    index_elementwise_kernel<nt, vt><<<grid, block, 0, stream>>>(N, f)
+
+【备注】
+    - nt, vt: 编译期常量，默认使用 launch_size_nd=128, launch_bound2=4
+
+--------------------------------
+gpu_index_kernel
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    gpu_index_kernel<func_t>(
+        iter: TensorIteratorBase,
+        index_size: IntArrayRef[num_indices],
+        index_stride: IntArrayRef[num_indices],
+        f: func_t
+    )
+
+    约束:
+    - iter.ntensors == num_indices + 2
+    - index_size.size == index_stride.size
+
+【算法】
+    if iter.numel == 0:
+        return
+
+    # Step 1: 处理大于32位索引的情况
+    if not iter.can_use_32bit_indexing():
+        for sub_iter in iter.with_32bit_indexing():
+            gpu_index_kernel(sub_iter, index_size, index_stride, f)
+        return
+
+    # Step 2: 准备索引信息
+    sizes = [index_size[i] for i in range(num_indices)]
+    strides = [index_stride[i] for i in range(num_indices)]
+    index_ptrs = [iter.data_ptr(i + 2) for i in range(num_indices)]
+
+    out_ptr = iter.data_ptr(0)
+    in_ptr = iter.data_ptr(1)
+    offset_calc = make_offset_calculator<3>(iter)
+
+    # Step 3: 启动kernel
+    launch_kernel<128, 4>(iter.numel, lambda idx:
+        offsets = offset_calc.get(idx)
+        out_data = out_ptr + offsets[0]
+        in_data = in_ptr + offsets[1]
+
+        # 计算多维索引偏移
+        offset = 0
+        for i in range(num_indices):
+            index = *reinterpret_cast<int64_t*>(index_ptrs[i] + offsets[2])
+            assert -sizes[i] <= index < sizes[i]
+            if index < 0:
+                index += sizes[i]
+            offset += index * strides[i]
+
+        f(out_data, in_data, offset)
+    )
+
+【并行模式】
+    parallel_for idx in range(iter.numel)
+
+【备注】
+    - iter: 包含 [output, input, *indices]
+    - f: 回调函数，接收 (out_data, in_data, offset)
+    - 支持负索引
+
+--------------------------------
+index_fill_kernel_impl
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    index_fill_kernel_impl<scalar_t>(
+        iter: TensorIterator,
+        dim: int64,
+        self_dim_size: int64,
+        self_dim_stride: int64,
+        fill_val: scalar_t
+    )
+
+【算法】
+    if iter.numel == 0:
+        return
+
+    if not iter.can_use_32bit_indexing():
+        for sub_iter in iter.with_32bit_indexing():
+            index_fill_kernel_impl(sub_iter, dim, self_dim_size, self_dim_stride, fill_val)
+        return
+
+    self_ptr = iter.data_ptr(0)
+    idx_ptr = iter.data_ptr(1)
+    offset_calc = make_offset_calculator<2>(iter)
+
+    launch_kernel<128, 4>(iter.numel, lambda i:
+        offsets = offset_calc.get(i)
+        self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0])
+        idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1])
+
+        assert idx >= -self_dim_size and idx < self_dim_size
+        if idx < 0:
+            idx += self_dim_size
+
+        self_data[idx * self_dim_stride] = fill_val
+    )
+
+【并行模式】
+    parallel_for i in range(iter.numel)
+
+【备注】
+    - iter: 包含 [self, indices]
+    - 支持负索引
+
+--------------------------------
+index_copy_kernel_impl
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    index_copy_kernel_impl<scalar_t>(
+        iter: TensorIterator,
+        dim: int64,
+        self_dim_size: int64,
+        self_dim_stride: int64
+    )
+
+【算法】
+    if iter.numel == 0:
+        return
+
+    if not iter.can_use_32bit_indexing():
+        for sub_iter in iter.with_32bit_indexing():
+            index_copy_kernel_impl<scalar_t>(sub_iter, dim, self_dim_size, self_dim_stride)
+        return
+
+    self_ptr = iter.data_ptr(0)
+    idx_ptr = iter.data_ptr(1)
+    source_ptr = iter.data_ptr(2)
+    offset_calc = make_offset_calculator<3>(iter)
+
+    launch_kernel<128, 4>(iter.numel, lambda i:
+        offsets = offset_calc.get(i)
+        self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0])
+        idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1])
+        source_data = reinterpret_cast<scalar_t*>(source_ptr + offsets[2])
+
+        assert idx >= 0 and idx < self_dim_size
+        self_data[idx * self_dim_stride] = *source_data
+    )
+
+【并行模式】
+    parallel_for i in range(iter.numel)
+
+【备注】
+    - iter: 包含 [self, indices, source]
+    - 不支持负索引（与index_fill不同）
+    - 非确定性操作（当indices有重复时）
+
+--------------------------------
+index_kernel_impl
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    index_kernel_impl<scalar_t>(
+        iter: TensorIteratorBase,
+        index_size: IntArrayRef,
+        index_stride: IntArrayRef
+    )
+
+【算法】
+    gpu_index_kernel(iter, index_size, index_stride, 
+        lambda (out_data, in_data, offset):
+            *reinterpret_cast<scalar_t*>(out_data) = *reinterpret_cast<scalar_t*>(in_data + offset)
+    )
+
+【备注】
+    - 高级索引的读取操作：output = input[indices]
+
+--------------------------------
+index_put_kernel_impl
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    index_put_kernel_impl<scalar_t>(
+        iter: TensorIterator,
+        index_size: IntArrayRef,
+        index_stride: IntArrayRef
+    )
+
+【算法】
+    gpu_index_kernel(iter, index_size, index_stride,
+        lambda (out_data, in_data, offset):
+            *reinterpret_cast<scalar_t*>(out_data + offset) = *reinterpret_cast<scalar_t*>(in_data)
+    )
+
+【备注】
+    - 高级索引的写入操作：output[indices] = input
+
+--------------------------------
+index_kernel
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    index_kernel(
+        iter: TensorIteratorBase,
+        index_size: IntArrayRef,
+        index_stride: IntArrayRef
+    )
+
+【算法】
+    AT_DISPATCH_V2(iter.dtype(), "index_cuda",
+        index_kernel_impl<OpaqueType<sizeof(scalar_t)>>(iter, index_size, index_stride)
+    )
+
+【备注】
+    - 支持类型: ALL_TYPES_AND_COMPLEX, FLOAT8_TYPES, ComplexHalf, Half, Bool, BFloat16
+    - 使用OpaqueType避免冗余实例化
+
+--------------------------------
+index_fill_kernel
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    index_fill_kernel(
+        iter: TensorIterator,
+        dim: int64,
+        self_dim_size: int64,
+        self_dim_stride: int64,
+        source: Scalar
+    )
+
+【算法】
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(Half, Bool, BFloat16, ComplexHalf, iter.dtype(), "index_fill_cuda",
+        fill_val = source.to<scalar_t>()
+        fill_val_opaque = *reinterpret_cast<OpaqueType<sizeof(scalar_t)>*>(&fill_val)
+        index_fill_kernel_impl<OpaqueType<sizeof(scalar_t)>>(iter, dim, self_dim_size, self_dim_stride, fill_val_opaque)
+    )
+
+--------------------------------
+index_copy_kernel
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    index_copy_kernel(
+        iter: TensorIterator,
+        dim: int64,
+        self_dim_size: int64,
+        self_dim_stride: int64
+    )
+
+【算法】
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(Half, Bool, BFloat16, ComplexHalf, iter.dtype(), "index_copy_cuda",
+        index_copy_kernel_impl<OpaqueType<sizeof(scalar_t)>>(iter, dim, self_dim_size, self_dim_stride)
+    )
+
+【备注】
+    - 非确定性操作（当indices有重复时）
+    - torch.use_deterministic_algorithms(True) 时不会调用此kernel
+
+--------------------------------
+index_put_kernel
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    index_put_kernel(
+        iter: TensorIterator,
+        index_size: IntArrayRef,
+        index_stride: IntArrayRef,
+        accumulate: bool
+    )
+
+    约束:
+    - accumulate == false
+
+【算法】
+    AT_DISPATCH_V2(iter.dtype(), "index_put",
+        index_put_kernel_impl<OpaqueType<sizeof(scalar_t)>>(iter, index_size, index_stride)
+    )
+
+【备注】
+    - 不支持 accumulate=true
+    - 支持类型: ALL_TYPES_AND_COMPLEX, FLOAT8_TYPES, ComplexHalf, Half, Bool, BFloat16
+
+--------------------------------
+index_put_kernel_quantized_cuda
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    index_put_kernel_quantized_cuda(
+        iter: TensorIterator,
+        index_size: IntArrayRef,
+        index_stride: IntArrayRef,
+        accumulate: bool,
+        scale: double,
+        zero_point: int
+    )
+
+    约束:
+    - accumulate == false
+
+【算法】
+    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "index_put",
+        qmin = min_value<scalar_t::underlying>
+        qmax = max_value<scalar_t::underlying>
+        inv_scale = 1.0 / float(scale)
+
+        gpu_index_kernel(iter, index_size, index_stride,
+            lambda (out_data, in_data, offset):
+                qvalue = int64(zero_point + round(*(float*)in_data * inv_scale))
+                qvalue = clamp(qvalue, qmin, qmax)
+                *(scalar_t*)(out_data + offset) = scalar_t(qvalue)
+        )
+    )
+
+【备注】
+    - 量化版本的index_put
+    - 输入为float，输出为量化类型
+    - 使用手动clamp而非std::clamp以避免ROCm构建问题
+
+--------------------------------
+cuda_take_put_kernel
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    cuda_take_put_kernel<scalar_t, index_t, func_t>(
+        iter: TensorIterator,
+        indexed: TensorBase,
+        f: func_t
+    )
+
+【算法】
+    if not iter.can_use_32bit_indexing():
+        for sub_iter in iter.with_32bit_indexing():
+            cuda_take_put_kernel<scalar_t, index_t>(sub_iter, indexed, f)
+        return
+
+    numel = indexed.numel()
+    is_contiguous = indexed.is_contiguous()
+
+    iterated_ptr = iter.data_ptr(0)
+    idx_ptr = iter.data_ptr(1)
+    offset_calc = make_offset_calculator<2>(iter)
+
+    # 为非连续tensor准备offset计算器
+    indexed_sizes = reversed(indexed.sizes())
+    indexed_strides = reversed(indexed.strides())
+    offset_indexed = OffsetCalculator<1, unsigned_index_t>(indexed.dim, indexed_sizes, indexed_strides)
+
+    launch_kernel<128, 4>(iter.numel, lambda i:
+        offsets = offset_calc.get(i)
+        iterated = *reinterpret_cast<scalar_t*>(iterated_ptr + offsets[0])
+        idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1])
+
+        assert idx < numel and idx >= -numel
+        offset = index_t(idx)
+        if offset < 0:
+            offset += numel
+
+        if not is_contiguous:
+            offset = offset_indexed.get(offset)[0]
+
+        f(iterated, offset)
+    )
+
+【并行模式】
+    parallel_for i in range(iter.numel)
+
+【备注】
+    - f: 回调函数，接收 (iterated, offset)
+    - index_t: Int 或 Long，取决于tensor大小
+
+--------------------------------
+put_kernel
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    put_kernel(
+        iter: TensorIterator,
+        output: TensorBase,
+        accumulate: bool
+    )
+
+【算法】
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(Half, Bool, BFloat16, iter.dtype(), "put_cuda",
+        AT_DISPATCH_INDEX_TYPES(can_use_32bit ? Int : Long, "put_cuda_index",
+            indexed_ptr = output.data_ptr<scalar_t>()
+
+            if accumulate:
+                numel = output.numel()
+                cuda_take_put_kernel<scalar_t, index_t>(iter, output,
+                    lambda (iterated, offset):
+                        fastSpecializedAtomicAdd(indexed_ptr, offset, numel, iterated)
+                )
+            else:
+                cuda_take_put_kernel<scalar_t, index_t>(iter, output,
+                    lambda (iterated, offset):
+                        indexed_ptr[offset] = iterated
+                )
+        )
+    )
+
+【备注】
+    - accumulate=true: 使用原子加
+    - accumulate=false: 直接赋值
+
+--------------------------------
+take_kernel
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    take_kernel(
+        iter: TensorIterator,
+        input: TensorBase
+    )
+
+【算法】
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(Half, Bool, BFloat16, iter.dtype(), "take_cuda",
+        AT_DISPATCH_INDEX_TYPES(can_use_32bit ? Int : Long, "take_cuda_index",
+            indexed_ptr = input.const_data_ptr<scalar_t>()
+            cuda_take_put_kernel<scalar_t, index_t>(iter, input,
+                lambda (iterated, offset):
+                    iterated = indexed_ptr[offset]
+            )
+        )
+    )
+
+【备注】
+    - 从input中取出indices指定的元素
+
+--------------------------------
+masked_scatter_size_check
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @device
+    masked_scatter_size_check(
+        mask_exclusive_sum: int64*,
+        mask: bool*,
+        srcSize: int64
+    )
+
+【算法】
+    totalElements = *mask_exclusive_sum + *mask
+    assert totalElements <= srcSize
+
+【备注】
+    - 异步检查：确保mask中true的数量不超过source的元素数
+
+--------------------------------
+launch_masked_scatter_kernel
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_masked_scatter_kernel(
+        self: TensorBase[*D, dtype],
+        mask: TensorBase[*D, bool],
+        maskPrefixSum: TensorBase[*D, int64],
+        source: TensorBase[S, dtype]
+    )
+
+【算法】
+    srcSize = source.numel()
+    mask_cont = mask.contiguous()
+    mask_numel = mask.numel()
+
+    # Step 1: 计算mask的前缀和（exclusive sum）
+    maskPrefixSum_data = maskPrefixSum.mutable_data_ptr<int64_t>()
+    mask_data = mask_cont.const_data_ptr<bool>()
+    at::cuda::cub::mask_exclusive_sum(mask_data, maskPrefixSum_data, mask_numel)
+
+    # Step 2: 异步检查source大小是否足够
+    masked_scatter_size_check<<<1, 1>>>(
+        &maskPrefixSum_data[mask_numel - 1],
+        &mask_data[mask_numel - 1],
+        srcSize
+    )
+
+    # Step 3: 执行scatter
+    source_contig = source.contiguous()
+    iter = TensorIteratorConfig()
+        .set_check_mem_overlap(false)
+        .check_all_same_dtype(false)
+        .resize_outputs(false)
+        .add_output(self)
+        .add_input(self)
+        .add_const_input(mask_cont)
+        .add_input(maskPrefixSum)
+        .build()
+
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(Bool, BFloat16, Half, self.dtype(), "masked_scatter_",
+        source_ptr = source_contig.const_data_ptr<scalar_t>()
+        gpu_kernel(iter, lambda (a, mask, maskPrefixSum):
+            if mask:
+                return source_ptr[maskPrefixSum]
+            else:
+                return a
+        )
+    )
+
+【并行模式】
+    elementwise
+
+【备注】
+    - maskPrefixSum: exclusive prefix sum，表示当前位置之前有多少个true
+    - 使用前缀和将mask位置映射到source索引
+
+--------------------------------
+flip_kernel_impl
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    flip_kernel_impl<scalar_t>(iter: TensorIterator)
+
+【算法】
+    if not iter.can_use_32bit_indexing():
+        for sub_iter in iter.with_32bit_indexing():
+            flip_kernel_impl<scalar_t>(sub_iter)
+        return
+
+    out_ptr = iter.data_ptr(0)
+    in_ptr = iter.data_ptr(1)
+    offset_calc = make_offset_calculator<2, signed_strides=true>(iter)
+
+    launch_kernel<128, 4>(iter.numel, lambda i:
+        offsets = offset_calc.get(i)
+        out_data = reinterpret_cast<scalar_t*>(out_ptr + offsets[0])
+        in_data = reinterpret_cast<scalar_t*>(in_ptr + offsets[1])
+        *out_data = *in_data
+    )
+
+【并行模式】
+    elementwise
+
+【备注】
+    - offsets可以为负（反向索引）
+    - 通过TensorIterator的stride设置实现翻转
+
+--------------------------------
+flip_kernel
+来源: aten/src/ATen/native/cuda/IndexKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    flip_kernel(iter: TensorIterator, quantized: bool)
+
+【算法】
+    if quantized:
+        AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cuda",
+            flip_kernel_impl<OpaqueType<sizeof(scalar_t)>>(iter)
+        )
+    else:
+        AT_DISPATCH_V2(iter.dtype(), "flip_cuda",
+            flip_kernel_impl<OpaqueType<sizeof(scalar_t)>>(iter)
+        )
+
+【备注】
+    - 支持类型: ALL_TYPES_AND_COMPLEX, FLOAT8_TYPES, BAREBONES_UNSIGNED_TYPES, ComplexHalf, Half, Bool, BFloat16
+    - 量化类型: QINT_AND_SUB_BYTE_TYPES
+
+--------------------------------
+launch_masked_scatter_kernel (header declaration)
+来源: aten/src/ATen/native/cuda/IndexKernel.h
+--------------------------------
+
+【签名】
+    launch_masked_scatter_kernel(
+        self: TensorBase,
+        mask: TensorBase,
+        maskPrefixSum: TensorBase [in,out],
+        source: TensorBase
+    )
+
+【备注】
+    - 函数声明，实现在IndexKernel.cu

@@ -20,7 +20,8 @@
         "TensorModeKernel.h": "6ec084f249b3b4fc"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Resize": {
@@ -30,7 +31,8 @@
         "Resize.h": "130fae57ea003b0d"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "GridSampler": {
@@ -41,7 +43,8 @@
         "GridSampler.h": "c4ca9e63d99a4f6a"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ScaledGroupMM": {
@@ -51,7 +54,8 @@
         "ScaledGroupMM.h": "f3c5472a6f5be7e6"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Sort": {
@@ -62,7 +66,8 @@
         "Sort.h": "4b6470ad091654aa"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ScanKernels": {
@@ -72,7 +77,8 @@
         "ScanKernels.h": "630173077e826c71"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Sorting": {
@@ -83,7 +89,8 @@
         "Sorting.h": "def800ab2d43e721"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "RowwiseScaledMM": {
@@ -93,7 +100,8 @@
         "RowwiseScaledMM.h": "556e88d41cfde031"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "IndexKernel": {
@@ -104,7 +112,8 @@
         "IndexKernel.h": "1dd32b772442596b"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Distributions": {
@@ -115,7 +124,8 @@
         "Distributions.h": "d76ab352568f5e33"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "TensorCompare": {
@@ -125,7 +135,8 @@
         "TensorCompare.cu": "4a8f272b8c73939d"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Copy": {
@@ -135,7 +146,8 @@
         "Copy.h": "b9df5a102face3e3"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Activation": {
@@ -156,7 +168,8 @@
         "TensorTopK.h": "9c45d21a30d63820"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "SpectralOps": {
@@ -166,7 +179,8 @@
         "SpectralOps.cu": "3d90105d6930ddf2"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "SortStable": {

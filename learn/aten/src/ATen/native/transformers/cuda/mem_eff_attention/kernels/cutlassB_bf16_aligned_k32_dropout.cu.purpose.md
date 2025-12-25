@@ -1,0 +1,15 @@
+- **自动生成的 CUDA 内核文件**（参见 generate_kernels.py）
+- **用途**：实现高效的注意力机制反向传播计算（AttentionBackwardKernel）
+- **数据类型**：bfloat16（Google Brain Float 16）
+- **配置参数**：
+  - 块大小：64x64
+  - 头维度：32
+  - Dropout：启用
+  - 其他特性：均启用（true, true, true）
+- **目标架构**：CUDA Compute Capability 8.0+（SM80 及以上）
+- **核心函数**：`fmha_cutlassB_bf16_aligned_64x64_k32_dropout_sm80()`
+- **执行逻辑**：
+  - 检查 CUDA 架构版本是否在 SM80-SM120 范围内
+  - 如果符合，调用 `AttentionBackwardKernel::attention_kernel()` 执行反向传播
+  - 如果架构不匹配，输出错误信息并退出
+- **关键特性**：使用 `__launch_bounds__()` 优化线程块分配和寄存器使用

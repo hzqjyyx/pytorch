@@ -1,0 +1,13 @@
+- **文件用途**：自动生成的 CUDA 内存高效注意力机制的反向传播内核文件
+- **核心功能**：为三个不同的 NVIDIA GPU 架构（SM50、SM70、SM75）提供优化的反向传播注意力内核实现
+- **内核特性**：
+  - 使用 CUTLASS 库的反向传播内核模板
+  - 数据类型：float32（32位浮点）
+  - 配置：64x64 线程块大小，64 的头维度
+  - 未对齐内存访问模式（notaligned）
+- **架构覆盖**：
+  - `fmha_cutlassB_f32_notaligned_64x64_k64_sm50`：支持 SM50-SM70（CUDA 计算能力 5.0-7.0）
+  - `fmha_cutlassB_f32_notaligned_64x64_k64_sm70`：支持 SM70-SM75（CUDA 计算能力 7.0-7.5）
+  - `fmha_cutlassB_f32_notaligned_64x64_k64_sm75`：支持 SM75-SM80（CUDA 计算能力 7.5-8.0）
+- **安全机制**：每个内核都包含架构检查，如果在不兼容的 GPU 上编译/运行，会输出错误信息
+- **内核执行流程**：调用 `advance_to_block()` 进行块级别的动态调度，然后执行 `attention_kernel()` 进行实际计算

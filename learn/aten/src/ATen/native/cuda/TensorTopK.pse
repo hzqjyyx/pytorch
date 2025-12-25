@@ -1,0 +1,720 @@
+# TensorTopK 伪代码
+
+## 配置管理
+
+--------------------------------
+topk配置管理
+来源: TensorTopK.cu
+--------------------------------
+
+【函数】
+    disable_sort_for_topk() -> bool
+        用途: 检查是否应禁用基于排序的topk实现
+        返回: CUB_SUPPORTS_SCAN_BY_KEY()的结果
+
+    should_use_sort(self: Tensor, dim: int) -> bool
+        用途: 判断是否应使用完整排序代替topk
+        返回: 根据启发式规则判断
+        平台特定:
+            ROCm: numel >= 10000 且 numel == size(dim) 时使用
+            CUDA: 当 num_slices <= 10 且 slice_size >= 100000 时使用
+        限制: Bool类型不支持排序，dim==0时不使用
+
+    should_use_multiblock(num_slices: int64, slice_size: int64) -> bool
+        用途: 判断是否使用多块topk实现
+        返回: 根据slice数量和大小的启发式规则判断
+        限制: num_slices和slice_size必须都在uint32范围内
+
+    get_items_per_thread(num_slices: uint64, slice_size: uint64) -> int
+        用途: 计算每个线程处理的元素数量
+        算法:
+            读取设备属性: regs_per_mp, max_blocks_per_mp, mpc
+            计算每MP的块数: blocks_per_mp = min(regs_per_mp / REGS_PER_BLOCK, max_blocks_per_mp)
+            总工作量分配: items = ceil(slice_size * num_slices / (mpc * blocks_per_mp * BLOCK_THREADS))
+            返回: clamp(items, MIN_ITEMS_PER_THREAD, MAX_ITEMS_PER_THREAD)  # [4, 64]
+
+--------------------------------
+BlockIdxToKey (块索引映射)
+来源: TensorTopK.cu
+--------------------------------
+
+【状态】
+    blocks_per_slice: uint32    # 每个slice使用的块数
+
+【接口】
+    operator()(blk: uint32) -> uint32
+        用途: 将全局块索引映射到slice索引
+        返回: blk / blocks_per_slice
+
+## 工具函数
+
+--------------------------------
+辅助工具
+来源: TensorTopK.cpp
+--------------------------------
+
+【函数】
+    topk_out_with_sort(
+        self: Tensor,
+        k: int64, dim: int64, largest: bool,
+        values: Tensor,    # 输出
+        indices: Tensor    # 输出
+    )
+        用途: 使用完整排序实现topk
+        算法:
+            sorted_values, sorted_indices = at::cuda::sort(self, stable=false, dim, largest)
+            values.copy_(sorted_values.narrow(dim, 0, k))
+            indices.copy_(sorted_indices.narrow(dim, 0, k))
+
+--------------------------------
+通用填充kernel
+来源: TensorTopK.cu
+--------------------------------
+
+【函数】
+    @device
+    fill<T, IndexType>(x: T*, value: T, size: IndexType)
+        用途: 将数组填充为指定值
+        算法:
+            parallel_for idx in range(size):
+                x[idx] = value
+        并行模式:
+            grid-stride loop
+
+## 单块TopK实现 (sbtopk)
+
+--------------------------------
+sbtopk::gatherTopK (单块TopK收集)
+来源: TensorTopK.cu
+--------------------------------
+
+【签名】
+    @device
+    gatherTopK<T, IndexType, Dim, WithKthValues>(
+        input: TensorInfo[const T, IndexType],
+        inputSliceSize: IndexType,
+        outputSliceSize: IndexType,    # aka k
+        largest: bool,
+        numInputSlices: IndexType,
+        inputWithinSliceStride: IndexType,
+        topK: TensorInfo[T, IndexType],
+        topKWithinSliceStride: IndexType,
+        indices: TensorInfo[int64, IndexType],
+        indicesWithinSliceStride: IndexType,
+        kthValues: T*    # 仅WithKthValues=true时使用
+    )
+
+【算法】
+    slice = blockIdx线性化ID
+    if slice >= numInputSlices: return
+
+    # 获取当前slice的数据指针
+    inputSliceStart = &input[slice起始偏移]
+    topKSliceStart = &topK[slice起始偏移]
+    indicesSliceStart = &indices[slice起始偏移]
+
+    # Step 1: 找第k大/小值
+    if WithKthValues:
+        topKValue = kthValues[slice]
+    else:
+        topKValue = radixSelect(inputSliceStart, outputSliceSize, largest, 
+                                inputSliceSize, inputWithinSliceStride)
+
+    topKConverted = TopKTypeConfig<T>::convert(topKValue)
+
+    # Step 2: 收集严格大于/小于topKValue的元素
+    writeIndexStart = 0
+    numIterations = round_up(inputSliceSize, blockDim.x)
+
+    for i in range(threadIdx.x, numIterations, blockDim.x):
+        inRange = (i < inputSliceSize)
+        v = inRange ? inputSliceStart[i * stride] : 0
+        convertedV = TopKTypeConfig<T>::convert(v)
+
+        hasTopK = inRange && (largest ? convertedV > topKConverted 
+                                      : convertedV < topKConverted)
+
+        # 块内前缀和计算写入位置
+        index, carry = exclusiveBinaryPrefixScan(smem, hasTopK)
+
+        if hasTopK:
+            writeIndex = writeIndexStart + index
+            topKSliceStart[writeIndex * stride] = v
+            indicesSliceStart[writeIndex * stride] = i
+
+        writeIndexStart += carry
+
+    # Step 3: 用等于topKValue的元素填充剩余位置
+    topKRemaining = outputSliceSize - writeIndexStart
+
+    for i in range(threadIdx.x, numIterations, blockDim.x):
+        inRange = (i < inputSliceSize)
+        v = inRange ? inputSliceStart[i * stride] : 0
+        convertedV = TopKTypeConfig<T>::convert(v)
+        hasTopK = inRange && (convertedV == topKConverted)
+
+        index, carry = exclusiveBinaryPrefixScan(smem, hasTopK)
+
+        if hasTopK && index < topKRemaining:
+            writeIndex = writeIndexStart + index
+            topKSliceStart[writeIndex * stride] = v
+            indicesSliceStart[writeIndex * stride] = i
+
+        if carry >= topKRemaining: break
+        topKRemaining -= carry
+        writeIndexStart += carry
+
+【并行模式】
+    grid: 每个slice一个块
+    block: 根据inputSliceSize调整，上限1024
+    shared_memory: 用于前缀和的smem[32或64]
+    
+    每个块处理一个slice，块内线程协作:
+    - 并行扫描输入
+    - block-level前缀和计算写入位置
+    - 两阶段写入: 先写>kth的元素，再填充=kth的元素
+
+--------------------------------
+sbtopk::launch
+来源: TensorTopK.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch<T, IndexType, Dim>(
+        input: TensorInfo[const T, IndexType],
+        inputSliceSize: IndexType,
+        outputSliceSize: IndexType,
+        largest: bool,
+        numInputSlices: IndexType,
+        inputWithinSliceStride: IndexType,
+        topK: TensorInfo[T, IndexType],
+        topKWithinSliceStride: IndexType,
+        indices: TensorInfo[int64, IndexType],
+        indicesWithinSliceStride: IndexType
+    )
+
+【算法】
+    grid = (numInputSlices, 1, 1)
+    warp_size = at::cuda::warp_size()
+    block = min(ceil_div(inputSliceSize, warp_size) * warp_size, 1024)
+
+    gatherTopK<T, IndexType, Dim, WithKthValues=false><<<grid, block>>>(
+        input, inputSliceSize, outputSliceSize, largest,
+        numInputSlices, inputWithinSliceStride,
+        topK, topKWithinSliceStride,
+        indices, indicesWithinSliceStride,
+        nullptr
+    )
+
+## 多块TopK实现 (mbtopk)
+
+--------------------------------
+mbtopk::radixFindKthValues (基数选择第k值)
+来源: TensorTopK.cu
+--------------------------------
+
+【签名】
+    @device
+    radixFindKthValues<T, IndexType, Bitwise, Dim>(
+        input: TensorInfo[const T, IndexType],
+        slice_size: uint32,
+        ks_to_find: uint32*,           # 未使用但影响性能
+        num_slices: uint32,
+        withinSliceStride: IndexType,
+        current_bit: int,               # 当前处理的基数位
+        items_per_thread: int,
+        blocks_per_slice: uint32,
+        desiredMask: Bitwise,           # 已确定的高位掩码
+        desires: Bitwise*,              # 每个slice的目标值
+        counts: short*                  # 输出: 每块每数字的计数
+    )
+
+【算法】
+    slice_idx = blockIdx / blocks_per_slice
+    blk_idx_in_slice = blockIdx % blocks_per_slice
+    if slice_idx >= num_slices: return
+
+    desired = desires[slice_idx]
+    data = &input[slice起始偏移]
+
+    # 初始化共享内存digit计数器
+    if tidx < RADIX_DIGITS:
+        digit_counters[tidx] = 0
+    __syncthreads()
+
+    # 调整items_per_thread (最后一块可能更少)
+    items_per_thread = (blk_idx_in_slice + 1 < blocks_per_slice) ? 
+                       items_per_thread : 
+                       ceil_div(slice_size - blk_idx_in_slice * items_per_block, BLOCK_THREADS)
+
+    # 收集数字计数
+    for i in range(items_per_thread):
+        idx = blk_idx_in_slice * items_per_block + i * BLOCK_THREADS + tidx
+        if idx < slice_size:
+            val = TopKTypeConfig<T>::convert(data[idx * stride])
+            has_val = ((val & desiredMask) == (desired & desiredMask))
+            digit = Bitfield<Bitwise>::getBitfield(val, current_bit, RADIX_BITS)
+            if has_val:
+                atomicAdd(&digit_counters[digit], 1)
+
+    __syncthreads()
+
+    # 写出计数 (每数字一个线程)
+    if tidx < RADIX_DIGITS:
+        counts[blockIdx * RADIX_DIGITS + tidx] = digit_counters[tidx]
+
+【并行模式】
+    grid: num_slices * blocks_per_slice
+    block: BLOCK_THREADS (256)
+    shared_memory: digit_counters[RADIX_DIGITS]
+    
+    基数选择的一次迭代:
+    - 每个块处理slice的一部分
+    - 统计当前位的数字分布
+    - 原子操作累加到shared memory
+
+【备注】
+    RADIX_BITS = 8, RADIX_DIGITS = 256
+
+--------------------------------
+mbtopk::computeBlockwiseWithinKCounts
+来源: TensorTopK.cu
+--------------------------------
+
+【签名】
+    @device
+    computeBlockwiseWithinKCounts<Bitwise, T>(
+        desires_in: Bitwise*,
+        counts: short*,                # 输入: 块级digit计数
+        ks_to_find_in: uint32*,
+        blocks_per_slice: uint32,
+        current_bit: int,
+        largest: bool,
+        # 输出:
+        withinKCounts: uint32*,        # 小于kth值的元素数
+        kthValues: T*,                 # current_bit=0时写入
+        ks_to_find_out: uint32*,
+        desires_out: Bitwise*,
+        num_blocks: uint32
+    )
+
+【算法】
+    block_idx = blockIdx线性化ID
+    slice_idx = block_idx / blocks_per_slice
+    if block_idx >= num_blocks: return
+
+    # Step 1: 聚合所有块的digit计数
+    digit_count = 0
+    if tidx < RADIX_DIGITS:
+        for blk in range(blocks_per_slice):
+            digit_count += counts[(slice_idx * blocks_per_slice + blk) * RADIX_DIGITS + tidx]
+
+    # Step 2: 块级前缀和
+    digit_count_cumsum = BlockScan::InclusiveSum(digit_count)
+    __syncthreads()
+
+    if tidx < RADIX_DIGITS:
+        digit_count_cumsum_shared[tidx] = digit_count_cumsum
+    __syncthreads()
+
+    # Step 3: 找包含第k个元素的digit，更新desired和ks_to_find
+    k_to_find = ks_to_find_in[slice_idx]
+    if tidx < RADIX_DIGITS:
+        digit_count_cumsum_left = (tidx == 0) ? 0 : digit_count_cumsum_shared[tidx - 1]
+
+        if digit_count_cumsum_left < k_to_find && k_to_find <= digit_count_cumsum:
+            desired = desires_in[slice_idx]
+            desired = Bitfield<Bitwise>::setBitfield(desired, tidx, current_bit, RADIX_BITS)
+
+            if block_idx == slice_idx * blocks_per_slice:  # 每slice只一个块更新
+                desires_out[slice_idx] = desired
+                if current_bit > 0:
+                    ks_to_find_out[slice_idx] = k_to_find - digit_count_cumsum_left
+                else:
+                    kthValues[slice_idx] = TopKTypeConfig<T>::deconvert(desired)
+    __syncthreads()
+
+    # Step 4: 如果CUB支持scan_by_key，计算withinKCounts
+    if !CUB_SUPPORTS_SCAN_BY_KEY(): return
+
+    desired_digit = Bitfield<Bitwise>::getBitfield(desired, current_bit, RADIX_BITS)
+
+    # 统计小于desired_digit的元素数
+    warp_is_active = largest ? (end_of_warp > desired_digit) : (start_of_warp < desired_digit)
+    thread_is_active = largest ? (tidx > desired_digit) : (tidx < desired_digit)
+
+    count = 0
+    if warp_is_active:
+        if thread_is_active:
+            count = counts[block_idx * RADIX_DIGITS + tidx]
+        count = warp_reduce_sum(count)
+
+    # warp间归约
+    if tidx % WARP_SIZE == 0:
+        warp_counts[warp] = count
+    __syncthreads()
+
+    if warp == 0:
+        count = (tidx < num_warps) ? warp_counts[tidx] : 0
+        count = warp_reduce_sum(count)
+        if tidx == 0:
+            withinKCounts[block_idx] += count
+
+【并行模式】
+    grid: 与radixFindKthValues相同
+    block: RADIX_DIGITS个线程
+    
+    两阶段归约:
+    - BlockScan: 前缀和找第k个元素所在digit
+    - Warp归约: 统计小于kth的元素数
+
+--------------------------------
+mbtopk::computeBlockwiseKthCounts
+来源: TensorTopK.cu
+--------------------------------
+
+【签名】
+    @device
+    computeBlockwiseKthCounts<Bitwise>(
+        desires: Bitwise*,
+        counts: short*,
+        num_blocks: uint32,
+        blocks_per_slice: uint32,
+        kthCounts: uint32*    # 输出
+    )
+
+【算法】
+    parallel_for idx in range(num_blocks):
+        slice_idx = idx / blocks_per_slice
+        desired = desires[slice_idx]
+        desired_digit = Bitfield<Bitwise>::getBitfield(desired, 0, RADIX_BITS)
+        kthCounts[idx] = counts[idx * RADIX_DIGITS + desired_digit]
+
+【并行模式】
+    CUDA_KERNEL_LOOP
+
+【备注】
+    只在CUB_SUPPORTS_SCAN_BY_KEY时编译
+
+--------------------------------
+mbtopk::gatherTopK (多块TopK收集)
+来源: TensorTopK.cu
+--------------------------------
+
+【签名】
+    @device
+    gatherTopK<T, IndexType, Dim>(
+        input: TensorInfo[const T, IndexType],
+        inputSliceSize: IndexType,
+        outputSliceSize: IndexType,
+        largest: bool,
+        numInputSlices: uint32,
+        inputWithinSliceStride: IndexType,
+        topK: TensorInfo[T, IndexType],
+        topKWithinSliceStride: IndexType,
+        indices: TensorInfo[int64, IndexType],
+        indicesWithinSliceStride: IndexType,
+        items_per_thread: uint32,
+        blocks_per_slice: uint32,
+        kthValues: T*,
+        withinKCounts: uint32*,      # 前缀和: 每块内<kth的元素起始位置
+        kthCounts: uint32*,          # 前缀和: 每块内=kth的元素起始位置
+        num_blocks: uint32
+    )
+
+【算法】
+    block_idx = blockIdx线性化ID
+    if block_idx >= num_blocks: return
+
+    slice_idx = block_idx / blocks_per_slice
+    blk_idx_in_slice = block_idx % blocks_per_slice
+
+    # 调整items_per_thread
+    items_per_thread = (blk_idx_in_slice + 1 < blocks_per_slice) ?
+                       items_per_thread :
+                       ceil_div(inputSliceSize - blk_idx_in_slice * items_per_block, BLOCK_THREADS)
+
+    # 获取slice数据指针
+    inputSliceStart = &input[slice起始偏移]
+    topKSliceStart = &topK[slice起始偏移]
+    indicesSliceStart = &indices[slice起始偏移]
+
+    kthValue = kthValues[slice_idx]
+    kthValueConverted = TopKTypeConfig<T>::convert(kthValue)
+
+    # 计算当前块的输出起始位置
+    startWithinK = (blk_idx_in_slice > 0) ? withinKCounts[block_idx - 1] : 0
+    startKth = withinKCounts[slice_idx * blocks_per_slice + blocks_per_slice - 1]
+    if blk_idx_in_slice > 0:
+        startKth += kthCounts[block_idx - 1]
+
+    # 读取、分类、写入
+    for i in range(items_per_thread):
+        idx = blk_idx_in_slice * items_per_block + i * BLOCK_THREADS + tidx
+        withinK = 0
+        kth = 0
+        if idx < inputSliceSize:
+            val = inputSliceStart[idx * stride]
+            valConverted = TopKTypeConfig<T>::convert(val)
+            withinK = (largest ? valConverted > kthValueConverted 
+                               : valConverted < kthValueConverted)
+            kth = (valConverted == kthValueConverted)
+
+        # 写入小于kth的元素
+        withinKIndex, numWithinK = BlockScan::ExclusiveSum(withinK)
+        __syncthreads()
+        if withinK:
+            offset = withinKIndex + startWithinK
+            topKSliceStart[offset * stride] = val
+            indicesSliceStart[offset * stride] = idx
+        startWithinK += numWithinK
+
+        # 写入等于kth的元素 (填充到k个)
+        if startKth < outputSliceSize:
+            kthIndex, numKth = BlockScan::ExclusiveSum(kth)
+            __syncthreads()
+            if kth:
+                offset = kthIndex + startKth
+                if offset < outputSliceSize:
+                    topKSliceStart[offset * stride] = val
+                    indicesSliceStart[offset * stride] = idx
+            startKth += numKth
+
+【并行模式】
+    grid: num_slices * blocks_per_slice
+    block: BLOCK_THREADS (256)
+    
+    基于预计算的kthValue和前缀和位置:
+    - 每个块处理输入的一部分
+    - BlockScan计算块内写入位置
+    - 两阶段写入: <kth元素 和 =kth元素
+
+【备注】
+    只在CUB_SUPPORTS_SCAN_BY_KEY时编译
+
+--------------------------------
+mbtopk::launch
+来源: TensorTopK.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch<T, IndexType, Dim>(
+        input: TensorInfo[const T, IndexType],
+        inputSliceSize: IndexType,
+        outputSliceSize: IndexType,
+        largest: bool,
+        numInputSlices: uint32,
+        inputWithinSliceStride: IndexType,
+        topK: TensorInfo[T, IndexType],
+        topKWithinSliceStride: IndexType,
+        indices: TensorInfo[int64, IndexType],
+        indicesWithinSliceStride: IndexType
+    )
+
+【算法】
+    # 配置并行度
+    items_per_thread = get_items_per_thread(numInputSlices, inputSliceSize)
+    items_per_block = items_per_thread * BLOCK_THREADS
+    blocks_per_slice = ceil_div(inputSliceSize, items_per_block)
+    num_blocks = numInputSlices * blocks_per_slice
+
+    # 分配临时存储
+    kthValues = allocate(numInputSlices * sizeof(T))
+    semaphores = allocate_zeros(numInputSlices * sizeof(uint32))
+    ks_to_find = allocate(2 * numInputSlices * sizeof(uint32))
+    desired = allocate(2 * numInputSlices * sizeof(Bitwise))
+    counts = allocate(num_blocks * RADIX_DIGITS * sizeof(short))
+
+    if CUB_SUPPORTS_SCAN_BY_KEY():
+        withinKCounts = allocate_zeros(num_blocks * sizeof(uint32))
+        kthCounts = allocate(num_blocks * sizeof(uint32))
+
+    # 初始化ks_to_find
+    k_to_find = largest ? inputSliceSize - outputSliceSize + 1 : outputSliceSize
+    fill<<<...>>>(ks_to_find, k_to_find, numInputSlices)
+
+    # 基数选择: 多次迭代确定第k大/小值
+    grid = getGridFromTiles(num_blocks)
+    block = BLOCK_THREADS
+    desiredMask = 0
+    ks_to_find_in = ks_to_find
+    ks_to_find_out = ks_to_find + numInputSlices
+    desired_in = desired
+    desired_out = desired + numInputSlices
+
+    for current_bit in range(sizeof(T)*8 - RADIX_BITS, -1, -RADIX_BITS):
+        radixFindKthValues<T, IndexType, Bitwise, Dim><<<grid, block>>>(
+            input, inputSliceSize, ks_to_find_in, numInputSlices,
+            inputWithinSliceStride, current_bit, items_per_thread,
+            blocks_per_slice, desiredMask, desired_in, counts
+        )
+
+        computeBlockwiseWithinKCounts<Bitwise, T><<<grid, RADIX_DIGITS>>>(
+            desired_in, counts, ks_to_find_in, blocks_per_slice,
+            current_bit, largest, withinKCounts, kthValues,
+            ks_to_find_out, desired_out, num_blocks
+        )
+
+        # 交换输入输出缓冲区
+        swap(desired_in, desired_out)
+        swap(ks_to_find_in, ks_to_find_out)
+        desiredMask = Bitfield<Bitwise>::setBitfield(desiredMask, RADIX_MASK, current_bit, RADIX_BITS)
+
+    desired = desired_in
+
+    # 收集topk元素
+    if CUB_SUPPORTS_SCAN_BY_KEY():
+        # 计算=kth值的元素数
+        computeBlockwiseKthCounts<Bitwise><<<...>>>(
+            desired, counts, num_blocks, blocks_per_slice, kthCounts
+        )
+
+        # 按slice分组前缀和
+        slice_idx_iter = TransformInputIterator(CountingIterator(0), BlockIdxToKey(blocks_per_slice))
+        at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, withinKCounts, withinKCounts, num_blocks)
+        at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, kthCounts, kthCounts, num_blocks)
+
+        # 收集
+        gatherTopK<T, IndexType, Dim><<<grid, block>>>(
+            input, inputSliceSize, outputSliceSize, largest,
+            numInputSlices, inputWithinSliceStride,
+            topK, topKWithinSliceStride,
+            indices, indicesWithinSliceStride,
+            items_per_thread, blocks_per_slice,
+            kthValues, withinKCounts, kthCounts, num_blocks
+        )
+    else:
+        # ROCm fallback: 使用单块gatherTopK
+        grid2 = getGridFromTiles(numInputSlices)
+        block2 = min(ceil_div(inputSliceSize, warp_size) * warp_size, 1024)
+        sbtopk::gatherTopK<T, IndexType, Dim, WithKthValues=true><<<grid2, block2>>>(
+            input, inputSliceSize, outputSliceSize, largest,
+            numInputSlices, inputWithinSliceStride,
+            topK, topKWithinSliceStride,
+            indices, indicesWithinSliceStride,
+            kthValues
+        )
+
+【并行模式】
+    多阶段kernel:
+    1. 基数选择 (多次迭代): 找第k大/小值
+    2. 前缀和: 计算每块的输出位置
+    3. 收集: 写入topk元素和索引
+
+【备注】
+    - 使用ping-pong缓冲区优化: desired/ks_to_find的in/out切换
+    - 每次迭代处理RADIX_BITS (8位)
+
+## 主接口
+
+--------------------------------
+launch_gather_topk_kernel
+来源: TensorTopK.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_gather_topk_kernel(
+        self: TensorBase,
+        k: int64, dim: int64, largest: bool,
+        values: TensorBase,    # 输出
+        indices: TensorBase    # 输出
+    )
+
+【算法】
+    numDims = max(self.dim, 1)
+    sliceSize = self.dim == 0 ? 1 : self.size(dim)
+    input = self.contiguous()
+
+    if input.numel() == 0: return
+
+    # 类型分发
+    AT_DISPATCH_ALL_TYPES_AND2(Half, BFloat16, input.scalar_type(), ...):
+        # 获取TensorInfo
+        inputInfo = getTensorInfo<const scalar_t, INDEX_T>(input)
+        topKInfo = getTensorInfo<scalar_t, INDEX_T>(values)
+        indicesInfo = getTensorInfo<int64_t, INDEX_T>(indices)
+
+        # 处理0维tensor
+        if !input.dim():
+            inputInfo.dims = topKInfo.dims = indicesInfo.dims = 1
+            inputInfo/topKInfo/indicesInfo.sizes[0] = strides[0] = 1
+
+        # 设置slice大小为1以便计算偏移
+        inputInfo.sizes[dim] = 1
+        topKInfo.sizes[dim] = 1
+        indicesInfo.sizes[dim] = 1
+
+        # 保存stride (防止collapse时丢失)
+        strideTopK = topKInfo.strides[dim]
+        strideIndices = indicesInfo.strides[dim]
+
+        # 折叠其他维度
+        collapseInputDim = inputInfo.collapseDims(dim)
+        collapseTopKDim = topKInfo.collapseDims(dim)
+        collapseIndicesDim = indicesInfo.collapseDims(dim)
+
+        # 恢复stride
+        topKInfo.strides[collapseTopKDim] = strideTopK
+        indicesInfo.strides[collapseIndicesDim] = strideIndices
+
+        # 计算slice数量
+        numInputSlices = product(inputInfo.sizes)
+
+        # 选择实现
+        if should_use_multiblock(numInputSlices, sliceSize):
+            mbtopk::launch<scalar_t, INDEX_T, Dim>(参数...)
+        else:
+            sbtopk::launch<scalar_t, INDEX_T, Dim>(参数...)
+
+【备注】
+    - INDEX_T根据tensor大小选择uint32或uint64
+    - Dim根据折叠后的维度数特化 (1/2/3/-1)
+
+--------------------------------
+topk_out_cuda
+来源: TensorTopK.cpp
+--------------------------------
+
+【签名】
+    @host→device
+    topk_out_cuda(
+        self: Tensor,
+        k: int64, dim: int64, largest: bool, sorted: bool,
+        values: Tensor,    # 输出
+        indices: Tensor    # 输出
+    )
+
+【算法】
+    checkAllSameGPU(topK, indices, self)
+    dim = maybe_wrap_dim(dim, self)
+
+    # 启发式选择: 排序 vs topk
+    if should_use_sort(self, dim):
+        topk_out_with_sort(self, k, dim, largest, values, indices)
+        return
+
+    if k == 0: return
+
+    # 调用topk kernel
+    launch_gather_topk_kernel(self, k, dim, largest, values, indices)
+
+    # 如果需要排序结果
+    if sorted && values.numel() > 1:
+        if should_use_small_sort(values, dim):
+            # 原地排序
+            sortKeyValueInplace(values, indices, dim, largest)
+        else:
+            # 使用完整排序
+            sortedIndices = empty_like(indices)
+            sortedValues = empty_like(values)
+            at::cuda::sort_outf(values, stable=false, dim, largest, 
+                               sortedValues, sortedIndices)
+            indices.copy_(indices.gather(dim, sortedIndices))
+            values.copy_(sortedValues)
+
+【备注】
+    - topk本身不保证有序，sorted=true时需额外排序
+    - 小结果用原地排序，大结果用完整排序+gather

@@ -1,0 +1,501 @@
+--------------------------------
+grid_sampler_2d_cuda:
+来源: aten/src/ATen/native/cuda/GridSampler.cpp
+--------------------------------
+
+【签名】
+    grid_sampler_2d_cuda(
+        input: Tensor[N, C, H_in, W_in],
+        grid: Tensor[N, H_out, W_out, 2],
+        interpolation_mode: int64,
+        padding_mode: int64,
+        align_corners: bool
+    ) -> Tensor[N, C, H_out, W_out]
+
+【算法】
+    output = at::empty(N, C, H_out, W_out, dtype=input.dtype)
+    launch_grid_sampler_2d_forward_kernel(
+        output, input, grid, interpolation_mode, padding_mode, align_corners
+    )
+    return output
+
+--------------------------------
+grid_sampler_3d_cuda:
+来源: aten/src/ATen/native/cuda/GridSampler.cpp
+--------------------------------
+
+【签名】
+    grid_sampler_3d_cuda(
+        input: Tensor[N, C, D_in, H_in, W_in],
+        grid: Tensor[N, D_out, H_out, W_out, 3],
+        interpolation_mode: int64,
+        padding_mode: int64,
+        align_corners: bool
+    ) -> Tensor[N, C, D_out, H_out, W_out]
+
+【算法】
+    output = at::empty(N, C, D_out, H_out, W_out, dtype=input.dtype)
+    launch_grid_sampler_3d_forward_kernel(
+        output, input, grid, interpolation_mode, padding_mode, align_corners
+    )
+    return output
+
+--------------------------------
+grid_sampler_2d_backward_cuda:
+来源: aten/src/ATen/native/cuda/GridSampler.cpp
+--------------------------------
+
+【签名】
+    grid_sampler_2d_backward_cuda(
+        grad_output: Tensor[N, C, H_out, W_out],
+        input: Tensor[N, C, H_in, W_in],
+        grid: Tensor[N, H_out, W_out, 2],
+        interpolation_mode: int64,
+        padding_mode: int64,
+        align_corners: bool,
+        output_mask: array<bool, 2>
+    ) -> (Tensor[N, C, H_in, W_in], Tensor[N, H_out, W_out, 2])
+
+【算法】
+    # 根据 output_mask[0] 决定是否计算 grad_input
+    if output_mask[0]:
+        grad_input = at::zeros_like(input)
+    else:
+        grad_input = Tensor()
+    
+    grad_grid = at::empty_like(grid)
+    
+    launch_grid_sampler_2d_backward_kernel(
+        grad_input, grad_grid, grad_output, input, grid,
+        interpolation_mode, padding_mode, align_corners, output_mask
+    )
+    
+    return (grad_input, grad_grid)
+
+--------------------------------
+grid_sampler_3d_backward_cuda:
+来源: aten/src/ATen/native/cuda/GridSampler.cpp
+--------------------------------
+
+【签名】
+    grid_sampler_3d_backward_cuda(
+        grad_output: Tensor[N, C, D_out, H_out, W_out],
+        input: Tensor[N, C, D_in, H_in, W_in],
+        grid: Tensor[N, D_out, H_out, W_out, 3],
+        interpolation_mode: int64,
+        padding_mode: int64,
+        align_corners: bool,
+        output_mask: array<bool, 2>
+    ) -> (Tensor[N, C, D_in, H_in, W_in], Tensor[N, D_out, H_out, W_out, 3])
+
+【算法】
+    if output_mask[0]:
+        grad_input = at::zeros_like(input)
+    else:
+        grad_input = Tensor()
+    
+    grad_grid = at::empty_like(grid)
+    
+    launch_grid_sampler_3d_backward_kernel(
+        grad_input, grad_grid, grad_output, input, grid,
+        interpolation_mode, padding_mode, align_corners, output_mask
+    )
+    
+    return (grad_input, grad_grid)
+
+--------------------------------
+grid_sampler_2d_kernel:
+来源: aten/src/ATen/native/cuda/GridSampler.cu
+--------------------------------
+
+【签名】
+    @device
+    grid_sampler_2d_kernel<scalar_t, index_t>(
+        nthreads: index_t,
+        input: TensorInfo[N, C, H_in, W_in, scalar_t],
+        grid: TensorInfo[N, H_out, W_out, 2, scalar_t],
+        output: TensorInfo[N, C, H_out, W_out, scalar_t],
+        interpolation_mode: GridSamplerInterpolation,
+        padding_mode: GridSamplerPadding,
+        align_corners: bool
+    )
+
+【算法】
+    parallel_for index in range(nthreads):
+        # 解析索引
+        w = index % W_out
+        h = (index / W_out) % H_out
+        n = index / (H_out * W_out)
+        
+        # 读取采样坐标
+        x = grid[n, h, w, 0]
+        y = grid[n, h, w, 1]
+        
+        # 转换为输入坐标
+        ix = grid_sampler_compute_source_index(x, W_in, padding_mode, align_corners)
+        iy = grid_sampler_compute_source_index(y, H_in, padding_mode, align_corners)
+        
+        match interpolation_mode:
+            Bilinear:
+                # 计算四个邻居像素坐标
+                ix_nw = floor(ix)
+                iy_nw = floor(iy)
+                ix_ne = ix_nw + 1
+                iy_ne = iy_nw
+                ix_sw = ix_nw
+                iy_sw = iy_nw + 1
+                ix_se = ix_nw + 1
+                iy_se = iy_nw + 1
+                
+                # 计算插值权重（面积）
+                nw = (ix_se - ix) * (iy_se - iy)
+                ne = (ix - ix_sw) * (iy_sw - iy)
+                sw = (ix_ne - ix) * (iy - iy_ne)
+                se = (ix - ix_nw) * (iy - iy_nw)
+                
+                # 对每个通道进行双线性插值
+                for c in range(C):
+                    out_acc = 0
+                    if within_bounds_2d(iy_nw, ix_nw, H_in, W_in):
+                        out_acc += input[n, c, iy_nw, ix_nw] * nw
+                    if within_bounds_2d(iy_ne, ix_ne, H_in, W_in):
+                        out_acc += input[n, c, iy_ne, ix_ne] * ne
+                    if within_bounds_2d(iy_sw, ix_sw, H_in, W_in):
+                        out_acc += input[n, c, iy_sw, ix_sw] * sw
+                    if within_bounds_2d(iy_se, ix_se, H_in, W_in):
+                        out_acc += input[n, c, iy_se, ix_se] * se
+                    output[n, c, h, w] = out_acc
+            
+            Nearest:
+                ix_nearest = nearbyint(ix)
+                iy_nearest = nearbyint(iy)
+                
+                for c in range(C):
+                    if within_bounds_2d(iy_nearest, ix_nearest, H_in, W_in):
+                        output[n, c, h, w] = input[n, c, iy_nearest, ix_nearest]
+                    else:
+                        output[n, c, h, w] = 0
+            
+            Bicubic:
+                # 反归一化坐标
+                ix = grid_sampler_unnormalize(x, W_in, align_corners)
+                iy = grid_sampler_unnormalize(y, H_in, align_corners)
+                
+                ix_nw = floor(ix)
+                iy_nw = floor(iy)
+                tx = ix - ix_nw
+                ty = iy - iy_nw
+                
+                for c in range(C):
+                    # 在 x 方向对 4 行进行三次插值
+                    coefficients[4]
+                    for i in range(4):
+                        coefficients[i] = cubic_interp1d(
+                            get_value_bounded(input[n, c], ix_nw - 1, iy_nw - 1 + i, ...),
+                            get_value_bounded(input[n, c], ix_nw + 0, iy_nw - 1 + i, ...),
+                            get_value_bounded(input[n, c], ix_nw + 1, iy_nw - 1 + i, ...),
+                            get_value_bounded(input[n, c], ix_nw + 2, iy_nw - 1 + i, ...),
+                            tx
+                        )
+                    
+                    # 在 y 方向对结果进行三次插值
+                    output[n, c, h, w] = cubic_interp1d(
+                        coefficients[0], coefficients[1],
+                        coefficients[2], coefficients[3], ty
+                    )
+
+【并行模式】
+    grid: GET_BLOCKS(N * H_out * W_out, 256)
+    block: 256
+
+    每个线程处理一个输出位置 (n, h, w)，对所有通道 C 进行插值
+
+【备注】
+    - 使用 opmath_t 作为累加类型以提高精度
+    - 支持 32 位和 64 位索引，根据张量大小自动选择
+
+--------------------------------
+grid_sampler_3d_kernel:
+来源: aten/src/ATen/native/cuda/GridSampler.cu
+--------------------------------
+
+【签名】
+    @device
+    grid_sampler_3d_kernel<scalar_t, index_t>(
+        nthreads: index_t,
+        input: TensorInfo[N, C, D_in, H_in, W_in, scalar_t],
+        grid: TensorInfo[N, D_out, H_out, W_out, 3, scalar_t],
+        output: TensorInfo[N, C, D_out, H_out, W_out, scalar_t],
+        interpolation_mode: GridSamplerInterpolation,
+        padding_mode: GridSamplerPadding,
+        align_corners: bool
+    )
+
+【算法】
+    parallel_for index in range(nthreads):
+        # 解析索引
+        w = index % W_out
+        h = (index / W_out) % H_out
+        d = (index / (H_out * W_out)) % D_out
+        n = index / (D_out * H_out * W_out)
+        
+        # 读取采样坐标
+        x = grid[n, d, h, w, 0]
+        y = grid[n, d, h, w, 1]
+        z = grid[n, d, h, w, 2]
+        
+        # 转换为输入坐标
+        ix = grid_sampler_compute_source_index(x, W_in, padding_mode, align_corners)
+        iy = grid_sampler_compute_source_index(y, H_in, padding_mode, align_corners)
+        iz = grid_sampler_compute_source_index(z, D_in, padding_mode, align_corners)
+        
+        match interpolation_mode:
+            Bilinear:  # 实际为三线性插值
+                # 计算 8 个角点坐标（top/bottom + NE/NW/SE/SW）
+                ix_tnw = floor(ix)
+                iy_tnw = floor(iy)
+                iz_tnw = floor(iz)
+                
+                # 其他 7 个角点坐标（通过 +1 获得）
+                ix_tne = ix_tnw + 1; iy_tne = iy_tnw;     iz_tne = iz_tnw
+                ix_tsw = ix_tnw;     iy_tsw = iy_tnw + 1; iz_tsw = iz_tnw
+                ix_tse = ix_tnw + 1; iy_tse = iy_tnw + 1; iz_tse = iz_tnw
+                ix_bnw = ix_tnw;     iy_bnw = iy_tnw;     iz_bnw = iz_tnw + 1
+                ix_bne = ix_tnw + 1; iy_bne = iy_tnw;     iz_bne = iz_tnw + 1
+                ix_bsw = ix_tnw;     iy_bsw = iy_tnw + 1; iz_bsw = iz_tnw + 1
+                ix_bse = ix_tnw + 1; iy_bse = iy_tnw + 1; iz_bse = iz_tnw + 1
+                
+                # 计算 8 个角点的插值权重（体积）
+                tnw = (ix_bse - ix) * (iy_bse - iy) * (iz_bse - iz)
+                tne = (ix - ix_bsw) * (iy_bsw - iy) * (iz_bsw - iz)
+                tsw = (ix_bne - ix) * (iy - iy_bne) * (iz_bne - iz)
+                tse = (ix - ix_bnw) * (iy - iy_bnw) * (iz_bnw - iz)
+                bnw = (ix_tse - ix) * (iy_tse - iy) * (iz - iz_tse)
+                bne = (ix - ix_tsw) * (iy_tsw - iy) * (iz - iz_tsw)
+                bsw = (ix_tne - ix) * (iy - iy_tne) * (iz - iz_tne)
+                bse = (ix - ix_tnw) * (iy - iy_tnw) * (iz - iz_tnw)
+                
+                # 对每个通道进行三线性插值
+                for c in range(C):
+                    out_acc = 0
+                    if within_bounds_3d(iz_tnw, iy_tnw, ix_tnw, D_in, H_in, W_in):
+                        out_acc += input[n, c, iz_tnw, iy_tnw, ix_tnw] * tnw
+                    if within_bounds_3d(iz_tne, iy_tne, ix_tne, D_in, H_in, W_in):
+                        out_acc += input[n, c, iz_tne, iy_tne, ix_tne] * tne
+                    if within_bounds_3d(iz_tsw, iy_tsw, ix_tsw, D_in, H_in, W_in):
+                        out_acc += input[n, c, iz_tsw, iy_tsw, ix_tsw] * tsw
+                    if within_bounds_3d(iz_tse, iy_tse, ix_tse, D_in, H_in, W_in):
+                        out_acc += input[n, c, iz_tse, iy_tse, ix_tse] * tse
+                    if within_bounds_3d(iz_bnw, iy_bnw, ix_bnw, D_in, H_in, W_in):
+                        out_acc += input[n, c, iz_bnw, iy_bnw, ix_bnw] * bnw
+                    if within_bounds_3d(iz_bne, iy_bne, ix_bne, D_in, H_in, W_in):
+                        out_acc += input[n, c, iz_bne, iy_bne, ix_bne] * bne
+                    if within_bounds_3d(iz_bsw, iy_bsw, ix_bsw, D_in, H_in, W_in):
+                        out_acc += input[n, c, iz_bsw, iy_bsw, ix_bsw] * bsw
+                    if within_bounds_3d(iz_bse, iy_bse, ix_bse, D_in, H_in, W_in):
+                        out_acc += input[n, c, iz_bse, iy_bse, ix_bse] * bse
+                    output[n, c, d, h, w] = out_acc
+            
+            Nearest:
+                ix_nearest = nearbyint(ix)
+                iy_nearest = nearbyint(iy)
+                iz_nearest = nearbyint(iz)
+                
+                for c in range(C):
+                    if within_bounds_3d(iz_nearest, iy_nearest, ix_nearest, D_in, H_in, W_in):
+                        output[n, c, d, h, w] = input[n, c, iz_nearest, iy_nearest, ix_nearest]
+                    else:
+                        output[n, c, d, h, w] = 0
+
+【并行模式】
+    grid: GET_BLOCKS(N * D_out * H_out * W_out, 512)
+    block: 512
+
+    每个线程处理一个输出位置 (n, d, h, w)，对所有通道 C 进行插值
+
+【备注】
+    - 3D 版本不支持 Bicubic 插值模式
+    - interpolation_mode 为 Bilinear 时实际执行的是三线性插值
+
+--------------------------------
+launch_grid_sampler_2d_forward_kernel:
+来源: aten/src/ATen/native/cuda/GridSampler.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_grid_sampler_2d_forward_kernel(
+        output: TensorBase[N, C, H_out, W_out],
+        input: TensorBase[N, C, H_in, W_in],
+        grid: TensorBase[N, H_out, W_out, 2],
+        interpolation_mode: int64,
+        padding_mode: int64,
+        align_corners: bool
+    )
+
+【算法】
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_2d(input, grid)
+    
+    count = N * H_out * W_out
+    if count > 0:
+        AT_DISPATCH_FLOATING_TYPES_AND2(Half, BFloat16, input.dtype):
+            if canUse32BitIndexMath(input, grid, output):
+                grid_sampler_2d_kernel<scalar_t, int32>
+                    <<<GET_BLOCKS(count, 256), 256, stream>>>(
+                        count, getTensorInfo<int32>(input),
+                        getTensorInfo<int32>(grid),
+                        getTensorInfo<int32>(output),
+                        interpolation_mode, padding_mode, align_corners
+                    )
+            else:
+                grid_sampler_2d_kernel<scalar_t, int64>
+                    <<<GET_BLOCKS(count, 256), 256, stream>>>(
+                        count, getTensorInfo<int64>(input),
+                        getTensorInfo<int64>(grid),
+                        getTensorInfo<int64>(output),
+                        interpolation_mode, padding_mode, align_corners
+                    )
+
+【备注】
+    - 根据张量大小自动选择 32 位或 64 位索引
+
+--------------------------------
+launch_grid_sampler_3d_forward_kernel:
+来源: aten/src/ATen/native/cuda/GridSampler.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_grid_sampler_3d_forward_kernel(
+        output: TensorBase[N, C, D_out, H_out, W_out],
+        input: TensorBase[N, C, D_in, H_in, W_in],
+        grid: TensorBase[N, D_out, H_out, W_out, 3],
+        interpolation_mode: int64,
+        padding_mode: int64,
+        align_corners: bool
+    )
+
+【算法】
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_3d(input, grid, interpolation_mode)
+    
+    count = N * D_out * H_out * W_out
+    if count > 0:
+        AT_DISPATCH_FLOATING_TYPES_AND2(Half, BFloat16, input.dtype):
+            if canUse32BitIndexMath(input, grid, output):
+                grid_sampler_3d_kernel<scalar_t, int32>
+                    <<<GET_BLOCKS(count, 512), 512, stream>>>(
+                        count, getTensorInfo<int32>(input),
+                        getTensorInfo<int32>(grid),
+                        getTensorInfo<int32>(output),
+                        interpolation_mode, padding_mode, align_corners
+                    )
+            else:
+                grid_sampler_3d_kernel<scalar_t, int64>
+                    <<<GET_BLOCKS(count, 512), 512, stream>>>(
+                        count, getTensorInfo<int64>(input),
+                        getTensorInfo<int64>(grid),
+                        getTensorInfo<int64>(output),
+                        interpolation_mode, padding_mode, align_corners
+                    )
+
+【备注】
+    - 块大小为 512（2D 版本为 256）
+
+--------------------------------
+launch_grid_sampler_2d_backward_kernel:
+来源: aten/src/ATen/native/cuda/GridSampler.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_grid_sampler_2d_backward_kernel(
+        grad_input: TensorBase[N, C, H_in, W_in],
+        grad_grid: TensorBase[N, H_out, W_out, 2],
+        grad_output: TensorBase[N, C, H_out, W_out],
+        input: TensorBase[N, C, H_in, W_in],
+        grid: TensorBase[N, H_out, W_out, 2],
+        interpolation_mode: int64,
+        padding_mode: int64,
+        align_corners: bool,
+        output_mask: array<bool, 2>
+    )
+
+【算法】
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_2d(input, grid)
+    
+    globalContext().alertNotDeterministic("grid_sampler_2d_backward_cuda")
+    
+    input_requires_grad = output_mask[0]
+    count = N * H_out * W_out
+    
+    if count > 0:
+        AT_DISPATCH_FLOATING_TYPES_AND2(Half, BFloat16, input.dtype):
+            if canUse32BitIndexMath(input, grid, grad_output):
+                grid_sampler_2d_backward_kernel<scalar_t, int32>
+                    <<<GET_BLOCKS(count, 256), 256, stream>>>(
+                        count, getTensorInfo<int32>(grad_output),
+                        getTensorInfo<int32>(input),
+                        getTensorInfo<int32>(grid),
+                        input_requires_grad ? getTensorInfo<int32>(grad_input) : empty,
+                        getTensorInfo<int32>(grad_grid),
+                        interpolation_mode, padding_mode, align_corners,
+                        input_requires_grad ? grad_input.numel() : 0,
+                        input_requires_grad
+                    )
+            else:
+                # 64 位索引版本
+
+【备注】
+    - 因使用 atomicAdd，此操作非确定性
+    - 若不需要 grad_input，传递空 TensorInfo 以避免内存分配
+
+--------------------------------
+launch_grid_sampler_3d_backward_kernel:
+来源: aten/src/ATen/native/cuda/GridSampler.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_grid_sampler_3d_backward_kernel(
+        grad_input: TensorBase[N, C, D_in, H_in, W_in],
+        grad_grid: TensorBase[N, D_out, H_out, W_out, 3],
+        grad_output: TensorBase[N, C, D_out, H_out, W_out],
+        input: TensorBase[N, C, D_in, H_in, W_in],
+        grid: TensorBase[N, D_out, H_out, W_out, 3],
+        interpolation_mode: int64,
+        padding_mode: int64,
+        align_corners: bool,
+        output_mask: array<bool, 2>
+    )
+
+【算法】
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_3d(input, grid, interpolation_mode)
+    
+    globalContext().alertNotDeterministic("grid_sampler_3d_backward_cuda")
+    
+    input_requires_grad = output_mask[0]
+    count = N * D_out * H_out * W_out
+    
+    if count > 0:
+        AT_DISPATCH_FLOATING_TYPES_AND2(Half, BFloat16, input.dtype):
+            if canUse32BitIndexMath(input, grid, grad_output):
+                grid_sampler_3d_backward_kernel<scalar_t, int32>
+                    <<<GET_BLOCKS(count, 256), 256, stream>>>(
+                        count, getTensorInfo<int32>(grad_output),
+                        getTensorInfo<int32>(input),
+                        getTensorInfo<int32>(grid),
+                        input_requires_grad ? getTensorInfo<int32>(grad_input) : empty,
+                        getTensorInfo<int32>(grad_grid),
+                        interpolation_mode, padding_mode, align_corners,
+                        input_requires_grad ? grad_input.numel() : 0,
+                        input_requires_grad
+                    )
+            else:
+                # 64 位索引版本
+
+【备注】
+    - 因使用 atomicAdd，此操作非确定性

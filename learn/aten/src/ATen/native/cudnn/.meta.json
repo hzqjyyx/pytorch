@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "units": {
+    "LossCTC.cpp": {
+      "type": "file",
+      "hashes": {
+        "LossCTC.cpp": "5f3821a346617105"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AffineGridGenerator.cpp": {
+      "type": "file",
+      "hashes": {
+        "AffineGridGenerator.cpp": "162b873a90c633e6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BatchNorm": {
+      "type": "group",
+      "hashes": {
+        "BatchNorm.cpp": "208de0cf002c187b",
+        "BatchNorm.h": "04c765a7d76a2f89"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ConvShared": {
+      "type": "group",
+      "hashes": {
+        "ConvShared.cpp": "fb4fe71880c0db81",
+        "ConvShared.h": "779101a5ccc62e7f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Conv_v8.cpp": {
+      "type": "file",
+      "hashes": {
+        "Conv_v8.cpp": "201db3adc946fe97"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "GridSampler.cpp": {
+      "type": "file",
+      "hashes": {
+        "GridSampler.cpp": "bc732cad5a064779"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MHA": {
+      "type": "group",
+      "hashes": {
+        "MHA.cpp": "2ba7fb3b7adc6817",
+        "MHA.h": "e675261b4587f03d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "RNNUtils.h": {
+      "type": "file",
+      "hashes": {
+        "RNNUtils.h": "0b11e2cc5119d117"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ConvPlaceholders.cpp": {
+      "type": "file",
+      "hashes": {
+        "ConvPlaceholders.cpp": "44d5a76402ab208c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Conv_v7.cpp": {
+      "type": "file",
+      "hashes": {
+        "Conv_v7.cpp": "03730c5003ffcb8c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "RNN.cpp": {
+      "type": "file",
+      "hashes": {
+        "RNN.cpp": "fbf4f678fe044e1d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    }
+  }
+}

@@ -1,0 +1,199 @@
+--------------------------------
+contiguous_out_arg
+来源: aten/src/ATen/native/cuda/ScanKernels.cpp
+--------------------------------
+
+【签名】
+    contiguous_out_arg(tensor: Tensor) -> MaybeOwned<Tensor>
+
+【算法】
+    if tensor.is_contiguous():
+        return borrowed(tensor)
+    else:
+        return owned(empty(tensor.sizes(), tensor.options()))
+
+【备注】
+    - 用途: 确保输出张量是连续的，避免不必要的拷贝
+    - 返回borrowed时不拥有所有权，返回owned时创建新张量
+
+--------------------------------
+cummax_helper_cuda
+来源: aten/src/ATen/native/cuda/ScanKernels.cpp
+--------------------------------
+
+【签名】
+    cummax_helper_cuda(
+        self: Tensor[*D],
+        values: Tensor[*D],      # 输出：累积最大值
+        indices: Tensor[*D, int64],  # 输出：最大值索引
+        dim: int64
+    )
+
+    约束:
+    - self, values, indices 必须在同一GPU上
+
+【算法】
+    # Step 1: 确保输出张量连续
+    values_ = contiguous_out_arg(values)
+    indices_ = contiguous_out_arg(indices)
+
+    # Step 2: 调用CUDA kernel计算累积最大值
+    launch_cummax_cuda_kernel(self, *values_, *indices_, dim)
+
+    # Step 3: 如果创建了临时张量，拷贝回原输出
+    if not values.is_same(*values_):
+        values.copy_(*values_)
+    if not indices.is_same(*indices_):
+        indices.copy_(*indices_)
+
+【备注】
+    - 计算沿dim维度的累积最大值及其索引
+    - launch_cummax_cuda_kernel要求输出张量必须连续
+
+--------------------------------
+cummin_helper_cuda
+来源: aten/src/ATen/native/cuda/ScanKernels.cpp
+--------------------------------
+
+【签名】
+    cummin_helper_cuda(
+        self: Tensor[*D],
+        values: Tensor[*D],      # 输出：累积最小值
+        indices: Tensor[*D, int64],  # 输出：最小值索引
+        dim: int64
+    )
+
+    约束:
+    - self, values, indices 必须在同一GPU上
+
+【算法】
+    # Step 1: 确保输出张量连续
+    values_ = contiguous_out_arg(values)
+    indices_ = contiguous_out_arg(indices)
+
+    # Step 2: 调用CUDA kernel计算累积最小值
+    launch_cummin_cuda_kernel(self, *values_, *indices_, dim)
+
+    # Step 3: 如果创建了临时张量，拷贝回原输出
+    if not values.is_same(*values_):
+        values.copy_(*values_)
+    if not indices.is_same(*indices_):
+        indices.copy_(*indices_)
+
+【备注】
+    - 计算沿dim维度的累积最小值及其索引
+    - launch_cummin_cuda_kernel要求输出张量必须连续
+
+--------------------------------
+_logcumsumexp_out_cuda
+来源: aten/src/ATen/native/cuda/ScanKernels.cpp
+--------------------------------
+
+【签名】
+    _logcumsumexp_out_cuda(
+        self: Tensor[*D, float],
+        dim: int64,
+        result: Tensor[*D, float]
+    ) -> Tensor[*D, float]
+
+    约束:
+    - self, result 必须在同一GPU上
+
+【算法】
+    # Step 0: 规范化维度索引
+    wrap_dim = maybe_wrap_dim(dim, self.dim())
+    result.resize_(self.sizes())
+
+    # Step 1: 边界情况
+    if self.dim() == 0:
+        result.fill_(self)
+        return result
+
+    if self.numel() == 0:
+        result.zero_()
+        return result
+
+    # Step 2: 确保输出张量连续
+    result_ = contiguous_out_arg(result)
+
+    # Step 3: 调用CUDA kernel计算log-cumsum-exp
+    launch_logcumsumexp_cuda_kernel(*result_, self, wrap_dim)
+
+    # Step 4: 如果创建了临时张量，拷贝回原输出
+    if not result.is_same(*result_):
+        result.copy_(*result_)
+
+    return result
+
+【备注】
+    - 计算沿dim维度的 log(cumsum(exp(x)))，数值稳定版本
+    - 用于对数空间的累积和，避免exp溢出
+
+--------------------------------
+_logcumsumexp_cuda
+来源: aten/src/ATen/native/cuda/ScanKernels.cpp
+--------------------------------
+
+【签名】
+    _logcumsumexp_cuda(
+        self: Tensor[*D, float],
+        dim: int64
+    ) -> Tensor[*D, float]
+
+【算法】
+    result = empty_like(self, MemoryFormat::Contiguous)
+    return _logcumsumexp_out_cuda(self, dim, result)
+
+--------------------------------
+cumsum_cuda_kernel
+来源: aten/src/ATen/native/cuda/ScanKernels.cpp
+--------------------------------
+
+【签名】
+    cumsum_cuda_kernel(
+        result: Tensor[*D],
+        self: Tensor[*D],
+        dim: int64
+    )
+
+【算法】
+    # Step 1: 确保输出张量连续
+    result_ = contiguous_out_arg(result)
+
+    # Step 2: 调用CUDA kernel计算累积和
+    launch_cumsum_cuda_kernel(*result_, self, dim)
+
+    # Step 3: 如果创建了临时张量，拷贝回原输出
+    if not result.is_same(*result_):
+        result.copy_(*result_)
+
+【备注】
+    - 计算沿dim维度的累积和
+    - 注册为cumsum_stub的CUDA分发实现
+
+--------------------------------
+cumprod_cuda_kernel
+来源: aten/src/ATen/native/cuda/ScanKernels.cpp
+--------------------------------
+
+【签名】
+    cumprod_cuda_kernel(
+        result: Tensor[*D],
+        self: Tensor[*D],
+        dim: int64
+    )
+
+【算法】
+    # Step 1: 确保输出张量连续
+    result_ = contiguous_out_arg(result)
+
+    # Step 2: 调用CUDA kernel计算累积积
+    launch_cumprod_cuda_kernel(*result_, self, dim)
+
+    # Step 3: 如果创建了临时张量，拷贝回原输出
+    if not result.is_same(*result_):
+        result.copy_(*result_)
+
+【备注】
+    - 计算沿dim维度的累积积
+    - 注册为cumprod_stub的CUDA分发实现

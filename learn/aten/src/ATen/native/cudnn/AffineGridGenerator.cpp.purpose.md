@@ -1,0 +1,13 @@
+- **文件用途**：实现仿射变换网格生成的 cuDNN 后端，包括前向和反向传播
+- **条件编译结构**：
+  - `#if !AT_CUDNN_ENABLED()` 分支提供占位符实现，编译时若无 cuDNN 支持则抛出错误
+  - `#else` 分支提供完整的 cuDNN 实现
+- **核心函数 - `cudnn_affine_grid_generator_forward`**（第76-97行）：
+  - 输入：仿射变换矩阵 `theta`（形状 N×2×3）及目标网格尺寸 N、C、H、W
+  - 输出：采样网格（形状 N×H×W×2）
+  - 流程：确保输入连续 → 验证张量属性 → 分配输出张量 → 调用 `cudnnSpatialTfGridGeneratorForward` 生成网格
+- **辅助函数 - `setSamplerDescriptor`**（第63-72行）：构建 cuDNN 空间变换描述符，设置数据类型和张量维度信息
+- **关键细节**：
+  - 使用 `TensorArg` 和 `CheckedFrom` 进行运行时验证
+  - 通过 `contiguous()` 确保内存布局兼容
+  - 利用 `getCudnnDataType()` 适配不同精度（float/double）

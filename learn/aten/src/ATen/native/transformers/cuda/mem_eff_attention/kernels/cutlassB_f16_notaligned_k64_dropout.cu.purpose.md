@@ -1,0 +1,9 @@
+- **Auto-generated CUDA kernel file** - 由 `generate_kernels.py` 脚本自动生成
+- **Multi-GPU架构支持** - 定义了三个全局内核函数，分别对应 SM50、SM70、SM75 三代 NVIDIA GPU架构
+- **Attention Backward Pass** - 实现反向传播计算，用于多头自注意力机制的梯度计算
+- **Dropout支持** - 第6个模板参数为 `true`，表示内核启用了 dropout 正则化
+- **半精度浮点** (`half_t`) - 使用 FP16 数据类型以降低内存占用和提升计算性能
+- **Non-aligned Access** - `notaligned` 表示支持非对齐的内存访问模式
+- **64x64x64配置** - 线程块和瓦片大小均为 64，用于 cutlass 库的矩阵运算优化
+- **架构检查与回退** - 每个内核包含编译时检查，确保运行架构匹配；若不匹配则打印错误信息
+- **Block级任务分配** - 通过 `advance_to_block()` 确保动态任务分发的正确性

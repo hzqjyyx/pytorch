@@ -1,0 +1,372 @@
+--------------------------------
+_s_poisson_cuda
+来源: aten/src/ATen/native/cuda/Distributions.cpp
+--------------------------------
+
+【签名】
+    _s_poisson_cuda(lambda: Tensor[*D, float], gen: Optional[Generator]) -> Tensor[*D]
+
+【算法】
+    gen = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator())
+    ret = at::empty(lambda.sizes(), lambda.options())
+    launch_poisson_cuda_kernel(ret, lambda, gen)
+    return ret
+
+【备注】
+    - launch_poisson_cuda_kernel: 见 Distributions.cu
+
+--------------------------------
+_s_binomial_cuda
+来源: aten/src/ATen/native/cuda/Distributions.cpp
+--------------------------------
+
+【签名】
+    _s_binomial_cuda(count: Tensor[*D, float], prob: Tensor[*D, float], gen: Optional[Generator]) -> Tensor[*D]
+
+【算法】
+    gen = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator())
+    ret = at::empty(count.sizes(), count.options())
+    
+    iter = at::TensorIteratorConfig()
+        .add_output(ret)
+        .add_input(count)
+        .add_input(prob)
+        .build()
+    
+    launch_binomial_cuda_kernel(iter, gen)
+    return ret
+
+【备注】
+    - launch_binomial_cuda_kernel: 见 Distributions.cu
+
+--------------------------------
+_s_gamma_cuda
+来源: aten/src/ATen/native/cuda/Distributions.cpp
+--------------------------------
+
+【签名】
+    _s_gamma_cuda(alpha: Tensor[*D, float], gen: Optional[Generator]) -> Tensor[*D]
+
+【算法】
+    gen = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator())
+    ret = at::empty(alpha.sizes(), alpha.options())
+    launch_gamma_kernel(ret, alpha, gen)
+    return ret
+
+【备注】
+    - launch_gamma_kernel: 见 Distributions.cu
+
+--------------------------------
+_s_dirichlet_cuda
+来源: aten/src/ATen/native/cuda/Distributions.cpp
+--------------------------------
+
+【签名】
+    _s_dirichlet_cuda(alpha: Tensor[*, K, float], gen: Optional[Generator]) -> Tensor[*, K]
+
+【算法】
+    # Step 1: 从 Gamma 分布采样
+    gen = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator())
+    ret = at::empty(alpha.sizes(), alpha.options())
+    launch_gamma_kernel(ret, alpha, gen)
+    
+    # Step 2: 归一化
+    gamma_sum = ret.sum(dim=-1, keepdim=true)
+    
+    iter = at::TensorIteratorConfig()
+        .add_output(ret)
+        .add_input(ret)
+        .add_input(gamma_sum)
+        .build()
+    
+    launch_dirichlet_kernel(iter)
+    return ret
+
+【备注】
+    - Dirichlet 分布通过 Gamma 分布的归一化生成
+    - launch_dirichlet_kernel: 见 Distributions.cu
+
+--------------------------------
+_standard_gamma_grad_cuda
+来源: aten/src/ATen/native/cuda/Distributions.cpp
+--------------------------------
+
+【签名】
+    _standard_gamma_grad_cuda(self: Tensor[*D, float], output: Tensor[*D, float]) -> Tensor[*D]
+
+【算法】
+    ret = at::empty(self.sizes(), self.options())
+    
+    iter = at::TensorIteratorConfig()
+        .add_output(ret)
+        .add_input(self)
+        .add_input(output)
+        .build()
+    
+    launch_standard_gamma_grad_kernel(iter)
+    return ret
+
+【备注】
+    - launch_standard_gamma_grad_kernel: 见 Distributions.cu
+
+--------------------------------
+_dirichlet_grad_cuda
+来源: aten/src/ATen/native/cuda/Distributions.cpp
+--------------------------------
+
+【签名】
+    _dirichlet_grad_cuda(x: Tensor[*D, float], alpha: Tensor[*D, float], total: Tensor[*D, float]) -> Tensor[*D]
+
+【算法】
+    ret = at::empty(x.sizes(), x.options())
+    
+    iter = at::TensorIteratorConfig()
+        .add_output(ret)
+        .add_input(x)
+        .add_input(alpha)
+        .add_input(total)
+        .build()
+    
+    launch_dirichlet_grad_kernel(iter)
+    return ret
+
+【备注】
+    - launch_dirichlet_grad_kernel: 见 Distributions.cu
+
+--------------------------------
+poisson_cuda_kernel
+来源: aten/src/ATen/native/cuda/Distributions.cu
+--------------------------------
+
+【签名】
+    @device
+    poisson_cuda_kernel<scalar_t>(ret: Tensor[*D], lambda: Tensor[*D], philox_args: PhiloxCudaState)
+
+【算法】
+    parallel_for (ret_val, lambda) in zip(ret, lambda):
+        assert lambda >= 0
+        
+        seeds = at::cuda::philox::unpack(philox_args)
+        curand_init(seeds[0], blockIdx.x * blockDim.x + threadIdx.x, seeds[1], &state)
+        
+        ret_val = curand_poisson(&state, lambda)
+
+【并行模式】
+    max_threads_per_block: 512
+    min_blocks_per_sm: 2
+    elementwise
+
+【备注】
+    - 使用 curandStatePhilox4_32_10_t 随机数生成器
+    - curand_poisson: cuRAND 库函数
+
+--------------------------------
+curand_uniform_wrapper
+来源: aten/src/ATen/native/cuda/Distributions.cu
+--------------------------------
+
+【签名】
+    @device
+    curand_uniform_wrapper(state: curandStatePhilox4_32_10_t&) -> float
+
+【算法】
+    val = curand(&state)
+    MASK = (1 << 24) - 1
+    DIVISOR = 1.0 / (1 << 24)
+    return (val & MASK) * DIVISOR
+
+【备注】
+    - 将 32-bit 随机数转换为 [0, 1) 的浮点数
+    - 使用 float 的 24-bit 有效数字
+
+--------------------------------
+binomial_cuda_kernel
+来源: aten/src/ATen/native/cuda/Distributions.cu
+--------------------------------
+
+【签名】
+    @device
+    binomial_cuda_kernel<scalar_t>(iter: TensorIteratorBase, philox_args: PhiloxCudaState)
+
+【算法】
+    at::native::distribution_binary_kernel(iter, philox_args,
+        lambda (state, count, prob):
+            uniform_lambda = curand_uniform_wrapper(state)
+            standard_uniform = BaseSampler<accscalar_t>(uniform_lambda)
+            sample = sample_binomial<scalar_t, accscalar_t>(count, prob, standard_uniform)
+            return sample
+    )
+
+【并行模式】
+    elementwise
+
+【备注】
+    - sample_binomial: 定义在 aten/src/ATen/native/Distributions.h
+    - accscalar_t: 累加精度类型
+
+--------------------------------
+gamma_cuda_kernel
+来源: aten/src/ATen/native/cuda/Distributions.cu
+--------------------------------
+
+【签名】
+    @device
+    gamma_cuda_kernel<scalar_t>(ret: Tensor[*D], alpha: Tensor[*D], philox_args: PhiloxCudaState)
+
+【算法】
+    parallel_for (ret_val, alpha) in zip(ret, alpha):
+        seeds = at::cuda::philox::unpack(philox_args)
+        curand_init(seeds[0], blockIdx.x * blockDim.x + threadIdx.x, seeds[1], &state)
+        
+        uniform_lambda = lambda: curand_uniform(&state)
+        standard_uniform = BaseSampler<accscalar_t>(uniform_lambda)
+        
+        normal_lambda = lambda: curand_normal(&state)
+        standard_normal = BaseSampler<accscalar_t>(normal_lambda)
+        
+        sample = sample_gamma<scalar_t, accscalar_t>(alpha, standard_uniform, standard_normal)
+        ret_val = max(sample, min_value)
+
+【并行模式】
+    max_threads_per_block: 256
+    min_blocks_per_sm: 2
+    elementwise
+
+【备注】
+    - sample_gamma: 定义在 aten/src/ATen/native/Distributions.h
+    - 输出被截断到 min_value 以避免数值下溢
+
+--------------------------------
+launch_dirichlet_kernel
+来源: aten/src/ATen/native/cuda/Distributions.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_dirichlet_kernel(iter: TensorIteratorBase)
+
+【算法】
+    AT_DISPATCH_FLOATING_TYPES_AND2(Half, BFloat16, iter.input_dtype(), "dirichlet_cuda", [&] {
+        at::native::gpu_kernel(iter,
+            lambda (gamma, gamma_sum):
+                ret_val = gamma / gamma_sum
+                ret_val = clamp(ret_val, min_value, max_value)
+                return ret_val
+        )
+    })
+
+    其中:
+        min_value = std::numeric_limits<scalar_t>::min()
+        max_value = 1 - std::numeric_limits<scalar_t>::epsilon()
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 归一化后裁剪到 (min_value, max_value) 以避免 0 或 1
+
+--------------------------------
+launch_poisson_cuda_kernel
+来源: aten/src/ATen/native/cuda/Distributions.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_poisson_cuda_kernel(ret: TensorBase, lambda: TensorBase, gen: CUDAGeneratorImpl*)
+
+【算法】
+    with gen.mutex_:
+        rng_engine_inputs = gen.philox_cuda_state(20)
+    
+    AT_DISPATCH_FLOATING_TYPES_AND2(Half, BFloat16, ret.scalar_type(), "poisson_cuda", [&] {
+        poisson_cuda_kernel<scalar_t>(ret, lambda, rng_engine_inputs)
+    })
+
+【备注】
+    - philox_cuda_state(20): 预留 20 个随机数序列
+
+--------------------------------
+launch_binomial_cuda_kernel
+来源: aten/src/ATen/native/cuda/Distributions.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_binomial_cuda_kernel(iter: TensorIteratorBase, gen: CUDAGeneratorImpl*)
+
+【算法】
+    with gen.mutex_:
+        rng_engine_inputs = gen.philox_cuda_state(42)
+    
+    AT_DISPATCH_FLOATING_TYPES_AND2(Half, BFloat16, iter.input_dtype(), "binomial_cuda", [&] {
+        binomial_cuda_kernel<scalar_t>(iter, rng_engine_inputs)
+    })
+
+【备注】
+    - philox_cuda_state(42): 预留 42 个随机数序列
+
+--------------------------------
+launch_gamma_kernel
+来源: aten/src/ATen/native/cuda/Distributions.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_gamma_kernel(ret: TensorBase, alpha: TensorBase, gen: CUDAGeneratorImpl*)
+
+【算法】
+    with gen.mutex_:
+        rng_engine_inputs = gen.philox_cuda_state(10)
+    
+    AT_DISPATCH_FLOATING_TYPES_AND2(Half, BFloat16, ret.scalar_type(), "gamma_cuda", [&] {
+        gamma_cuda_kernel<scalar_t>(ret, alpha, rng_engine_inputs)
+    })
+
+【备注】
+    - philox_cuda_state(10): 预留 10 个随机数序列
+
+--------------------------------
+launch_standard_gamma_grad_kernel
+来源: aten/src/ATen/native/cuda/Distributions.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_standard_gamma_grad_kernel(iter: TensorIteratorBase)
+
+【算法】
+    AT_DISPATCH_FLOATING_TYPES_AND2(Half, BFloat16, iter.input_dtype(), "_standard_gamma_grad_cuda", [&] {
+        gpu_kernel(iter,
+            lambda (self_val, output_val):
+                return standard_gamma_grad_one<scalar_t, accscalar_t>(self_val, output_val)
+        )
+    })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - standard_gamma_grad_one: 定义在 aten/src/ATen/native/Distributions.h
+
+--------------------------------
+launch_dirichlet_grad_kernel
+来源: aten/src/ATen/native/cuda/Distributions.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_dirichlet_grad_kernel(iter: TensorIteratorBase)
+
+【算法】
+    AT_DISPATCH_FLOATING_TYPES(iter.input_dtype(), "_dirichlet_grad_cuda", [&] {
+        at::native::gpu_kernel(iter,
+            lambda (x_val, alpha_val, total_val):
+                return dirichlet_grad_one<scalar_t, accscalar_t>(x_val, alpha_val, total_val)
+        )
+    })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - dirichlet_grad_one: 定义在 aten/src/ATen/native/Distributions.h

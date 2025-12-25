@@ -1,0 +1,256 @@
+# TensorCompare.cpp
+
+--------------------------------
+isin_default_kernel_gpu:
+来源: aten/src/ATen/native/cuda/TensorCompare.cpp
+--------------------------------
+
+【签名】
+    isin_default_kernel_gpu(
+        elements: Tensor[*D],
+        test_elements: Tensor[N],
+        invert: bool,
+        out: Tensor[*D, bool]
+    ) -> void
+
+【算法】
+    # 构造广播形状: elements的所有维度 + [-1]
+    bc_shape = [1] * elements.dim + [-1]
+    
+    # 将 elements 扩展为 [..., 1]，test_elements 重塑为 [1, ..., 1, N]
+    # 然后逐元素比较，沿最后一维归约
+    if invert:
+        out = (elements.unsqueeze(-1) != test_elements.view(bc_shape)).all(-1)
+    else:
+        out = (elements.unsqueeze(-1) == test_elements.view(bc_shape)).any(-1)
+
+【备注】
+    - 复合操作实现，生成 elements × test_elements 的笛卡尔积
+    - 内存密集型，但在 CUDA 上速度快
+    - invert=False: 检查是否在集合中 (any)
+    - invert=True: 检查是否不在集合中 (all)
+
+---
+
+# TensorCompare.cu
+
+--------------------------------
+where_kernel_impl:
+来源: aten/src/ATen/native/cuda/TensorCompare.cu
+--------------------------------
+
+【签名】
+    @host→device
+    where_kernel_impl(iter: TensorIterator) -> void
+
+【算法】
+    parallel_for each element in iter:
+        y = cond ? self : other
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: ComplexHalf, Half, BFloat16, Bool, 所有标准类型和复数类型, Float8 类型
+
+--------------------------------
+isposinf_kernel_impl:
+来源: aten/src/ATen/native/cuda/TensorCompare.cu
+--------------------------------
+
+【签名】
+    @host→device
+    isposinf_kernel_impl(iter: TensorIteratorBase) -> void
+
+【算法】
+    parallel_for each element in iter:
+        out = (input == +∞)
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: 浮点类型 + Half + BFloat16
+
+--------------------------------
+isneginf_kernel_impl:
+来源: aten/src/ATen/native/cuda/TensorCompare.cu
+--------------------------------
+
+【签名】
+    @host→device
+    isneginf_kernel_impl(iter: TensorIteratorBase) -> void
+
+【算法】
+    parallel_for each element in iter:
+        out = (input == -∞)
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: 浮点类型 + Half + BFloat16
+
+--------------------------------
+clamp_kernel_impl:
+来源: aten/src/ATen/native/cuda/TensorCompare.cu
+--------------------------------
+
+【签名】
+    @host→device
+    clamp_kernel_impl(iter: TensorIteratorBase) -> void
+
+【算法】
+    parallel_for each element in iter:
+        # NaN 传播优先级: v > lower > upper
+        if isnan(v):
+            out = v
+        else if isnan(lower):
+            out = lower
+        else if isnan(upper):
+            out = upper
+        else:
+            out = min(max(v, lower), upper)
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: 所有标准类型 + Half + BFloat16
+    - ROCm 需要显式 NaN 传播处理
+
+--------------------------------
+launch_clamp_scalar:
+来源: aten/src/ATen/native/cuda/TensorCompare.cu
+--------------------------------
+
+【签名】
+    @host→device
+    launch_clamp_scalar(
+        iter: TensorIteratorBase,
+        lim0: Scalar,
+        lim1: Scalar,
+        minmax: ClampLimits  # Min | Max | MinMax
+    ) -> void
+
+【算法】
+    # 将 lim0, lim1 转换为 opmath_t
+    parallel_for each element in iter:
+        if isnan(v):
+            out = v
+        else if minmax == Min:
+            out = max(v, lim0)
+        else if minmax == Max:
+            out = min(v, lim0)
+        else:  # MinMax
+            out = min(max(v, lim0), lim1)
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 使用更高精度的 opmath_t 类型进行边界值计算
+    - 支持类型: 所有标准类型 + Half + BFloat16
+
+--------------------------------
+clamp_scalar_kernel_impl:
+来源: aten/src/ATen/native/cuda/TensorCompare.cu
+--------------------------------
+
+【签名】
+    @host→device
+    clamp_scalar_kernel_impl(iter: TensorIteratorBase, min: Scalar, max: Scalar) -> void
+
+【算法】
+    launch_clamp_scalar(iter, min, max, ClampLimits::MinMax)
+
+--------------------------------
+clamp_min_scalar_kernel_impl:
+来源: aten/src/ATen/native/cuda/TensorCompare.cu
+--------------------------------
+
+【签名】
+    @host→device
+    clamp_min_scalar_kernel_impl(iter: TensorIteratorBase, min: Scalar) -> void
+
+【算法】
+    launch_clamp_scalar(iter, min, min, ClampLimits::Min)
+
+--------------------------------
+clamp_max_scalar_kernel_impl:
+来源: aten/src/ATen/native/cuda/TensorCompare.cu
+--------------------------------
+
+【签名】
+    @host→device
+    clamp_max_scalar_kernel_impl(iter: TensorIteratorBase, max: Scalar) -> void
+
+【算法】
+    launch_clamp_scalar(iter, max, max, ClampLimits::Max)
+
+--------------------------------
+_assert_async_cuda_kernel:
+来源: aten/src/ATen/native/cuda/TensorCompare.cu
+--------------------------------
+
+【签名】
+    @device
+    _assert_async_cuda_kernel(input: scalar_t*, msg: Msg) -> void
+
+【算法】
+    # 针对标量类型
+    assert input[0] != 0 with message msg.msg
+    
+    # 针对 complex<float>
+    assert input[0] != complex(0, 0) with message msg.msg
+    
+    # 针对 complex<double>
+    assert input[0] != complex(0, 0) with message msg.msg
+
+【并行模式】
+    single-thread kernel (<<<1, 1>>>)
+
+【备注】
+    - Msg 结构体最大消息长度 256 字节
+    - 使用 CUDA_KERNEL_ASSERT_MSG 进行设备端断言
+
+--------------------------------
+_assert_async_msg_cuda:
+来源: aten/src/ATen/native/cuda/TensorCompare.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _assert_async_msg_cuda(self_tensor: Tensor, assert_msg: string_view) -> void
+
+【算法】
+    # 验证
+    assert self.numel() != 0, "Boolean value of Tensor with no values is ambiguous"
+    assert self.numel() < 2, "Boolean value of Tensor with more than one value is ambiguous"
+    assert assert_msg.length() < 255, "Message length must be smaller than 255"
+    
+    # 准备消息
+    msg.msg = assert_msg + '\0'
+    
+    # 启动 kernel
+    stream = at::cuda::getCurrentCUDAStream()
+    _assert_async_cuda_kernel<<<1, 1, 0, stream>>>(self.data_ptr(), msg)
+
+【备注】
+    - 支持类型: 所有标准类型 + 复数类型 + Half + Bool + BFloat16
+    - 消息在 host 侧准备，通过值传递到 device
+
+--------------------------------
+_assert_async_cuda:
+来源: aten/src/ATen/native/cuda/TensorCompare.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _assert_async_cuda(self_tensor: Tensor) -> void
+
+【算法】
+    _assert_async_msg_cuda(self_tensor, "")
+
+【备注】
+    - 无自定义消息的版本

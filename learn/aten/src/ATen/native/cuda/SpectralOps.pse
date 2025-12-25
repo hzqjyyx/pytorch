@@ -1,0 +1,540 @@
+--------------------------------
+exec_cufft_plan
+来源: aten/src/ATen/native/cuda/SpectralOps.cpp
+--------------------------------
+
+【签名】
+    exec_cufft_plan(config: CuFFTConfig, in_data: void*, out_data: void*, forward: bool)
+
+【算法】
+    plan = config.plan()
+    direction = CUFFT_FORWARD if forward else CUFFT_INVERSE
+    cufftXtExec(plan, in_data, out_data, direction)
+
+【备注】
+    - 执行预先规划好的 cuFFT 变换
+    - 使用 cuFFT 的通用接口 cufftXtExec
+
+--------------------------------
+cufft_get_plan_cache
+来源: aten/src/ATen/native/cuda/SpectralOps.cpp
+--------------------------------
+
+【签名】
+    cufft_get_plan_cache(device_index: int) -> CuFFTParamsLRUCache&
+
+【算法】
+    lock(plan_caches_mutex):
+        if device_index >= plan_caches.size():
+            plan_caches.resize(device_index + 1)
+        
+        if plan_caches[device_index] is None:
+            plan_caches[device_index] = new CuFFTParamsLRUCache()
+        
+        return plan_caches[device_index]
+
+【备注】
+    - 全局缓存：每个设备一个 LRU 缓存
+    - 线程安全：使用 mutex 保护
+
+--------------------------------
+has_large_prime_factor
+来源: aten/src/ATen/native/cuda/SpectralOps.cpp
+--------------------------------
+
+【签名】
+    has_large_prime_factor(n: int64) -> bool
+
+【算法】
+    # 检查 n 是否有大于等于 11 的素因子
+    prime_radices = [2, 3, 5, 7]
+    
+    for prime in prime_radices:
+        if n < 11:
+            return false
+        while n % prime == 0:
+            n /= prime
+    
+    return n != 1
+
+【备注】
+    - cuFFT 对 2,3,5,7 的幂次优化
+    - 如果有 >=11 的素因子，可能触发 Bluestein 算法
+
+--------------------------------
+_exec_fft
+来源: aten/src/ATen/native/cuda/SpectralOps.cpp
+--------------------------------
+
+【签名】
+    @host→device
+    _exec_fft(
+        out: Tensor[*batch, *signal_shape],
+        self: Tensor[*batch, *signal_shape],
+        out_sizes: IntArray,
+        dim: IntArray,              # 要变换的维度
+        forward: bool
+    ) -> Tensor
+
+    约束:
+    - dim.size() <= 3  # cuFFT 最多支持 3D
+
+【算法】
+    ndim = self.dim
+    signal_ndim = dim.size()
+    batch_dims = ndim - signal_ndim
+
+    # Step 1: 重排维度，将 batch 维度移到前面，按 stride 排序
+    dim_permute = [0, 1, ..., ndim-1]
+    is_transformed_dim = mark(dim)
+    
+    # batch 维度按 stride 降序排列（提升 cache locality）
+    batch_part = [d for d in dim_permute if not is_transformed_dim[d]]
+    sort(batch_part, key=lambda d: self.strides[d], reverse=True)
+    
+    dim_permute = batch_part + list(dim)
+    input = self.permute(dim_permute)
+
+    # Step 2: 合并所有 batch 维度为一个
+    input = input.reshape(-1, *input.shape[batch_dims:])
+    batch_size = input.size(0)
+
+    # Step 3: 确定信号尺寸（取 input/output 的最大值）
+    signal_size = [batch_size]
+    for i in range(signal_ndim):
+        in_size = input.size(i+1)
+        out_size = out_sizes[dim[i]]
+        signal_size.append(max(in_size, out_size))
+
+    out.resize([batch_size] + [out_sizes[dim[i]] for i in range(signal_ndim)])
+
+    # Step 4: 获取或创建 cuFFT plan
+    value_type = toRealValueType(input.scalar_type)
+    fft_type = GetCuFFTTransformType(input.is_complex, out.is_complex)
+    params = CuFFTParams(input.strides, out.strides, signal_size, fft_type, value_type)
+    
+    plan_cache = cufft_get_plan_cache(input.device.index)
+    
+    # Workaround: cuFFT 10.3 的 Bluestein plan 不能复用
+    use_caching = True
+    if CUFFT_VERSION in [10300, 10400):
+        use_caching = not any(has_large_prime_factor(s) for s in signal_size[1:])
+    
+    if use_caching and plan_cache.max_size > 0:
+        config = plan_cache.lookup(params)
+    else:
+        config = CuFFTConfig(params)
+
+    # Step 5: 执行变换
+    if config.should_clone_input():
+        input = input.clone()
+    
+    plan = config.plan()
+    cufftSetStream(plan, getCurrentCUDAStream())
+    workspace = empty([config.workspace_size()], dtype=byte, device=cuda)
+    cufftSetWorkArea(plan, workspace.data_ptr())
+    
+    # CUDA context workaround
+    if not USE_ROCM:
+        ctx = cuCtxGetCurrent()
+        if ctx is None:
+            cuDevicePrimaryCtxRetain(0)
+            cuCtxSetCurrent(ctx)
+    
+    exec_cufft_plan(config, input.data_ptr(), out.data_ptr(), forward)
+
+    # Step 6: 恢复原始 batch 形状和维度顺序
+    out_strides = compute_inverse_permute_strides(out_sizes, dim_permute, out.strides)
+    return out.as_strided(out_sizes, out_strides)
+
+【备注】
+    - 维度重排：优化 memory layout，提升 cache 命中率
+    - Plan 缓存：避免重复创建 cuFFT plan（昂贵操作）
+    - Bluestein 算法：大素因子时的 fallback，但 cuFFT 10.3 有 bug 不能缓存
+
+--------------------------------
+_fft_normalization_scale
+来源: aten/src/ATen/native/cuda/SpectralOps.cpp
+--------------------------------
+
+【签名】
+    _fft_normalization_scale(
+        normalization: int64,     # 0=none, 1=by_sqrt_n, 2=by_n
+        sizes: IntArray,
+        dims: IntArray
+    ) -> float64
+
+【算法】
+    norm = fft_norm_mode(normalization)
+    
+    if norm == none:
+        return 1.0
+    
+    signal_numel = prod(sizes[d] for d in dims)
+    
+    if norm == by_root_n:
+        return 1.0 / sqrt(signal_numel)
+    else:  # by_n
+        return 1.0 / signal_numel
+
+--------------------------------
+_fft_apply_normalization
+来源: aten/src/ATen/native/cuda/SpectralOps.cpp
+--------------------------------
+
+【签名】
+    _fft_apply_normalization(
+        self: Tensor[*D],
+        normalization: int64,
+        sizes: IntArray,
+        dims: IntArray
+    ) -> Tensor[*D]
+
+【算法】
+    scale = _fft_normalization_scale(normalization, sizes, dims)
+    return self if scale == 1.0 else self * scale
+
+【并行模式】
+    elementwise
+
+--------------------------------
+use_optimized_cufft_path
+来源: aten/src/ATen/native/cuda/SpectralOps.cpp
+--------------------------------
+
+【签名】
+    use_optimized_cufft_path(dim: IntArray) -> bool
+
+【算法】
+    # 不使用优化路径的情况：
+    # 1. 超过 3D
+    # 2. dim 以 (0, 1) 开头（性能原因）
+    
+    if dim.size > 3:
+        return false
+    if dim.size >= 2 and dim[0] == 0 and dim[1] == 1:
+        return false
+    return true
+
+【备注】
+    - 优化路径：单次 cuFFT 调用完成所有维度变换
+    - 非优化路径：分多次调用（R2C + C2C）
+
+--------------------------------
+_fft_r2c_cufft
+来源: aten/src/ATen/native/cuda/SpectralOps.cpp
+--------------------------------
+
+【签名】
+    @host→device
+    _fft_r2c_cufft(
+        self: Tensor[*D, float],
+        dim: IntArray,              # 要变换的维度
+        normalization: int64,
+        onesided: bool
+    ) -> Tensor[*D, complex]
+
+【算法】
+    input_sizes = self.sizes
+    last_dim = dim[-1]
+    last_dim_halfsize = input_sizes[last_dim] // 2 + 1
+    
+    # onesided: 只保留 Hermitian 对称的一半
+    onesided_sizes = input_sizes.copy()
+    onesided_sizes[last_dim] = last_dim_halfsize
+    out_sizes = onesided_sizes if onesided else input_sizes
+    
+    output = empty(out_sizes, dtype=toComplexType(self.dtype))
+
+    # cuFFT 要求实数输入按复数对齐
+    complex_size = 2 * self.element_size
+    complex_aligned = (self.data_ptr % complex_size == 0)
+    
+    working_tensor = self
+    if not complex_aligned:
+        # 重新对齐：last_dim 移到最后，clone，再移回来
+        working_tensor = self.movedim(last_dim, -1).clone().movedim(-1, last_dim)
+
+    if use_optimized_cufft_path(dim):
+        # 单次 R2C 变换
+        _exec_fft(output, working_tensor, out_sizes, dim, forward=true)
+    else:
+        # 多步骤：先最后一维 R2C，然后其他维度 C2C
+        
+        # Step 1: 最后一维 R2C
+        target_sizes = out_sizes if dim.size == 1 else onesided_sizes
+        _exec_fft(output, working_tensor, target_sizes, [last_dim], forward=true)
+        
+        if dim.size > 1:
+            working_tensor = empty(out_sizes, dtype=output.dtype)
+        
+        # Step 2: 剩余维度 C2C（最多 3D 一组）
+        sorted_dims = list(dim[:-1])
+        while sorted_dims:
+            swap(output, working_tensor)
+            
+            # 按 stride 重排维度
+            strides = working_tensor.strides
+            sort(sorted_dims, key=lambda d: strides[d], reverse=True)
+            
+            # 取最后 min(3, len(sorted_dims)) 个维度
+            max_dims = min(3, len(sorted_dims))
+            last_dims = sorted_dims[-max_dims:]
+            
+            _exec_fft(output, working_tensor, onesided_sizes, last_dims, forward=true)
+            sorted_dims = sorted_dims[:-max_dims]
+
+    # 归一化（仅对 onesided 部分）
+    out_slice = output[:..., :last_dim_halfsize]  # 沿 last_dim 切片
+    _fft_apply_normalization(out_slice, normalization, input_sizes, dim)
+
+    # 如果需要 twosided，填充共轭对称
+    if not onesided:
+        if output.size(last_dim) != out_sizes[last_dim]:
+            working_tensor.resize(out_sizes)
+            working_tensor[:..., :last_dim_halfsize] = output
+            output = working_tensor
+        _fft_fill_with_conjugate_symmetry_(output, dim)
+    
+    return output
+
+【备注】
+    - 实数 FFT 输出具有 Hermitian 对称性
+    - onesided=true: 只返回一半（节省内存）
+    - 对齐问题：cuFFT 内部将实数当复数处理，需要 2*sizeof(float) 对齐
+
+--------------------------------
+_fft_c2r_cufft
+来源: aten/src/ATen/native/cuda/SpectralOps.cpp
+--------------------------------
+
+【签名】
+    @host→device
+    _fft_c2r_cufft(
+        self: Tensor[*D, complex],
+        dim: IntArray,
+        normalization: int64,
+        lastdim: int64           # 最后一维的输出尺寸（完整长度）
+    ) -> Tensor[*D, float]
+
+【算法】
+    in_sizes = self.sizes
+    out_sizes = in_sizes.copy()
+    out_sizes[dim[-1]] = lastdim
+    
+    output = empty(out_sizes, dtype=toRealValueType(self.dtype))
+
+    if use_optimized_cufft_path(dim):
+        # C2R 可能覆盖输入，必须 clone
+        temp = self.clone()
+        _exec_fft(output, temp, out_sizes, dim, forward=false)
+    else:
+        # 多步骤：先其他维度 C2C，然后最后一维 C2R
+        
+        if dim.size > 1:
+            temp = _fft_c2c_cufft(self, dim[:-1], norm=none, forward=false)
+        else:
+            temp = self.clone()
+        
+        # 最后一维 C2R
+        _exec_fft(output, temp, out_sizes, [dim[-1]], forward=false)
+
+    return _fft_apply_normalization(output, normalization, out_sizes, dim)
+
+【备注】
+    - C2R 会覆盖输入缓冲区，必须 clone
+    - lastdim 指定实数输出的完整长度（输入是 halfsize）
+
+--------------------------------
+_fft_c2c_cufft
+来源: aten/src/ATen/native/cuda/SpectralOps.cpp
+--------------------------------
+
+【签名】
+    @host→device
+    _fft_c2c_cufft(
+        self: Tensor[*D, complex],
+        dim: IntArray,
+        normalization: int64,
+        forward: bool
+    ) -> Tensor[*D, complex]
+
+【算法】
+    if dim.empty():
+        return self.clone()
+    
+    out_sizes = self.sizes
+    output = empty(out_sizes, dtype=self.dtype)
+
+    # 分批处理：每次最多 3 个维度
+    sorted_dims = list(dim)
+    working_tensor = self
+    
+    while true:
+        # 按 stride 重排维度
+        strides = working_tensor.strides
+        sort(sorted_dims, key=lambda d: strides[d], reverse=True)
+        
+        # 取最后 min(3, len(sorted_dims)) 个维度
+        max_dims = min(3, len(sorted_dims))
+        first_dims = sorted_dims[-max_dims:]
+        
+        _exec_fft(output, working_tensor, out_sizes, first_dims, forward)
+        sorted_dims = sorted_dims[:-max_dims]
+        
+        if not sorted_dims:
+            break
+        
+        # 交换 buffer
+        if working_tensor is self:
+            working_tensor = output
+            output = empty(out_sizes, dtype=self.dtype)
+        else:
+            swap(output, working_tensor)
+
+    return _fft_apply_normalization(output, normalization, out_sizes, dim)
+
+【备注】
+    - cuFFT 限制：单次调用最多 3D 变换
+    - 多于 3D：分多次调用，buffer 交换避免额外拷贝
+
+--------------------------------
+HermitianSymmetryOffsetCalculator
+来源: aten/src/ATen/native/cuda/SpectralOps.cu
+--------------------------------
+
+【状态】
+    dims: int                          # 张量维度数
+    sizes_[MAX_DIMS]: IntDivider       # 各维度尺寸（快速整数除法）
+    strides_[MAX_DIMS]: int            # 各维度步长（按元素）
+    mirror_dim_: uint32                # 位掩码，标记需要镜像的维度
+
+【接口】
+    __init__(sizes: IntArray, strides: IntArray, dim: IntArray, element_size: int64)
+        用途: 构造 offset calculator
+        参数: dim=需要镜像的维度列表
+        算法:
+            # 初始化 sizes 和 strides
+            for i in range(dims):
+                sizes_[i] = IntDivider(sizes[i])
+                strides_[i] = strides[i] / element_size
+            
+            # 构造位掩码
+            mirror_dim_ = 0
+            for d in dim:
+                mirror_dim_ |= (1 << d)
+
+    @device
+    get(linear_idx: int64) -> int64
+        用途: 将线性索引转为 Hermitian 镜像索引
+        算法:
+            offset = 0
+            for d in range(dims):
+                quotient, remainder = divmod(linear_idx, sizes_[d])
+                linear_idx = quotient
+                
+                if mirror_dim_ & (1 << d) == 0:
+                    # 非镜像维度：正常索引
+                    offset += remainder * strides_[d]
+                elif remainder != 0:
+                    # 镜像维度：索引取反 (n - i) % n
+                    offset += (sizes_[d] - remainder) * strides_[d]
+            
+            return offset
+
+【备注】
+    - Hermitian 对称性：X[i] = conj(X[n-i])
+    - 用于 R2C FFT 的 twosided 填充
+
+--------------------------------
+_fft_conjugate_copy_kernel
+来源: aten/src/ATen/native/cuda/SpectralOps.cu
+--------------------------------
+
+【签名】
+    @device
+    _fft_conjugate_copy_kernel(
+        numel: int64,
+        out_data: complex*,
+        in_data: const complex*,
+        ic: InputOffsetCalculator,
+        oc: OutputOffsetCalculator
+    )
+
+【算法】
+    parallel_for idx in range(numel):
+        in_offset = ic.get(idx)[0]
+        out_offset = oc.get(idx)[0]
+        out_data[out_offset] = conj(in_data[in_offset])
+
+【并行模式】
+    elementwise
+    grid: GET_BLOCKS(numel)
+    block: CUDA_NUM_THREADS
+
+【备注】
+    - 泛化的 conjugate copy，支持任意索引变换
+
+--------------------------------
+_fft_fill_with_conjugate_symmetry_cuda_
+来源: aten/src/ATen/native/cuda/SpectralOps.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _fft_fill_with_conjugate_symmetry_cuda_(
+        dtype: ScalarType,
+        mirror_dims: IntArray,        # 需要镜像的维度
+        signal_half_sizes: IntArray,  # onesided 数据的形状
+        in_strides: IntArray,
+        in_data: void*,
+        out_strides: IntArray,
+        out_data: void*
+    )
+
+【算法】
+    # 构造 offset calculators
+    element_size = dtype.itemsize
+    ndim = in_strides.size()
+    
+    input_offset_calculator = OffsetCalculator(ndim, signal_half_sizes, in_strides, element_size)
+    output_offset_calculator = HermitianSymmetryOffsetCalculator(
+        signal_half_sizes, out_strides, mirror_dims, element_size
+    )
+
+    numel = prod(signal_half_sizes)
+    
+    # 调用 kernel
+    _fft_conjugate_copy_kernel<<<blocks, threads, 0, stream>>>(
+        numel, out_data, in_data, 
+        input_offset_calculator, output_offset_calculator
+    )
+
+【备注】
+    - 用于 R2C FFT 的 onesided → twosided 填充
+    - 输入：onesided 数据（一半 + 1）
+    - 输出：利用 Hermitian 对称性填充另一半
+    - 见 SpectralOpsUtils.h NOTE [ Fourier Transform Conjugate Symmetry ]
+
+--------------------------------
+Plan Cache Management (cufft_*_plan_cache_*)
+来源: aten/src/ATen/native/cuda/SpectralOps.cpp
+--------------------------------
+
+【函数】
+    cufft_get_plan_cache_max_size_impl(device_index: int) -> int64
+        用途: 查询指定设备的 plan cache 最大容量
+
+    cufft_set_plan_cache_max_size_impl(device_index: int, max_size: int64)
+        用途: 设置指定设备的 plan cache 最大容量
+        调用: cufft_get_plan_cache(device_index).resize(max_size)
+
+    cufft_get_plan_cache_size_impl(device_index: int) -> int64
+        用途: 查询指定设备的 plan cache 当前大小
+
+    cufft_clear_plan_cache_impl(device_index: int)
+        用途: 清空指定设备的 plan cache
+
+【依赖】
+    at::detail::getCUDAHooks().deviceCount()    # 设备数量查询
+    cufft_get_plan_cache()                      # 获取设备缓存

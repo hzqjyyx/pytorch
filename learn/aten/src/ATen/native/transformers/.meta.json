@@ -1,0 +1,918 @@
+{
+  "version": 1,
+  "units": {
+    "cuda/flash_attn/philox.cuh": {
+      "type": "file",
+      "hashes": {
+        "cuda/flash_attn/philox.cuh": "347e3a89ffdbd24c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/flash_attn/cuda/flash_attn/flash_api": {
+      "type": "group",
+      "hashes": {
+        "cuda/flash_attn/flash_api.cpp": "853ca3d041c15385",
+        "cuda/flash_attn/flash_api.h": "2f2608ea66781fa8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "sdp_utils_cpp": {
+      "type": "group",
+      "hashes": {
+        "sdp_utils_cpp.cpp": "3204a493f8e23311",
+        "sdp_utils_cpp.h": "ed26066f7b351236"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "attention": {
+      "type": "group",
+      "hashes": {
+        "attention.cpp": "c930313b4f295129",
+        "attention.h": "aeee2628d3fe559e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/generate_kernels.py": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/generate_kernels.py": "6f0e3846f5a73bce"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/cuda/sdp_utils": {
+      "type": "group",
+      "hashes": {
+        "cuda/sdp_utils.cpp": "4fdcd6ae3bf92c7d",
+        "cuda/sdp_utils.h": "7291283f14f01f04"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/mha_bwd_ck.hip": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/mha_bwd_ck.hip": "79be526e49225892"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/CMakeLists.txt": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/CMakeLists.txt": "3ede6efc0e5569be"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/me_bwd_ck.hip": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/me_bwd_ck.hip": "2faa86c1bfb9cfcc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/add_make_kernel_pt.sh": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/add_make_kernel_pt.sh": "748d31e1b90016c6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/me_fwd_ck.hip": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/me_fwd_ck.hip": "fb70580eaddf2e7e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/mha_varlen_bwd_ck.hip": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/mha_varlen_bwd_ck.hip": "9fb68181f7b2e70e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "transformer.cpp": {
+      "type": "file",
+      "hashes": {
+        "transformer.cpp": "e3a0964b9da25321"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/mha_varlen_fwd_ck.hip": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/mha_varlen_fwd_ck.hip": "e6d32b2272a3bac9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/mha_fwd_ck.hip": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/mha_fwd_ck.hip": "41420daac76106af"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/aot/mha_all_aot.hip": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/aot/mha_all_aot.hip": "7abf36b041c65dd7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/aotriton_adapter.h": {
+      "type": "file",
+      "hashes": {
+        "hip/aotriton_adapter.h": "82f106448bccbc28"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/gemm_kernel_utils.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/gemm_kernel_utils.h": "ce914b76b79d92c4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/debug_utils.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/debug_utils.h": "0bc7029c77ea42c8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/pytorch_utils.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/pytorch_utils.h": "ff58b5022103f595"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/attention_backward.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/attention_backward.cu": "17e9ed81c5de3177"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernel_backward.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernel_backward.h": "ae21c8fc2d3fcd60"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/flash_attn/static_switch.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/flash_attn/static_switch.h": "08f8e54296081e93"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k32.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k32.cu": "c886545ab83dc9b1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k32.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k32.cu": "184110817513d8fe"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassF_f16_aligned.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassF_f16_aligned.cu": "b6226ba694bb2aba"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernel_forward.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernel_forward.h": "6dcc1d40f6f0a92a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k128_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k128_dropout.cu": "b2ebeecdde75776b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassF_bf16_aligned.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassF_bf16_aligned.cu": "be793a5fe48564c7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k32_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k32_dropout.cu": "b301609b385ca509"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k32_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k32_dropout.cu": "555fb95b7ab310bf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k65536_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k65536_dropout.cu": "e9466f5cd3aa45cc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k128.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k128.cu": "89a9daedfe9448be"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k65536.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k65536.cu": "48b8747f70db0037"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k65536.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k65536.cu": "32dfabe6fc54ef00"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k64.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k64.cu": "e07812d342822131"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k65536.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k65536.cu": "e75c7ec67d8884fd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/attention.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/attention.cu": "f7e7146d32c6a48b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k96.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k96.cu": "3cd84e7762ac7587"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k32.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k32.cu": "53d1843d77e8f50f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k32_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k32_dropout.cu": "a4e6d2bbd6b73e18"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassF_f32_aligned.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassF_f32_aligned.cu": "36b3fc2d3ccf7d80"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k64_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k64_dropout.cu": "312ac588c4e151af"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k32_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k32_dropout.cu": "669ca034dbc76a7f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k64.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k64.cu": "f8c8f5b32e234e93"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k128_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k128_dropout.cu": "daeca89285fcb21b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k128.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k128.cu": "f8074f3eda4414c4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k65536.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k65536.cu": "c8a326708702f667"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k128.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k128.cu": "a3aa668725f99fbd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassF_f32_notaligned.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassF_f32_notaligned.cu": "2ed3525fc0dfd4e9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k64_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k64_dropout.cu": "ad6899582a6c2af7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k128.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k128.cu": "34076bad61a1aba5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k128.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k128.cu": "766efbe1beec5279"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k32_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k32_dropout.cu": "b6289806773173b0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k64_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k64_dropout.cu": "79732648bd9a2295"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k32.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k32.cu": "e18b590b65dcfe19"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k64.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k64.cu": "e8a481d7f226687a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k65536.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k65536.cu": "385cdb7ebadaa469"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k65536_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_aligned_k65536_dropout.cu": "87509b72ffe86359"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k64_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k64_dropout.cu": "eda64d3ebc351846"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k32.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k32.cu": "a686680a90f05073"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k96.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k96.cu": "30270646c083ba50"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k64_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k64_dropout.cu": "092275f0db19213c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k128_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k128_dropout.cu": "04f8df741dd56ec5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB.h": "2b2607cf2c2cf2c1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k128_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k128_dropout.cu": "3779ec3f6b6fd1e3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k128_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k128_dropout.cu": "250309681c5c6cef"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k65536_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f16_notaligned_k65536_dropout.cu": "17adda2030740b99"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k65536_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k65536_dropout.cu": "3db55520ea6b4424"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k64.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_bf16_aligned_k64.cu": "f67da9b4f34e9caa"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k65536_dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_notaligned_k65536_dropout.cu": "80bc7604ccb18f88"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassF.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassF.h": "865e21a7bfdec231"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k64.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassB_f32_aligned_k64.cu": "89e4df694f2fe656"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/kernels/cutlassF_f16_notaligned.cu": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/kernels/cutlassF_f16_notaligned.cu": "edc853030ecdab46"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/gemm/find_default_mma.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/gemm/find_default_mma.h": "223613991c96520b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/gemm/custom_mma_base.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/gemm/custom_mma_base.h": "9281f07cebb654fb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/gemm/custom_mma.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/gemm/custom_mma.h": "5bdb4c6606d73a76"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/gemm/mma_accum_lambda_iterator.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/gemm/mma_accum_lambda_iterator.h": "ec666626f49dd4b6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/epilogue/epilogue_thread_apply_logsumexp.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/epilogue/epilogue_thread_apply_logsumexp.h": "c5ca7711ae4f94cd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/gemm/custom_mma_multistage.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/gemm/custom_mma_multistage.h": "2b73ea750e2f2455"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/epilogue/epilogue_rescale_output.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/epilogue/epilogue_rescale_output.h": "01937cbd90f837ba"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/gemm/mma_from_smem.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/gemm/mma_from_smem.h": "aa18d0eb6812037d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/gemm/custom_mma_pipelined.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/gemm/custom_mma_pipelined.h": "71c2bb92d8a3ba59"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/transform/tile_smem_loader.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/transform/tile_smem_loader.h": "798f55c4a47fadba"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/iterators/make_residual_last.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/iterators/make_residual_last.h": "17f4e1b6e4b473e2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/iterators/transpose_warp_iterator.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/iterators/transpose_warp_iterator.h": "8eb466e7e3013da3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/iterators/default_warp_iterator_from_smem.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/iterators/default_warp_iterator_from_smem.h": "c46d8c01507a4a04"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/epilogue/epilogue_pipelined.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/epilogue/epilogue_pipelined.h": "1c354cf139f6ae6b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/iterators/warp_iterator_from_smem.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/iterators/warp_iterator_from_smem.h": "3e97f7b3eae7cb5c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/iterators/epilogue_predicated_tile_iterator.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/iterators/epilogue_predicated_tile_iterator.h": "bee2b0cf715346a4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/flash_common_hip.hpp": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/flash_common_hip.hpp": "5738e7ddcd48488e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/iterators/predicated_tile_iterator_residual_last.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/iterators/predicated_tile_iterator_residual_last.h": "880a3383d716b50f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/bias.hpp": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/bias.hpp": "10043915cbf311a3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/flash_api.h": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/flash_api.h": "1af446ce3f2fa884"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/mem_eff_attention/iterators/predicated_tile_access_iterator_residual_last.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/mem_eff_attention/iterators/predicated_tile_access_iterator_residual_last.h": "d17ec394229e52e6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/launch_kernel_pt.hpp": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/launch_kernel_pt.hpp": "a6049bcb574da377"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/rotary.hpp": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/rotary.hpp": "222bb333710aee49"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/me_ck_api.h": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/me_ck_api.h": "519485b4ed745d7f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/mask.hpp": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/mask.hpp": "12294f52ea363f30"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/fmha_bwd.hpp": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/fmha_bwd.hpp": "427019329c334567"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hip/flash_attn/ck/fmha_fwd.hpp": {
+      "type": "file",
+      "hashes": {
+        "hip/flash_attn/ck/fmha_fwd.hpp": "177343938ccf1948"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    }
+  }
+}

@@ -1,0 +1,453 @@
+--------------------------------
+should_use_small_sort
+来源: aten/src/ATen/native/cuda/Sort.h
+--------------------------------
+
+【签名】
+    should_use_small_sort(self: TensorBase, dim: int64) -> bool
+
+【算法】
+    return self.size(dim) <= 4096
+
+【备注】
+    - 用于判断是否使用小规模排序优化路径
+
+--------------------------------
+sortKeyValueInplace
+来源: aten/src/ATen/native/cuda/Sort.h
+--------------------------------
+
+【签名】
+    sortKeyValueInplace(
+        key: TensorBase,
+        value: TensorBase,
+        dim: int64,
+        descending: bool,
+        stable: bool = false
+    )
+
+【备注】
+    - 声明，实现见 Sort.cu
+
+--------------------------------
+fillSliceWithIndex
+来源: aten/src/ATen/native/cuda/Sort.cpp
+--------------------------------
+
+【签名】
+    fillSliceWithIndex(t: Tensor, dim: int64)
+
+【算法】
+    if t.numel() > 0:
+        sizes = [1] * t.dim()
+        sizes[dim] = t.sizes()[dim]
+        range = at::arange(t.sizes()[dim], t.options())
+        rangeview = range.view(sizes)
+        t.copy_(rangeview)
+
+【备注】
+    - 沿指定维度填充索引值 [0, 1, 2, ..., size-1]
+
+--------------------------------
+sort_cuda_kernel
+来源: aten/src/ATen/native/cuda/Sort.cpp
+--------------------------------
+
+【签名】
+    @host→device
+    sort_cuda_kernel(
+        self: TensorBase,
+        values: TensorBase,       # 输出: 排序后的值
+        indices: TensorBase,      # 输出: 排序后的索引
+        dim: int64,
+        descending: bool,
+        stable: bool
+    )
+
+    约束:
+    - self.sizes()[dim] <= INT_MAX
+    - self.dtype != ComplexFloat && self.dtype != ComplexDouble
+
+【算法】
+    # Step 1: 数据类型处理
+    if self.dtype == Bool and USE_ROCM:
+        self.copy_(self.to(kByte))  # ROCm bool标准化
+
+    # Step 2: 小规模优化路径 (size <= 4096 && !stable)
+    if should_use_small_sort(self, dim):
+        fillSliceWithIndex(indices, dim)
+        values.copy_(self)
+        sortKeyValueInplace(values, indices, dim, descending, stable)
+        return
+
+    # Step 3: 大规模路径 - 内存布局优化
+    if self.is_non_overlapping_and_dense() and self.stride(dim) == 1:
+        self_ = self
+    else:
+        # 重排使 dim 维度连续
+        new_strides = infer_dense_strides_dim_last(self, dim)
+        self_ = at::empty_strided(self.sizes(), new_strides, self.options())
+        self_.copy_(self)
+
+    # Step 4: 创建或复用输出缓冲区
+    if values.strides() == self_.strides() and no_overlap(self, values):
+        values_tmp = values
+    else:
+        values_tmp = at::empty_strided(self_.sizes(), self_.strides(), self_.options())
+
+    if indices.strides() != self_.strides():
+        indices_tmp = at::empty_strided(self_.sizes(), self_.strides(), options(kLong))
+    else:
+        indices_tmp = indices
+
+    # Step 5: 调用稳定排序 kernel
+    launch_stable_sort_kernel(self_, dim, descending, values_tmp, indices_tmp)
+
+    # Step 6: 回写结果
+    if not values_tmp.is_same(values):
+        values.copy_(values_tmp)
+    if not indices_tmp.is_same(indices):
+        indices.copy_(indices_tmp)
+
+【备注】
+    - 算法总是稳定排序
+    - 小规模 (size <= 4096): 使用 sortKeyValueInplace (见 Sort.cu)
+    - 大规模: 使用 launch_stable_sort_kernel (CUB segmented sort)
+    - 内存优化: 确保 dim 维度 stride=1，减少访存开销
+
+--------------------------------
+sortKeyValueInplace (实现)
+来源: aten/src/ATen/native/cuda/Sort.cu
+--------------------------------
+
+【签名】
+    @host→device
+    sortKeyValueInplace(
+        key: TensorBase,
+        value: TensorBase,
+        dim: int64,
+        descending: bool,
+        stable: bool
+    )
+
+    约束:
+    - key.sizes() == value.sizes()
+
+【算法】
+    sort_size = key.size(dim)
+
+    if sort_size <= 1:
+        return  # 已排序
+
+    if !stable and sort_size <= 32:
+        sortCommon(SmallBitonicSort{}, key, value, dim, descending)
+
+    elif sort_size <= 128 and HAS_WARP_MERGE_SORT:
+        sortCommon(WarpMergeSort<128>{}, key, value, dim, descending)
+
+    else:  # 128 < sort_size <= 4096
+        sortCommon(MediumRadixSort{}, key, value, dim, descending)
+
+【备注】
+    - 三种排序策略，根据规模自动选择:
+      * Bitonic Sort: 不稳定，size <= 32，多个排序任务共享 block
+      * Warp Merge Sort: 稳定，size <= 128，每个 warp 排序一个切片
+      * Radix Sort: 稳定，size <= 4096，基数排序
+    - sortCommon: 通用调度逻辑，见下文
+
+--------------------------------
+sortCommon
+来源: aten/src/ATen/native/cuda/Sort.cu
+--------------------------------
+
+【签名】
+    @host→device
+    sortCommon(
+        sorter: SmallBitonicSort | WarpMergeSort | MediumRadixSort,
+        key: TensorBase,
+        value: TensorBase,
+        dim: int,
+        descending: bool
+    )
+
+    约束:
+    - key.sizes() == value.sizes()
+    - key.dim() <= MAX_DIMS
+
+【算法】
+    if key.numel() == 0:
+        return
+
+    keySliceSize = key.size(dim)
+    keySlices = key.numel() / keySliceSize
+
+    # 构建 TensorInfo (用于 kernel 按切片访问)
+    AT_DISPATCH_ALL_TYPES_AND3(Half, BFloat16, Bool, key.scalar_type()):
+
+        if canUse32BitIndexMath(key):
+            keyInfo = getTensorInfo<scalar_t, uint32>(key)
+            valueInfo = getTensorInfo<int64, uint32>(value)
+            IndexType = uint32
+        else:
+            keyInfo = getTensorInfo<scalar_t, uint64>(key)
+            valueInfo = getTensorInfo<int64, uint64>(value)
+            IndexType = uint64
+
+        # 折叠维度，只保留 dim 维度的步幅
+        strideKey = keyInfo.strides[dim]
+        keyInfo.sizes[dim] = 1
+        collapseKeyDim = keyInfo.collapseDims(dim)
+        keyInfo.strides[collapseKeyDim] = strideKey
+
+        strideValue = valueInfo.strides[dim]
+        valueInfo.sizes[dim] = 1
+        collapseValueDim = valueInfo.collapseDims(dim)
+        valueInfo.strides[collapseValueDim] = strideValue
+
+        # 根据连续性选择模板参数 A
+        if keyInfo.isContiguous():
+            A = -2  # 连续优化
+        elif keyInfo.dims == 2:
+            A = 2   # 2D 特化
+        else:
+            A = -1  # 通用
+
+        # 调用具体排序器
+        sorter.sort<A>(
+            keyInfo,
+            (IndexType) keySlices,
+            (IndexType) keySliceSize,
+            (IndexType) keyInfo.strides[collapseKeyDim],
+            valueInfo,
+            (IndexType) valueInfo.strides[collapseValueDim],
+            descending
+        )
+
+【并行模式】
+    - 每个切片独立排序 (keySlices 个任务)
+    - 具体并行策略由 sorter 实现
+
+【备注】
+    - TensorInfo.collapseDims: 合并连续维度，减少索引计算
+    - A 模板参数: 编译期优化访存模式
+
+--------------------------------
+SmallBitonicSort
+来源: aten/src/ATen/native/cuda/Sort.cu
+--------------------------------
+
+【签名】
+    @host→device
+    SmallBitonicSort::sort<A>(
+        keyInfo: TensorInfo<K, IndexType>,
+        keySlices: IndexType,
+        keySliceSize: IndexType,        # <= 32
+        keySliceStride: IndexType,
+        valueInfo: TensorInfo<V, IndexType>,
+        valueSliceStride: IndexType,
+        descending: bool
+    )
+
+【算法】
+    # 配置
+    sort_size = 32
+    items_per_thread = 2
+    block_x = 16  # sort_size / items_per_thread
+    max_block_y = 16
+
+    # 动态调整 block_y 以提高占用率
+    min_grid = minimum_grid_for_occupancy(bitonicSortKVInPlace, block_x * max_block_y)
+    max_batch = max(1, keySlices / min_grid)
+    block_y = min(max_block_y, max_batch)
+
+    grid = (ceil(keySlices / block_y), 1, 1)
+    block = (block_x, block_y, 1)
+
+    # 启动 kernel
+    if descending:
+        bitonicSortKVInPlace<A, -1, block_x, max_block_y>
+            <<<grid, block>>>(
+                keyInfo, keySlices, keySliceSize, keySliceStride,
+                valueInfo, valueSliceStride,
+                GTOp<K, true>()
+            )
+    else:
+        bitonicSortKVInPlace<A, -1, block_x, max_block_y>
+            <<<grid, block>>>(
+                keyInfo, keySlices, keySliceSize, keySliceStride,
+                valueInfo, valueSliceStride,
+                LTOp<K, true>()
+            )
+
+【并行模式】
+    grid: (ceil(keySlices / block_y), 1, 1)
+    block: (16, block_y, 1)
+
+    - 每个 threadIdx.y 对应一个切片
+    - 每个切片内，threadIdx.x 处理 2 个元素
+    - 多个切片共享一个 block 以提高占用率
+
+【备注】
+    - 不稳定排序，适用于 size <= 32
+    - bitonicSortKVInPlace: 实际 kernel，见 SortingCommon.cuh
+
+--------------------------------
+WarpMergeSort<sort_size>
+来源: aten/src/ATen/native/cuda/Sort.cu
+--------------------------------
+
+【签名】
+    @host→device
+    WarpMergeSort<sort_size>::sort<A>(
+        keyInfo: TensorInfo<K, IndexType>,
+        keySlices: IndexType,
+        keySliceSize: IndexType,        # <= sort_size (128)
+        keySliceStride: IndexType,
+        valueInfo: TensorInfo<V, IndexType>,
+        valueSliceStride: IndexType,
+        descending: bool
+    )
+
+    约束:
+    - sort_size = 128
+    - HAS_WARP_MERGE_SORT() = true
+
+【算法】
+    # 配置
+    max_block_y = 16
+    block_x = warp_size  # 32
+
+    # 动态调整 block_y
+    min_grid = minimum_grid_for_occupancy(warpMergeSortKVInPlace, block_x * max_block_y)
+    max_batch = max(1, keySlices / min_grid)
+    block_y = min(max_block_y, max_batch)
+
+    grid = (ceil(keySlices / block_y), 1, 1)
+    block = (block_x, block_y, 1)
+
+    # 启动 kernel
+    if descending:
+        invalid_key = numeric_limits<K>::lower_bound()
+        warpMergeSortKVInPlace<A, -1, sort_size, max_block_y>
+            <<<grid, block>>>(
+                keyInfo, keySlices, keySliceSize, keySliceStride,
+                valueInfo, valueSliceStride,
+                GTOp<K, true>(),
+                invalid_key
+            )
+    else:
+        invalid_key = has_nan<K>() ? K(NAN) : numeric_limits<K>::upper_bound()
+        warpMergeSortKVInPlace<A, -1, sort_size, max_block_y>
+            <<<grid, block>>>(
+                keyInfo, keySlices, keySliceSize, keySliceStride,
+                valueInfo, valueSliceStride,
+                LTOp<K, true>(),
+                invalid_key
+            )
+
+【并行模式】
+    grid: (ceil(keySlices / block_y), 1, 1)
+    block: (32, block_y, 1)
+
+    - 每个 warp (threadIdx.y) 排序一个切片
+    - warp 内归并排序，利用 shuffle 指令
+    - invalid_key 用于填充不足 sort_size 的部分
+
+【备注】
+    - 稳定排序，适用于 size <= 128
+    - NaN 处理: 升序时 NaN 排在最后，降序时排在最前
+    - warpMergeSortKVInPlace: 实际 kernel，见 SortingCommon.cuh
+
+--------------------------------
+MediumRadixSort
+来源: aten/src/ATen/native/cuda/Sort.cu
+--------------------------------
+
+【签名】
+    @host→device
+    MediumRadixSort::sort<A>(
+        keyInfo: TensorInfo<K, IndexType>,
+        keySlices: IndexType,
+        keySliceSize: IndexType,        # 128 < size <= 4096
+        keySliceStride: IndexType,
+        valueInfo: TensorInfo<V, IndexType>,
+        valueSliceStride: IndexType,
+        descending: bool
+    )
+
+【算法】
+    # 根据 size 选择 kernel 配置
+    ceilPowerOf2 = nextHighestPowerOf2(keySliceSize)
+
+    match ceilPowerOf2:
+        4096:
+            fixed_size_sort<A, 4096, default_ipt>(...)
+        2048:
+            fixed_size_sort<A, 2048, default_ipt>(...)
+        1024 | 512 | 256:
+            fixed_size_sort<A, 1024, default_ipt>(...)
+        128 | 64:
+            if HAS_WARP_MERGE_SORT:
+                assert false  # 应由 WarpMergeSort 处理
+            else:
+                fixed_size_sort<A, 128, 4>(...)
+        32 | 16 | 8 | 4 | 2:
+            if HAS_WARP_MERGE_SORT:
+                assert false  # 应由 SmallBitonicSort 处理
+            else:
+                fixed_size_sort<A, 32, 2>(...)
+        1:
+            return  # 已排序
+
+    # default_ipt = USE_ROCM ? 8 : 32
+
+【备注】
+    - 基数排序，稳定
+    - 内部调用 fixed_size_sort
+
+--------------------------------
+MediumRadixSort::fixed_size_sort
+来源: aten/src/ATen/native/cuda/Sort.cu
+--------------------------------
+
+【签名】
+    @host→device
+    fixed_size_sort<A, sort_size, items_per_thread>(
+        keyInfo: TensorInfo<K, IndexType>,
+        keySlices: IndexType,
+        keySliceSize: IndexType,
+        keySliceStride: IndexType,
+        valueInfo: TensorInfo<V, IndexType>,
+        valueSliceStride: IndexType,
+        descending: bool
+    )
+
+    约束:
+    - sort_size % items_per_thread == 0
+
+【算法】
+    block = sort_size / items_per_thread
+    grid = (keySlices, 1, 1)
+
+    radixSortKVInPlace<A, -1, block, items_per_thread>
+        <<<grid, block>>>(
+            keyInfo,
+            keySlices,
+            keySliceSize,
+            keySliceStride,
+            valueInfo,
+            valueSliceStride,
+            descending
+        )
+
+【并行模式】
+    grid: (keySlices, 1, 1)
+    block: (block, 1, 1)
+
+    - 每个 block 排序一个切片
+    - 每个线程处理 items_per_thread 个元素
+    - 使用 block 级基数排序
+
+【备注】
+    - radixSortKVInPlace: 实际 kernel，见 SortingCommon.cuh
+    - ROCm 使用更小的 items_per_thread (8) 以降低寄存器压力
