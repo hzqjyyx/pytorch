@@ -1,0 +1,8 @@
+- **文件用途**：实现 CUDA 上 Chebyshev 多项式 W 类型的前向计算内核
+- **核心函数**：`chebyshev_polynomial_w_kernel_cuda()` - 通过 TensorIterator 对所有元素并行计算
+- **计算方式**：双路径实现
+  - 启用 JIT 编译时：使用 `opmath_jitted_gpu_kernel_with_scalars` 动态编译计算
+  - 禁用 JIT 时：使用静态编译的 `chebyshev_polynomial_w_forward<scalar_t, true>()` lambda 函数
+- **支持类型**：所有浮点数类型（通过 `AT_DISPATCH_FLOATING_TYPES` 分发）
+- **输入参数**：x（函数变量）和 n（多项式阶数）
+- **注册机制**：通过 `REGISTER_DISPATCH` 将内核注册到 `chebyshev_polynomial_w_stub` 分发表

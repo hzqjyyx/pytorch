@@ -1,0 +1,6 @@
+- **文件目的**：定义用于 MoE（Mixture of Experts）架构所需的新布局类型
+- **主要内容**：
+  - `ColumnMajorTileInterleave` 模板类：定义按列主序的瓦片交错布局，参数化行数和列交错因子
+  - `IsColumnMajorTileInterleave` 特化检查：用于检测某个类型是否为列主序瓦片交错布局
+- **依赖**：使用 CUTLASS 库的基础设施（矩阵坐标、音高线性坐标等）
+- **用途**：为 CUTLASS 张量操作提供自定义内存布局支持，优化 MoE 相关计算的数据访问模式

@@ -1,0 +1,13 @@
+- **文件目的**: 实现 Airy Ai 函数的 CUDA GPU 加速计算
+- **主要组件**:
+  - `airy_ai_kernel_cuda()`: 核心 CUDA 内核函数，负责在 GPU 上执行 Airy Ai 计算
+  - 使用 `AT_DISPATCH_FLOATING_TYPES` 宏处理浮点数类型分派
+  - 两套实现路径:
+    - 启用 JIT 编译时: 调用 `jitted_gpu_kernel` 使用预编译的 CUDA 代码
+    - 禁用 JIT 时: 调用 `gpu_kernel` 使用 lambda 表达式直接计算
+  - `airy_ai_forward()`: 实际的 Airy Ai 数学函数实现
+  - `REGISTER_DISPATCH` 宏: 将内核函数注册到分发系统
+- **核心特性**:
+  - 支持浮点数张量的并行化计算
+  - 使用 TensorIterator 处理多种张量形状和步长
+  - JIT 编译优化路径以提高性能

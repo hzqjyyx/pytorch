@@ -8,7 +8,8 @@
         "ReduceOps.h": "4174e71f63cce4b8"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "TensorModeKernel": {
@@ -338,6 +339,2274 @@
       "type": "file",
       "hashes": {
         "MemoryAccess.cuh": "78fe49f834c5ed24"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "fused_adamw_impl.cuh": {
+      "type": "file",
+      "hashes": {
+        "fused_adamw_impl.cuh": "5fc47d8afb1c5e21"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "reduction_template.cuh": {
+      "type": "file",
+      "hashes": {
+        "reduction_template.cuh": "d5f53ba05fe6fa0a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SortingCommon.cuh": {
+      "type": "file",
+      "hashes": {
+        "SortingCommon.cuh": "70e01e301e7c9066"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_utils.cuh": {
+      "type": "file",
+      "hashes": {
+        "cutlass_utils.cuh": "1ddeb70df1796c58"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "EmbeddingBackwardKernel.cuh": {
+      "type": "file",
+      "hashes": {
+        "EmbeddingBackwardKernel.cuh": "fa75ca3b78a13eba"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "fused_adamw_amsgrad_impl.cuh": {
+      "type": "file",
+      "hashes": {
+        "fused_adamw_amsgrad_impl.cuh": "8f959b7f69e667c1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MultiTensorApply.cuh": {
+      "type": "file",
+      "hashes": {
+        "MultiTensorApply.cuh": "8842882c3b7bfc94"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ScanUtils.cuh": {
+      "type": "file",
+      "hashes": {
+        "ScanUtils.cuh": "5a302518b5565428"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "fused_adam_utils.cuh": {
+      "type": "file",
+      "hashes": {
+        "fused_adam_utils.cuh": "d924530d53613cb4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Math.cuh": {
+      "type": "file",
+      "hashes": {
+        "Math.cuh": "f9e314549c046f64"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "JitLoops.cuh": {
+      "type": "file",
+      "hashes": {
+        "JitLoops.cuh": "98574e4bd0049d51"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "KernelUtils.cuh": {
+      "type": "file",
+      "hashes": {
+        "KernelUtils.cuh": "9e446fb1967174ba"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "fused_adam_amsgrad_impl.cuh": {
+      "type": "file",
+      "hashes": {
+        "fused_adam_amsgrad_impl.cuh": "fdafd603e5d7f2c5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ForeachFunctors.cuh": {
+      "type": "file",
+      "hashes": {
+        "ForeachFunctors.cuh": "5c34215b9f7891b9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UniqueCub.cuh": {
+      "type": "file",
+      "hashes": {
+        "UniqueCub.cuh": "fed0ce0215b6994f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Loops.cuh": {
+      "type": "file",
+      "hashes": {
+        "Loops.cuh": "75e7f26abf62db5b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "GridSampler.cuh": {
+      "type": "file",
+      "hashes": {
+        "GridSampler.cuh": "3da205fb1b2063d4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ForeachMinMaxFunctors.cuh": {
+      "type": "file",
+      "hashes": {
+        "ForeachMinMaxFunctors.cuh": "53137de7c0c31ec4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDALoops.cuh": {
+      "type": "file",
+      "hashes": {
+        "CUDALoops.cuh": "d3277ec6b4562a2d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Reduce.cuh": {
+      "type": "file",
+      "hashes": {
+        "Reduce.cuh": "afde4f3f5831bec6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PersistentSoftmax.cuh": {
+      "type": "file",
+      "hashes": {
+        "PersistentSoftmax.cuh": "332061c98b329371"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "fused_adam_impl.cuh": {
+      "type": "file",
+      "hashes": {
+        "fused_adam_impl.cuh": "466f6f7c0e03dc2c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/README.md": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/README.md": "5d4803394ae12f85"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MaxMinElementwiseKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "MaxMinElementwiseKernel.cu": "7019321b568adcc4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CompositeRandomAccessor.h": {
+      "type": "file",
+      "hashes": {
+        "CompositeRandomAccessor.h": "5ed9c10b22f5e572"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "modified_bessel_k0.cu": {
+      "type": "file",
+      "hashes": {
+        "modified_bessel_k0.cu": "9a73c08099cc9cbe"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "bessel_j1.cu": {
+      "type": "file",
+      "hashes": {
+        "bessel_j1.cu": "e6fb46a3fcfd7326"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ForeachReduceOp.cu": {
+      "type": "file",
+      "hashes": {
+        "ForeachReduceOp.cu": "1ba9445dbf77c9f8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AdaptiveMaxPooling3d.cu": {
+      "type": "file",
+      "hashes": {
+        "AdaptiveMaxPooling3d.cu": "9b69383b7f07420c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MiscUtils.h": {
+      "type": "file",
+      "hashes": {
+        "MiscUtils.h": "033fa0a1a0e2fdb4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryMiscOpsKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "BinaryMiscOpsKernels.cu": "b9a72b70683a7c64"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryOpsKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryOpsKernel.cu": "ae9e870121de229f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReduceLogicKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ReduceLogicKernel.cu": "f19464d164f9baa8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "bessel_y0.cu": {
+      "type": "file",
+      "hashes": {
+        "bessel_y0.cu": "5789bfea319a04d7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ForeachBinaryOpScalarTensor.cu": {
+      "type": "file",
+      "hashes": {
+        "ForeachBinaryOpScalarTensor.cu": "f987f9bde7ef33ed"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AdaptiveMaxPooling2d.cu": {
+      "type": "file",
+      "hashes": {
+        "AdaptiveMaxPooling2d.cu": "8c6355454359f6ad"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Unique.cu": {
+      "type": "file",
+      "hashes": {
+        "Unique.cu": "e123e931b1e98358"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PointwiseOpsKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "PointwiseOpsKernel.cu": "b44b57db0e3b4b60"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "scaled_modified_bessel_k0.cu": {
+      "type": "file",
+      "hashes": {
+        "scaled_modified_bessel_k0.cu": "2d5500cd2989ca47"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReflectionPad.cu": {
+      "type": "file",
+      "hashes": {
+        "ReflectionPad.cu": "4dd7d08d48c3419c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationHardswishKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationHardswishKernel.cu": "a0777335e123b9cd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnarySignKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "UnarySignKernels.cu": "aff9074f77b12b48"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DistributionCauchyKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "DistributionCauchyKernel.cu": "d4cd93eaf8d6b99c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DistributionBernoulli.cu": {
+      "type": "file",
+      "hashes": {
+        "DistributionBernoulli.cu": "ce448ecd03a02de7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "shifted_chebyshev_polynomial_t.cu": {
+      "type": "file",
+      "hashes": {
+        "shifted_chebyshev_polynomial_t.cu": "b690f863cf92ffcf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Randperm.cu": {
+      "type": "file",
+      "hashes": {
+        "Randperm.cu": "e9b8e006c833ffe2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGeometricAsinhKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGeometricAsinhKernel.cu": "f2ffb8d8403dca47"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDAScalar.cu": {
+      "type": "file",
+      "hashes": {
+        "CUDAScalar.cu": "fea9d15a7b299a87"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CuFFTPlanCache.h": {
+      "type": "file",
+      "hashes": {
+        "CuFFTPlanCache.h": "6e3f37122ee32a7f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGeometricCoshKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGeometricCoshKernel.cu": "c044e5d32fccb96a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "modified_bessel_i0.cu": {
+      "type": "file",
+      "hashes": {
+        "modified_bessel_i0.cu": "0cc9ddfff4ddeeab"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "scaled_modified_bessel_k1.cu": {
+      "type": "file",
+      "hashes": {
+        "scaled_modified_bessel_k1.cu": "b75953182c779f9c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "RecordStream.cu": {
+      "type": "file",
+      "hashes": {
+        "RecordStream.cu": "a161dbe684c9fd0a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DistributionUniform.cu": {
+      "type": "file",
+      "hashes": {
+        "DistributionUniform.cu": "5763fda5967de4f9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "shifted_chebyshev_polynomial_u.cu": {
+      "type": "file",
+      "hashes": {
+        "shifted_chebyshev_polynomial_u.cu": "2d46702c21fbe0c5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "EmbeddingBag.cu": {
+      "type": "file",
+      "hashes": {
+        "EmbeddingBag.cu": "c6cfe1c6a7d98c0b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "modified_bessel_i1.cu": {
+      "type": "file",
+      "hashes": {
+        "modified_bessel_i1.cu": "85a8b520073d855e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorShape.cu": {
+      "type": "file",
+      "hashes": {
+        "TensorShape.cu": "1834eae1f8f62596"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReduceMomentKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ReduceMomentKernel.cu": "259c039b52c3d44a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGeometricTanKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGeometricTanKernel.cu": "92a629ec6aeae68b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "fused_adamw_impl.cu": {
+      "type": "file",
+      "hashes": {
+        "fused_adamw_impl.cu": "2c03ca4e0320f372"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MultiLabelMarginCriterion.cu": {
+      "type": "file",
+      "hashes": {
+        "MultiLabelMarginCriterion.cu": "b359d4bb1ae37e57"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "StepKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "StepKernel.cu": "3c3fb390b41b92bb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LinearAlgebraStubs.cpp": {
+      "type": "file",
+      "hashes": {
+        "LinearAlgebraStubs.cpp": "a7cb642e9a60f501"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MixedDtypesLinear.cu": {
+      "type": "file",
+      "hashes": {
+        "MixedDtypesLinear.cu": "47ce99631d7eee75"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "bessel_j0.cu": {
+      "type": "file",
+      "hashes": {
+        "bessel_j0.cu": "9d0dd310f466d921"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AmpKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "AmpKernels.cu": "c61b085b99c6422e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DilatedMaxPool3d.cu": {
+      "type": "file",
+      "hashes": {
+        "DilatedMaxPool3d.cu": "36107b9286440c8d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SegmentReduce.cu": {
+      "type": "file",
+      "hashes": {
+        "SegmentReduce.cu": "62c9089034c82798"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TriangularOps.cu": {
+      "type": "file",
+      "hashes": {
+        "TriangularOps.cu": "e14eff6bd33853e6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "modified_bessel_k1.cu": {
+      "type": "file",
+      "hashes": {
+        "modified_bessel_k1.cu": "7d38956ee14e96b2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CompareEQKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "CompareEQKernel.cu": "a28f9dd15250a239"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ZetaKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ZetaKernel.cu": "1e06d0ad6e725f90"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryFractionKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryFractionKernels.cu": "7e5e29108431de8c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReduceMinValuesKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ReduceMinValuesKernel.cu": "c15a3cc5679dc498"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReplicationPadding.cu": {
+      "type": "file",
+      "hashes": {
+        "ReplicationPadding.cu": "52d120d47d31e286"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "bessel_y1.cu": {
+      "type": "file",
+      "hashes": {
+        "bessel_y1.cu": "f64c0f8de83ac4a1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Bucketization.cu": {
+      "type": "file",
+      "hashes": {
+        "Bucketization.cu": "c1dffddaced23792"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "fused_adam_impl.cu": {
+      "type": "file",
+      "hashes": {
+        "fused_adam_impl.cu": "4ee0b3ddd9146f6c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGeometricAcosKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGeometricAcosKernel.cu": "2373657da08dd2ee"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DilatedMaxPool2d.cu": {
+      "type": "file",
+      "hashes": {
+        "DilatedMaxPool2d.cu": "394ccab3c000f2e8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "RreluWithNoise.cu": {
+      "type": "file",
+      "hashes": {
+        "RreluWithNoise.cu": "076c4849903cfb6c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "int4mm.cu": {
+      "type": "file",
+      "hashes": {
+        "int4mm.cu": "dec1aaf6183f205a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationLogSigmoidKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationLogSigmoidKernel.cu": "0fe25db8a531825b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryInternal.h": {
+      "type": "file",
+      "hashes": {
+        "BinaryInternal.h": "1b2537bf34f3d420"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorFactories.cu": {
+      "type": "file",
+      "hashes": {
+        "TensorFactories.cu": "0170fae2e8eed26f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SummaryOps.cu": {
+      "type": "file",
+      "hashes": {
+        "SummaryOps.cu": "156132b630e882f5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "RenormKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "RenormKernel.cu": "aaeaef1df5f06de9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UniqueCub.cu": {
+      "type": "file",
+      "hashes": {
+        "UniqueCub.cu": "374f28e46a2c0971"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "legendre_polynomial_p.cu": {
+      "type": "file",
+      "hashes": {
+        "legendre_polynomial_p.cu": "4691f6705191fcf5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ForeachBinaryOpList.cu": {
+      "type": "file",
+      "hashes": {
+        "ForeachBinaryOpList.cu": "f1f968a1b0bd1ca0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CuFFTUtils.h": {
+      "type": "file",
+      "hashes": {
+        "CuFFTUtils.h": "ec7eb8db9d11d967"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SortImpl.cu": {
+      "type": "file",
+      "hashes": {
+        "SortImpl.cu": "e572f7ae1f85aedb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "layer_norm_kernel.cu": {
+      "type": "file",
+      "hashes": {
+        "layer_norm_kernel.cu": "33918b0ff5573118"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "GcdLcmKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "GcdLcmKernel.cu": "42783e940b4a9454"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "chebyshev_polynomial_t.cu": {
+      "type": "file",
+      "hashes": {
+        "chebyshev_polynomial_t.cu": "32f90ed679bfab3f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hermite_polynomial_he.cu": {
+      "type": "file",
+      "hashes": {
+        "hermite_polynomial_he.cu": "4107865161932465"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LossCTC.cu": {
+      "type": "file",
+      "hashes": {
+        "LossCTC.cu": "020973dd9e567c09"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CumminmaxKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "CumminmaxKernel.cu": "e07079c5d005dc7f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryDivFloorKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "BinaryDivFloorKernel.cu": "0ec571c037878315"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationSoftplusKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationSoftplusKernel.cu": "10c0a9aa6ed10471"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "EmbeddingBackwardKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "EmbeddingBackwardKernel.cu": "af86504f9c8a7ed5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Nonzero.cu": {
+      "type": "file",
+      "hashes": {
+        "Nonzero.cu": "a62886fe49701338"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MultiMarginLoss.cu": {
+      "type": "file",
+      "hashes": {
+        "MultiMarginLoss.cu": "ead0ef60b6d8ea9d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleNearest3d.cu": {
+      "type": "file",
+      "hashes": {
+        "UpSampleNearest3d.cu": "772e5b9f16dfa9d6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NaiveConvolutionTranspose2d.cu": {
+      "type": "file",
+      "hashes": {
+        "NaiveConvolutionTranspose2d.cu": "1fc8ab2bdd77384d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "chebyshev_polynomial_u.cu": {
+      "type": "file",
+      "hashes": {
+        "chebyshev_polynomial_u.cu": "b1c408e05f944a0b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MultinomialKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "MultinomialKernel.cu": "2b2c9b0f73c82d70"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGeometricAsinKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGeometricAsinKernel.cu": "04fa96baca07e5d3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGeometricSinhKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGeometricSinhKernel.cu": "6b9bbc926de4ed8a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleNearest2d.cu": {
+      "type": "file",
+      "hashes": {
+        "UpSampleNearest2d.cu": "98952bbd89687393"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorTransformations.cu": {
+      "type": "file",
+      "hashes": {
+        "TensorTransformations.cu": "ec9c29680444d65f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NaiveConvolutionTranspose3d.cu": {
+      "type": "file",
+      "hashes": {
+        "NaiveConvolutionTranspose3d.cu": "3673f13a1267dbbc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MaxUnpooling.cu": {
+      "type": "file",
+      "hashes": {
+        "MaxUnpooling.cu": "003aa486e1ddfdb3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGeometricAcoshKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGeometricAcoshKernel.cu": "2f83441f2e10f483"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DistanceKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "DistanceKernel.cu": "a763e324c7eb3fa2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CopysignKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "CopysignKernel.cu": "3d547c956f38967e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Reduce.cu": {
+      "type": "file",
+      "hashes": {
+        "Reduce.cu": "0315eab1b7a33743"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryLogicalOpsKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "BinaryLogicalOpsKernels.cu": "e73d6626a90448cc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Embedding.cu": {
+      "type": "file",
+      "hashes": {
+        "Embedding.cu": "d7b8a31f4313c3de"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Lerp.cu": {
+      "type": "file",
+      "hashes": {
+        "Lerp.cu": "d4082efd39c5594a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PowKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "PowKernel.cu": "e836aa657a5bf261"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "fused_adamw_amsgrad_impl.cu": {
+      "type": "file",
+      "hashes": {
+        "fused_adamw_amsgrad_impl.cu": "0bd73eeeda1cb300"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleNearest1d.cu": {
+      "type": "file",
+      "hashes": {
+        "UpSampleNearest1d.cu": "f5251685e43bde4a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "thread_constants.h": {
+      "type": "file",
+      "hashes": {
+        "thread_constants.h": "cf53b44ad55ef333"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnfoldBackwardKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnfoldBackwardKernel.cu": "23bf1be59b9cba43"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationSoftshrinkKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationSoftshrinkKernel.cu": "f494ebf1e635c27e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LogAddExpKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "LogAddExpKernel.cu": "89576a86a82b8b91"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ForeachBinaryOpScalarList.cu": {
+      "type": "file",
+      "hashes": {
+        "ForeachBinaryOpScalarList.cu": "35c50a440a0f2f9e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LegacyThrustHelpers.cu": {
+      "type": "file",
+      "hashes": {
+        "LegacyThrustHelpers.cu": "62e4784578c8c718"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryMiscBackwardOpsKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "BinaryMiscBackwardOpsKernels.cu": "2190d9a1b49ab6aa"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Equal.cpp": {
+      "type": "file",
+      "hashes": {
+        "Equal.cpp": "44853a0bafdb7d4a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReduceNormKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ReduceNormKernel.cu": "517d449c739f3fa5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CumsumKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "CumsumKernel.cu": "59dd8fca7cd3e8d5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SparseBinaryOpIntersectionKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "SparseBinaryOpIntersectionKernel.cu": "f5c098a45abf816c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "chebyshev_polynomial_v.cu": {
+      "type": "file",
+      "hashes": {
+        "chebyshev_polynomial_v.cu": "bc2e6a42284cbe72"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CompareKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "CompareKernels.cu": "21b829ab302b7d0d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FusedAdamKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "FusedAdamKernel.cu": "db421e9cca831703"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ForeachUnaryOp.cu": {
+      "type": "file",
+      "hashes": {
+        "ForeachUnaryOp.cu": "ce1147b654a6e7df"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ComplexKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ComplexKernel.cu": "8769ad79acc68192"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FusedSgdKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "FusedSgdKernel.cu": "b70c9260ccf5799d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FillKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "FillKernel.cu": "c1de778462d601bb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationHardsigmoidKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationHardsigmoidKernel.cu": "653d45f11908d06a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleTrilinear3d.cu": {
+      "type": "file",
+      "hashes": {
+        "UpSampleTrilinear3d.cu": "df2b10ff10f7ca2c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Normalization.cu": {
+      "type": "file",
+      "hashes": {
+        "Normalization.cu": "0b1573eecf69e33b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Dropout.cu": {
+      "type": "file",
+      "hashes": {
+        "Dropout.cu": "540ca715c3f19d7d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DepthwiseConv3d.cu": {
+      "type": "file",
+      "hashes": {
+        "DepthwiseConv3d.cu": "b8baa2ab554bd9a2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryShiftOpsKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "BinaryShiftOpsKernels.cu": "832d627fd067489e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DistributionGeometricKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "DistributionGeometricKernel.cu": "3f566c316dd60132"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NaiveDilatedConvolution.cu": {
+      "type": "file",
+      "hashes": {
+        "NaiveDilatedConvolution.cu": "4017e8584f75cb2c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReduceMaxValuesKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ReduceMaxValuesKernel.cu": "3e6458864f45cd4c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ValidateCompressedIndicesKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ValidateCompressedIndicesKernel.cu": "e2722ef9b9f5964d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryDivTruncKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "BinaryDivTruncKernel.cu": "d499a13cd64f0bf8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FlattenIndicesKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "FlattenIndicesKernel.cu": "a3bfe3644b14d667"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ForeachBinaryOpScalar.cu": {
+      "type": "file",
+      "hashes": {
+        "ForeachBinaryOpScalar.cu": "7b5b5df479c50637"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationGluKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationGluKernel.cu": "8d154603a69ec228"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SparseMM.cu": {
+      "type": "file",
+      "hashes": {
+        "SparseMM.cu": "c579b49ac1e09989"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AveragePool2d.cu": {
+      "type": "file",
+      "hashes": {
+        "AveragePool2d.cu": "4325ff1f0dba0bcb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "hermite_polynomial_h.cu": {
+      "type": "file",
+      "hashes": {
+        "hermite_polynomial_h.cu": "8e728017770e67c3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DepthwiseConv2d.cu": {
+      "type": "file",
+      "hashes": {
+        "DepthwiseConv2d.cu": "67f6692da405e0bc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryMulKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "BinaryMulKernel.cu": "2a6325d254dc598c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGeometricSinKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGeometricSinKernel.cu": "6576b53f6a46ebdf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "laguerre_polynomial_l.cu": {
+      "type": "file",
+      "hashes": {
+        "laguerre_polynomial_l.cu": "cc2266d3aefeb609"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationThresholdKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationThresholdKernel.cu": "06e6c5f9bb13852e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FusedAdamWKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "FusedAdamWKernel.cu": "936a756c91bde617"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ScatterGatherKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ScatterGatherKernel.cu": "d4d98ba95b2df0f8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AdaptiveAveragePooling3d.cu": {
+      "type": "file",
+      "hashes": {
+        "AdaptiveAveragePooling3d.cu": "c834c85822057e19"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AveragePool3d.cu": {
+      "type": "file",
+      "hashes": {
+        "AveragePool3d.cu": "731bb24b0f0aa462"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "chebyshev_polynomial_w.cu": {
+      "type": "file",
+      "hashes": {
+        "chebyshev_polynomial_w.cu": "58a7a0468b2893db"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Im2Col.cu": {
+      "type": "file",
+      "hashes": {
+        "Im2Col.cu": "6297a216a294719b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "RNN.cu": {
+      "type": "file",
+      "hashes": {
+        "RNN.cu": "744adf2201fdcd87"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGeometricTanhKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGeometricTanhKernel.cu": "06a8b535473b24ad"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DistributionRandomKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "DistributionRandomKernel.cu": "8f10d73d487a1375"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryBitwiseOpsKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "BinaryBitwiseOpsKernels.cu": "04518ada2716a746"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReduceArgMinKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ReduceArgMinKernel.cu": "1768fa221a1b4080"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Blas.cpp": {
+      "type": "file",
+      "hashes": {
+        "Blas.cpp": "7d79567bab633f89"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Repeat.cu": {
+      "type": "file",
+      "hashes": {
+        "Repeat.cu": "05b7458c79442096"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CrossKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "CrossKernel.cu": "ac5e4f0dc4b85abd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SoftMax.cu": {
+      "type": "file",
+      "hashes": {
+        "SoftMax.cu": "b26a9680e4c0b78e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryRemainderKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "BinaryRemainderKernel.cu": "fed4905c68282417"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReduceSumProdKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ReduceSumProdKernel.cu": "d4282beb6a3c746d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Col2Im.cu": {
+      "type": "file",
+      "hashes": {
+        "Col2Im.cu": "e6e09bb1000a57f0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationLeakyReluKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationLeakyReluKernel.cu": "bd02b52b6d750c4e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationGeluKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationGeluKernel.cu": "1a9977ab66af25d9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "shifted_chebyshev_polynomial_v.cu": {
+      "type": "file",
+      "hashes": {
+        "shifted_chebyshev_polynomial_v.cu": "52894f5eee029974"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReduceAMinMaxKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ReduceAMinMaxKernel.cu": "f836ce2d61dc682d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FractionalMaxPool2d.cu": {
+      "type": "file",
+      "hashes": {
+        "FractionalMaxPool2d.cu": "8bb641a52b6175a4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationHardshrinkKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationHardshrinkKernel.cu": "a80f3bb731a5c0a7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnarySpecialOpsKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnarySpecialOpsKernel.cu": "8945af541ef1ffc0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGeometricAtanhKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGeometricAtanhKernel.cu": "fc902a9838eb3504"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationHardtanhKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationHardtanhKernel.cu": "531299e71c27a53f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LinearAlgebra.cu": {
+      "type": "file",
+      "hashes": {
+        "LinearAlgebra.cu": "6664c31d93fbf95a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FractionalMaxPool3d.cu": {
+      "type": "file",
+      "hashes": {
+        "FractionalMaxPool3d.cu": "3d5b31008e8fce6c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryDivTrueKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "BinaryDivTrueKernel.cu": "ad86bdbc9000d2ad"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NLLLoss2d.cu": {
+      "type": "file",
+      "hashes": {
+        "NLLLoss2d.cu": "d8ca95b1dcdb73c9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ReduceArgMaxKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ReduceArgMaxKernel.cu": "2ee091fabb55652b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationEluKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationEluKernel.cu": "534da30a87c83297"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DistributionExponentialKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "DistributionExponentialKernel.cu": "29145966ddfee075"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "IGammaKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "IGammaKernel.cu": "e14f92b72e2123bf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "fused_adam_amsgrad_impl.cu": {
+      "type": "file",
+      "hashes": {
+        "fused_adam_amsgrad_impl.cu": "bff1671c32fa84de"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "airy_ai.cu": {
+      "type": "file",
+      "hashes": {
+        "airy_ai.cu": "afe5f4e0ed3102d3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FunctionOfAMatrixUtilsKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "FunctionOfAMatrixUtilsKernel.cu": "e9da47d37f150535"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DistributionTemplates.h": {
+      "type": "file",
+      "hashes": {
+        "DistributionTemplates.h": "94a598ff053a782a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGeometricAtanKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGeometricAtanKernel.cu": "75c0d97afcd95d94"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DistributionNormal.cu": {
+      "type": "file",
+      "hashes": {
+        "DistributionNormal.cu": "0c2588deb7457fdc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Loss.cu": {
+      "type": "file",
+      "hashes": {
+        "Loss.cu": "140292e941c2cc7f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AbsKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "AbsKernel.cu": "52ae38cb755daad5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationMishKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationMishKernel.cu": "b5e91449360ec02c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ActivationPreluKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "ActivationPreluKernel.cu": "718a2e4ff3e65722"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleBilinear2d.cu": {
+      "type": "file",
+      "hashes": {
+        "UpSampleBilinear2d.cu": "d79014652d1e81aa"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AdaptiveAveragePooling.cu": {
+      "type": "file",
+      "hashes": {
+        "AdaptiveAveragePooling.cu": "18b26e6219b98025"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ForeachTernaryOp.cu": {
+      "type": "file",
+      "hashes": {
+        "ForeachTernaryOp.cu": "7c406417ee6d9849"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LogcumsumexpKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "LogcumsumexpKernel.cu": "4cdb53bdb55516d4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "group_norm_kernel.cu": {
+      "type": "file",
+      "hashes": {
+        "group_norm_kernel.cu": "a77518cb2cd7ffc2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ForeachPointwiseOp.cu": {
+      "type": "file",
+      "hashes": {
+        "ForeachPointwiseOp.cu": "511a2d87f0d8699d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "WeightNorm.cu": {
+      "type": "file",
+      "hashes": {
+        "WeightNorm.cu": "da9f1ea9dce8aa68"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGeometricCosKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGeometricCosKernel.cu": "bfa6f966c733c88d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Shape.cu": {
+      "type": "file",
+      "hashes": {
+        "Shape.cu": "b8b0846d7b8ba580"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CumprodKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "CumprodKernel.cu": "c8e729367f202224"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryComplexKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryComplexKernels.cu": "de13828ee73b5594"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleBicubic2d.cu": {
+      "type": "file",
+      "hashes": {
+        "UpSampleBicubic2d.cu": "d272ecd2e5138c8e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UpSampleLinear1d.cu": {
+      "type": "file",
+      "hashes": {
+        "UpSampleLinear1d.cu": "cabd1de06cb1a4cf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "RangeFactories.cu": {
+      "type": "file",
+      "hashes": {
+        "RangeFactories.cu": "d9347f4d3c520fee"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "shifted_chebyshev_polynomial_w.cu": {
+      "type": "file",
+      "hashes": {
+        "shifted_chebyshev_polynomial_w.cu": "4c6bee4b7d051827"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DistributionLogNormalKernel.cu": {
+      "type": "file",
+      "hashes": {
+        "DistributionLogNormalKernel.cu": "5b7dfb8b14534552"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LaunchUtils.h": {
+      "type": "file",
+      "hashes": {
+        "LaunchUtils.h": "5c709adf72a55717"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryLogKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryLogKernels.cu": "4ffc9f091bbbae5d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "spherical_bessel_j0.cu": {
+      "type": "file",
+      "hashes": {
+        "spherical_bessel_j0.cu": "29c1d548e52f32d6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "UnaryGammaKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "UnaryGammaKernels.cu": "ad2039cba9a4e5b0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorShapeCUDA.cpp": {
+      "type": "file",
+      "hashes": {
+        "TensorShapeCUDA.cpp": "b3209a683396fae3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BinaryGeometricKernels.cu": {
+      "type": "file",
+      "hashes": {
+        "BinaryGeometricKernels.cu": "b55753d6f313fac1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "linalg/CudssHandlePool.cpp": {
+      "type": "file",
+      "hashes": {
+        "linalg/CudssHandlePool.cpp": "22117c1dcaebfd15"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "linalg/MagmaUtils.h": {
+      "type": "file",
+      "hashes": {
+        "linalg/MagmaUtils.h": "3510dcf79ed07ff1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ConvolutionMM2d.cu": {
+      "type": "file",
+      "hashes": {
+        "ConvolutionMM2d.cu": "fe89bdb49f728df9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "linalg/CusolverDnHandlePool.cpp": {
+      "type": "file",
+      "hashes": {
+        "linalg/CusolverDnHandlePool.cpp": "81ef9e5bf822b7bf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/epilogue_helpers.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/epilogue_helpers.h": "ea95e206b99d0a2e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/tile_interleaved_layout.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/tile_interleaved_layout.h": "d5bd42f56058b4cc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "linalg/BatchLinearAlgebraLibBlas.cpp": {
+      "type": "file",
+      "hashes": {
+        "linalg/BatchLinearAlgebraLibBlas.cpp": "cc4e6bae959e1de5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/ft_gemm_configs.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/ft_gemm_configs.h": "b4b1ef7093a85498"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/arch/mma.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/arch/mma.h": "238b8a5204635df8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/gemm/threadblock/default_dq_mma.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/gemm/threadblock/default_dq_mma.h": "89be5141ff927b56"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/gemm/threadblock/default_dq_mma_pipelined.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/gemm/threadblock/default_dq_mma_pipelined.h": "0adddf880ba90080"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/gemm/threadblock/default_mma_bf16.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/gemm/threadblock/default_mma_bf16.h": "e5277a70d9af7f5c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/interleaved_numeric_conversion.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/interleaved_numeric_conversion.h": "b3c577fb67699334"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/gemm/threadblock/dq_mma_multistage.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/gemm/threadblock/dq_mma_multistage.h": "bad7155bd03d7aca"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/gemm/threadblock/dq_mma_pipelined.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/gemm/threadblock/dq_mma_pipelined.h": "c06ef707b6a9bbe2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/gemm/threadblock/dq_mma_base.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/gemm/threadblock/dq_mma_base.h": "bf3807695ca07f53"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "linalg/BatchLinearAlgebra.cpp": {
+      "type": "file",
+      "hashes": {
+        "linalg/BatchLinearAlgebra.cpp": "a2ce432076f6bc55"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/gemm/threadblock/default_mma.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/gemm/threadblock/default_mma.h": "2324f98042a194c9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/gemm/warp/mma_tensorop_compute_B_with_f16.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/gemm/warp/mma_tensorop_compute_B_with_f16.h": "09e50009ad3442b4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/gemm/threadblock/default_dq_mma_multistage.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/gemm/threadblock/default_dq_mma_multistage.h": "81d473fa2b4560d2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cutlass_extensions/gemm/warp/default_mma_tensor_op.h": {
+      "type": "file",
+      "hashes": {
+        "cutlass_extensions/gemm/warp/default_mma_tensor_op.h": "40ac87b7f5bfa8e3"
       },
       "tasks": {
         "purpose": "done"

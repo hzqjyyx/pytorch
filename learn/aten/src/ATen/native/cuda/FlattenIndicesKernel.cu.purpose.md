@@ -1,0 +1,10 @@
+- **文件功能**：实现 CUDA 版本的索引展平（flatten indices）内核
+- **核心操作**：将多维张量的索引转换为一维线性索引
+- **主要组件**：
+  - `CUDAKernelLauncher`：CUDA 内核启动器模板，调用 `gpu_kernel` 执行计算
+  - `flatten_indices_cuda_kernel`：包装函数，调用通用的 `_flatten_indices` 模板并传入 CUDA 启动器
+- **依赖关系**：
+  - `FlattenIndicesCommon.h`：提供通用的展平索引逻辑
+  - `Loops.cuh`：提供 GPU 循环执行框架
+  - `OffsetCalculator.cuh`：处理多维到一维的偏移计算
+- **注册机制**：通过 `REGISTER_CUDA_DISPATCH` 将 CUDA 实现注册到稀疏张量操作派发系统
