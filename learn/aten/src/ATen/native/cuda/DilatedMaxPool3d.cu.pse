@@ -1,0 +1,268 @@
+--------------------------------
+max_pool3d_with_indices (前向):
+来源: aten/src/ATen/native/cuda/DilatedMaxPool3d.cu
+--------------------------------
+
+【签名】
+    @device
+    max_pool3d_with_indices_single_out_frame(
+        inputData: Tensor[features, itime, iheight, iwidth],
+        outputData: Tensor[features, otime, oheight, owidth],
+        indicesData: Tensor[features, otime, oheight, owidth, int64],
+        kT, kH, kW: int,           # 池化窗口大小
+        dT, dH, dW: int,           # 步长
+        pT, pH, pW: int,           # padding
+        dilationT, dilationH, dilationW: int,
+        channels_last: bool
+    )
+
+【算法】
+    # 每个线程处理一个输出位置
+    oColumn = blockIdx.x * blockDim.x + threadIdx.x
+    oRow = blockIdx.y * blockDim.y + threadIdx.y
+    
+    if channels_last:
+        channel = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) % features
+        slice = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) / features
+        batch = slice / otime
+        oFrame = slice % otime
+    else:
+        oFrame = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) % otime
+        slice = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) / otime
+
+    if 边界检查通过:
+        # 计算输入窗口范围
+        tStart = oFrame * dT - pT
+        hStart = oRow * dH - pH
+        wStart = oColumn * dW - pW
+        tEnd = min(tStart + (kT - 1) * dilationT + 1, itime)
+        hEnd = min(hStart + (kH - 1) * dilationH + 1, iheight)
+        wEnd = min(wStart + (kW - 1) * dilationW + 1, iwidth)
+
+        # 调整负数起点到第一个有效位置（考虑dilation）
+        while tStart < 0: tStart += dilationT
+        while hStart < 0: hStart += dilationH
+        while wStart < 0: wStart += dilationW
+
+        # 查找最大值和索引
+        max = -Infinity
+        maxIndex = tStart * iheight * iwidth + hStart * iwidth + wStart
+
+        for t in range(tStart, tEnd, dilationT):
+            for h in range(hStart, hEnd, dilationH):
+                for w in range(wStart, wEnd, dilationW):
+                    index = t * iheight * iwidth + h * iwidth + w
+                    val = inputData[根据channels_last调整的index]
+                    
+                    if (max < val) or isnan(val):
+                        max = val
+                        maxIndex = index
+
+        outputData[out_index] = max
+        indicesData[out_index] = maxIndex
+
+【并行模式】
+    grid: (ceil(owidth/blockDim.x), ceil(oheight/blockDim.y), totalZ/threadZ)
+    block:
+        - channels_first: (32, 8, 1)
+        - channels_last: (2, 4, 64)
+
+    每个线程独立处理一个输出位置的max pooling
+
+【备注】
+    - totalZ = otime * nslices * nbatch，沿此维度分批启动kernel（每批最多65535*threadZ）
+    - maxIndex存储在channels-first格式（contiguous）下的线性索引
+    - NaN处理：NaN会被选为最大值
+
+--------------------------------
+max_pool3d_with_indices (前向入口):
+来源: aten/src/ATen/native/cuda/DilatedMaxPool3d.cu
+--------------------------------
+
+【签名】
+    @host→device
+    max_pool3d_with_indices_out_cuda_template(
+        output: Tensor,
+        indices: Tensor,
+        input: Tensor[*B, C, T, H, W],  # 4D或5D
+        kernel_size: (kT,) | (kT, kH, kW),
+        stride: () | (dT,) | (dT, dH, dW),
+        padding: (pT,) | (pT, pH, pW),
+        dilation: (dilationT,) | (dilationT, dilationH, dilationW),
+        ceil_mode: bool
+    )
+
+【算法】
+    # Step 1: 参数解析
+    kT, kH, kW = expand(kernel_size)
+    dT, dH, dW = expand(stride) if stride else (kT, kH, kW)
+    pT, pH, pW = expand(padding)
+    dilationT, dilationH, dilationW = expand(dilation)
+
+    # Step 2: 计算输出尺寸
+    nbatch = input.size(-5) if input.ndim == 5 else 1
+    nslices = input.size(-4)
+    itime, iheight, iwidth = input.size(-3), input.size(-2), input.size(-1)
+    otime = pooling_output_shape(itime, kT, pT, dT, dilationT, ceil_mode)
+    oheight = pooling_output_shape(iheight, kH, pH, dH, dilationH, ceil_mode)
+    owidth = pooling_output_shape(iwidth, kW, pW, dW, dilationW, ceil_mode)
+
+    # Step 3: 检测内存格式
+    channels_last = input.suggest_memory_format() == ChannelsLast3d
+    if input.ndim == 4:
+        # 处理4D输入的channels_last检测
+        input_check = input.unsqueeze(0)
+        channels_last = (!input_check.is_contiguous()) and 
+                        input_check.is_contiguous(ChannelsLast3d)
+
+    # Step 4: 调整输入和输出形状
+    if input.ndim == 4:
+        if channels_last:
+            _input = input.unsqueeze(0)
+            output.resize({1, nslices, otime, oheight, owidth}, ChannelsLast3d)
+            indices.resize({1, nslices, otime, oheight, owidth}, ChannelsLast3d)
+            output = output.squeeze(0)
+            indices = indices.squeeze(0)
+        else:
+            output.resize({nslices, otime, oheight, owidth})
+            indices.resize({nslices, otime, oheight, owidth})
+    else:
+        memory_format = ChannelsLast3d if channels_last else Contiguous
+        output.resize({nbatch, nslices, otime, oheight, owidth}, memory_format)
+        indices.resize({nbatch, nslices, otime, oheight, owidth}, memory_format)
+
+    if input.numel() == 0:
+        return
+
+    # Step 5: 确保contiguous
+    work_input = _input.contiguous(ChannelsLast3d) if channels_last else input.contiguous()
+
+    # Step 6: 启动kernel
+    totalZ = otime * nslices * nbatch
+    max_pool3d_with_indices_out_frame(
+        work_input.const_data_ptr(),
+        output, indices,
+        nslices,
+        totalZ,
+        itime, iheight, iwidth,
+        nbatch, otime, oheight, owidth,
+        kT, kH, kW,
+        dT, dH, dW,
+        pT, pH, pW,
+        dilationT, dilationH, dilationW,
+        channels_last
+    )
+
+【备注】
+    - 支持 float, half, bfloat16 类型
+    - channels_last 优化: block配置为(2,4,64)，沿channel维度并行
+    - 4D输入特殊处理：内部临时unsqueeze为5D
+
+--------------------------------
+max_pool3d_with_indices_backward (反向):
+来源: aten/src/ATen/native/cuda/DilatedMaxPool3d.cu
+--------------------------------
+
+【签名】
+    @device
+    max_pool3d_with_indices_backward_single_out_frame(
+        gradInputData: Tensor[features, itime, iheight, iwidth],
+        gradOutputData: Tensor[features, otime, oheight, owidth],
+        indicesData: Tensor[features, otime, oheight, owidth, int64],
+        channels_last: bool
+    )
+
+【算法】
+    # 每个线程处理一个输出位置
+    oColumn = blockIdx.x * blockDim.x + threadIdx.x
+    oRow = blockIdx.y * blockDim.y + threadIdx.y
+    
+    if channels_last:
+        channel = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) % features
+        slice = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) / features
+        batch = slice / otime
+        oFrame = slice % otime
+    else:
+        oFrame = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) % otime
+        slice = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) / otime
+
+    if 边界检查通过:
+        out_index = compute_output_index(slice, batch, channel, oFrame, oRow, oColumn, channels_last)
+        maxIndex = indicesData[out_index]
+        
+        if maxIndex != -1:
+            input_index = compute_input_index(slice, batch, channel, maxIndex, channels_last)
+            atomic_add(gradInputData[input_index], gradOutputData[out_index])
+
+【并行模式】
+    grid: (ceil(owidth/blockDim.x), ceil(oheight/blockDim.y), totalZ/threadZ)
+    block:
+        - channels_first: (32, 8, 1)
+        - channels_last: (2, 4, 64)
+
+    每个线程将梯度原子加到对应的输入位置
+
+【备注】
+    - 使用原子加，因为多个输出位置可能选择同一个输入位置
+    - 非确定性操作（由于原子加的顺序不确定）
+
+--------------------------------
+max_pool3d_with_indices_backward (反向入口):
+来源: aten/src/ATen/native/cuda/DilatedMaxPool3d.cu
+--------------------------------
+
+【签名】
+    @host→device
+    max_pool3d_with_indices_backward_out_cuda_template(
+        gradInput: Tensor,
+        gradOutput: Tensor[*B, C, oT, oH, oW],
+        input: Tensor[*B, C, iT, iH, iW],
+        indices: Tensor[*B, C, oT, oH, oW, int64],
+        kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+【算法】
+    # Step 1: 参数解析（同前向）
+    kT, kH, kW = expand(kernel_size)
+    dT, dH, dW = expand(stride) if stride else (kT, kH, kW)
+    pT, pH, pW = expand(padding)
+    dilationT, dilationH, dilationW = expand(dilation)
+
+    # Step 2: 检测内存格式（同前向）
+    channels_last = detect_channels_last(input)
+
+    # Step 3: 初始化gradInput
+    memory_format = ChannelsLast3d if channels_last else Contiguous
+    gradInput.resize_as(input, memory_format)
+    gradInput.zero_()
+
+    # Step 4: 提取维度
+    nbatch = input.size(-5) if input.ndim == 5 else 1
+    nslices = input.size(-4)
+    otime, oheight, owidth = gradOutput.size(-3), gradOutput.size(-2), gradOutput.size(-1)
+    itime, iheight, iwidth = gradInput.size(-3), gradInput.size(-2), gradInput.size(-1)
+
+    if gradOutput.numel() == 0:
+        return
+
+    # Step 5: 确保contiguous
+    work_grad_output = gradOutput.contiguous(ChannelsLast3d) if channels_last else gradOutput.contiguous()
+    work_indices = indices.contiguous(ChannelsLast3d) if channels_last else indices.contiguous()
+
+    # Step 6: 启动kernel
+    totalZ = otime * nslices * nbatch
+    max_pool3d_with_indices_backward_out_frame(
+        gradInput.mutable_data_ptr(),
+        work_grad_output,
+        work_indices,
+        nslices,
+        totalZ,
+        itime, iheight, iwidth,
+        nbatch, otime, oheight, owidth,
+        channels_last
+    )
+
+【备注】
+    - 会触发非确定性警告（由于atomic_add）
+    - gradInput初始化为零，然后累加梯度
+    - 支持 float, half, bfloat16 类型

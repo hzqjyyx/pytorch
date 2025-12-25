@@ -9,6 +9,753 @@
       "tasks": {
         "pseudocode": "done"
       }
+    },
+    "DLConvertor": {
+      "type": "group",
+      "hashes": {
+        "DLConvertor.cpp": "daa5e35ed5cc8d00",
+        "DLConvertor.h": "e19b128fa5c0554a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MemoryOverlap": {
+      "type": "group",
+      "hashes": {
+        "MemoryOverlap.cpp": "e335fc676ce1a56c",
+        "MemoryOverlap.h": "54c220b568c1e1d5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NestedTensorImpl": {
+      "type": "group",
+      "hashes": {
+        "NestedTensorImpl.cpp": "7a378502c491ae2d",
+        "NestedTensorImpl.h": "9f2e9f39ff408740"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Utils": {
+      "type": "group",
+      "hashes": {
+        "Utils.cpp": "1463e017e94738da",
+        "Utils.h": "4c17dcc45f58cfc7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LegacyBatchedFallback": {
+      "type": "group",
+      "hashes": {
+        "LegacyBatchedFallback.cpp": "ee03a3d33768b221",
+        "LegacyBatchedFallback.h": "40d06c64e9e4cf56"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DeviceAccelerator": {
+      "type": "group",
+      "hashes": {
+        "DeviceAccelerator.cpp": "e56b7ee457fcb217",
+        "DeviceAccelerator.h": "b6f37a9142597626"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ScalarOps": {
+      "type": "group",
+      "hashes": {
+        "ScalarOps.cpp": "371ed288301f55d5",
+        "ScalarOps.h": "2c08b8ecf6e92465"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LegacyVmapMode": {
+      "type": "group",
+      "hashes": {
+        "LegacyVmapMode.cpp": "d59126a5dafd09d6",
+        "LegacyVmapMode.h": "c3c6538fe54fe711"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "StorageUtils": {
+      "type": "group",
+      "hashes": {
+        "StorageUtils.cpp": "9e1cc1fc0622073b",
+        "StorageUtils.h": "d985b61b3b535877"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Version": {
+      "type": "group",
+      "hashes": {
+        "Version.cpp": "ebcc6c875725fb07",
+        "Version.h": "b135b4e21161ed11"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorUtils": {
+      "type": "group",
+      "hashes": {
+        "TensorUtils.cpp": "774f3b8c5cb539d5",
+        "TensorUtils.h": "cad8d33c0c664888"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "AccumulateType": {
+      "type": "group",
+      "hashes": {
+        "AccumulateType.cpp": "0b8ebbe0d84a2a6c",
+        "AccumulateType.h": "f1defbdc257362ab"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FuncTorchTLS": {
+      "type": "group",
+      "hashes": {
+        "FuncTorchTLS.cpp": "6f4411a64deb80a3",
+        "FuncTorchTLS.h": "d5187f4a5d2bd143"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FunctionalTensorWrapper": {
+      "type": "group",
+      "hashes": {
+        "FunctionalTensorWrapper.cpp": "00fe4b0895f79751",
+        "FunctionalTensorWrapper.h": "31fbf373ae3f01be"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "EmptyTensor": {
+      "type": "group",
+      "hashes": {
+        "EmptyTensor.cpp": "d36f2efa58d04ae6",
+        "EmptyTensor.h": "899a832877229ce3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorIndexing": {
+      "type": "group",
+      "hashes": {
+        "TensorIndexing.cpp": "8fcbdb2fccd81073",
+        "TensorIndexing.h": "5e2904d15233d4c6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ThreadLocalPythonObjects": {
+      "type": "group",
+      "hashes": {
+        "ThreadLocalPythonObjects.cpp": "e4d1117087ae8e96",
+        "ThreadLocalPythonObjects.h": "12a1b8ebfd7c1e98"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorMeta": {
+      "type": "group",
+      "hashes": {
+        "TensorMeta.cpp": "ffdfd5b938513256",
+        "TensorMeta.h": "b358c8ae8fe247e1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LegacyBatchedTensorImpl": {
+      "type": "group",
+      "hashes": {
+        "LegacyBatchedTensorImpl.cpp": "7fe1cb34ad2e1257",
+        "LegacyBatchedTensorImpl.h": "90940cf4ad361c93"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ExpandUtils": {
+      "type": "group",
+      "hashes": {
+        "ExpandUtils.cpp": "f2a49ea431d8868e",
+        "ExpandUtils.h": "d5f1ffd20120ffea"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Context": {
+      "type": "group",
+      "hashes": {
+        "Context.cpp": "5b75f7e4ab22f095",
+        "Context.h": "5116a1c2d41cdbf0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorIterator": {
+      "type": "group",
+      "hashes": {
+        "TensorIterator.cpp": "5693a1fcc4657809",
+        "TensorIterator.h": "8dcc26a404f3a140"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PythonTorchFunctionTLS": {
+      "type": "group",
+      "hashes": {
+        "PythonTorchFunctionTLS.cpp": "01c3745ff18ecf53",
+        "PythonTorchFunctionTLS.h": "e66021a3c1676134"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MapAllocator": {
+      "type": "group",
+      "hashes": {
+        "MapAllocator.cpp": "2630344996bb543c",
+        "MapAllocator.h": "226fa5682c741736"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SequenceNumber": {
+      "type": "group",
+      "hashes": {
+        "SequenceNumber.cpp": "b1c7daf337821a43",
+        "SequenceNumber.h": "924c74fc15327dd4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CPUGeneratorImpl": {
+      "type": "group",
+      "hashes": {
+        "CPUGeneratorImpl.cpp": "a412efd2abd9a25f",
+        "CPUGeneratorImpl.h": "ee876b3442205dff"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "record_function": {
+      "type": "group",
+      "hashes": {
+        "record_function.cpp": "bd81a4012418e4d9",
+        "record_function.h": "25245a96f56baf37"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ParallelOpenMP": {
+      "type": "group",
+      "hashes": {
+        "ParallelOpenMP.cpp": "5b1073b6efc83959",
+        "ParallelOpenMP.h": "547137c59ba1f88d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorGeometry": {
+      "type": "group",
+      "hashes": {
+        "TensorGeometry.cpp": "c6f37cbd2ef1cb2d",
+        "TensorGeometry.h": "cf24a510b8d257fb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorNames": {
+      "type": "group",
+      "hashes": {
+        "TensorNames.cpp": "4db9df5a8d7ea03e",
+        "TensorNames.h": "3d93b5da6cd4507a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FunctionalStorageImpl": {
+      "type": "group",
+      "hashes": {
+        "FunctionalStorageImpl.cpp": "126c60bb0e943ad0",
+        "FunctionalStorageImpl.h": "4ab277231acf43af"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SparseCsrTensorImpl": {
+      "type": "group",
+      "hashes": {
+        "SparseCsrTensorImpl.cpp": "936ca6dc0c3f5b85",
+        "SparseCsrTensorImpl.h": "98ee258ad3ee22a2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SavedTensorHooks": {
+      "type": "group",
+      "hashes": {
+        "SavedTensorHooks.cpp": "d6deef59ab73845a",
+        "SavedTensorHooks.h": "8d3c26a6f5f620b0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SparseTensorImpl": {
+      "type": "group",
+      "hashes": {
+        "SparseTensorImpl.cpp": "e28be36071c6f598",
+        "SparseTensorImpl.h": "b05e3155f2e9e6dd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ParallelNative": {
+      "type": "group",
+      "hashes": {
+        "ParallelNative.cpp": "5711d1573bbeb754",
+        "ParallelNative.h": "a85081bb73a38b0a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ThreadLocalState": {
+      "type": "group",
+      "hashes": {
+        "ThreadLocalState.cpp": "5ef097a74db9c2f6",
+        "ThreadLocalState.h": "c7449aaf8fb1cb22"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DynamicLibrary": {
+      "type": "group",
+      "hashes": {
+        "DynamicLibrary.cpp": "0a35513f2bedcf84",
+        "DynamicLibrary.h": "36d9807f8635fc18"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Dispatch": {
+      "type": "group",
+      "hashes": {
+        "Dispatch.cpp": "62d51e352d9bb382",
+        "Dispatch.h": "ac1c4407f78e1c2e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LegacyVmapTransforms": {
+      "type": "group",
+      "hashes": {
+        "LegacyVmapTransforms.cpp": "c4d0527bede74f4d",
+        "LegacyVmapTransforms.h": "83494121827bf776"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CachedTensorUtils": {
+      "type": "group",
+      "hashes": {
+        "CachedTensorUtils.cpp": "5e351be7011dc105",
+        "CachedTensorUtils.h": "03b81a4bafac7b1a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NamedTensorUtils": {
+      "type": "group",
+      "hashes": {
+        "NamedTensorUtils.cpp": "e7efbbf81c1c9ba1",
+        "NamedTensorUtils.h": "c3eeefe791066b71"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/quantized/QTensorImpl": {
+      "type": "group",
+      "hashes": {
+        "quantized/QTensorImpl.cpp": "6688ad29642763f9",
+        "quantized/QTensorImpl.h": "3be5dc2ae97ae41f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/quantized/Quantizer": {
+      "type": "group",
+      "hashes": {
+        "quantized/Quantizer.cpp": "c96e761ebaa6bb7a",
+        "quantized/Quantizer.h": "5fa8f84d0a17803d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "autocast_mode": {
+      "type": "group",
+      "hashes": {
+        "autocast_mode.cpp": "9482e6e2f4183edd",
+        "autocast_mode.h": "2b7b7fe6d7c22f8e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/detail/PrivateUse1HooksInterface": {
+      "type": "group",
+      "hashes": {
+        "detail/PrivateUse1HooksInterface.cpp": "f5268f4d0cb71e10",
+        "detail/PrivateUse1HooksInterface.h": "df09b9458b3b03ea"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/detail/MAIAHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "detail/MAIAHooksInterface.cpp": "c4169f97930b7c9f",
+        "detail/MAIAHooksInterface.h": "1547441f42e66648"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/detail/CUDAHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "detail/CUDAHooksInterface.cpp": "9935ada7cb8e8abb",
+        "detail/CUDAHooksInterface.h": "b6205f835b48d35d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/detail/XPUHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "detail/XPUHooksInterface.cpp": "5f8f6cdb61d68ea3",
+        "detail/XPUHooksInterface.h": "606bfb239814d983"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/detail/HIPHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "detail/HIPHooksInterface.cpp": "749a27cc332152e8",
+        "detail/HIPHooksInterface.h": "a632addcb55d36bd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/detail/MPSHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "detail/MPSHooksInterface.cpp": "3e8f02c3a36a0ca2",
+        "detail/MPSHooksInterface.h": "823d8972fdf6d39a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/detail/MTIAHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "detail/MTIAHooksInterface.cpp": "4567df6b77fba035",
+        "detail/MTIAHooksInterface.h": "99ecdb9527738d7a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/detail/IPUHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "detail/IPUHooksInterface.cpp": "6594453b3075241c",
+        "detail/IPUHooksInterface.h": "ebdf60cb86666bc1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/detail/HPUHooksInterface": {
+      "type": "group",
+      "hashes": {
+        "detail/HPUHooksInterface.cpp": "331a007390b412f3",
+        "detail/HPUHooksInterface.h": "0bd9c5badab6cd27"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nnapi/nnapi/nnapi_bind": {
+      "type": "group",
+      "hashes": {
+        "nnapi/nnapi_bind.cpp": "f0711ce4ef290271",
+        "nnapi/nnapi_bind.h": "7e47f9fccdee0b8f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nnapi/nnapi/nnapi_wrapper": {
+      "type": "group",
+      "hashes": {
+        "nnapi/nnapi_wrapper.cpp": "19316d6dce1fa87c",
+        "nnapi/nnapi_wrapper.h": "290be3a62636a23e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nnapi/nnapi/nnapi_model_loader": {
+      "type": "group",
+      "hashes": {
+        "nnapi/nnapi_model_loader.cpp": "214aa17224e20f84",
+        "nnapi/nnapi_model_loader.h": "53ad0d6dd1b396f1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/templates/UnboxingFunctions": {
+      "type": "group",
+      "hashes": {
+        "templates/UnboxingFunctions.cpp": "c3076561469a0a35",
+        "templates/UnboxingFunctions.h": "6dcb38113d0b2edc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/templates/RedispatchFunctions": {
+      "type": "group",
+      "hashes": {
+        "templates/RedispatchFunctions.cpp": "a4d85fa7780c070e",
+        "templates/RedispatchFunctions.h": "1c527c48b0668362"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/templates/Operators": {
+      "type": "group",
+      "hashes": {
+        "templates/Operators.cpp": "7237e390832d7dcf",
+        "templates/Operators.h": "a14f77f42239f43a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/templates/DispatchKeyNativeFunctions": {
+      "type": "group",
+      "hashes": {
+        "templates/DispatchKeyNativeFunctions.cpp": "0d88f1266610e587",
+        "templates/DispatchKeyNativeFunctions.h": "7bc9543496788edd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/templates/Functions": {
+      "type": "group",
+      "hashes": {
+        "templates/Functions.cpp": "46f534ff3cca54f6",
+        "templates/Functions.h": "dd613d0e6b133e8c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/functorch/PlumbingHelper": {
+      "type": "group",
+      "hashes": {
+        "functorch/PlumbingHelper.cpp": "e5f2432387a39951",
+        "functorch/PlumbingHelper.h": "6e2832fa21a6113c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/functorch/ADInterpreters": {
+      "type": "group",
+      "hashes": {
+        "functorch/ADInterpreters.cpp": "747665b3c81b3e26",
+        "functorch/ADInterpreters.h": "fb6f6324b3863b24"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/functorch/BatchRulesHelper": {
+      "type": "group",
+      "hashes": {
+        "functorch/BatchRulesHelper.cpp": "6822a7a45b5aa83e",
+        "functorch/BatchRulesHelper.h": "87638a597b718b1f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/functorch/BatchedFallback": {
+      "type": "group",
+      "hashes": {
+        "functorch/BatchedFallback.cpp": "09bd8beced7c4923",
+        "functorch/BatchedFallback.h": "6d57edb248bb71dc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/functorch/FunctionalizeInterpreter": {
+      "type": "group",
+      "hashes": {
+        "functorch/FunctionalizeInterpreter.cpp": "0c8f881d16c9af3e",
+        "functorch/FunctionalizeInterpreter.h": "d70802af56980870"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/functorch/VmapInterpreter": {
+      "type": "group",
+      "hashes": {
+        "functorch/VmapInterpreter.cpp": "0b9f5e2909d1bb3f",
+        "functorch/VmapInterpreter.h": "9ff421eca8a3b851"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/functorch/TensorWrapper": {
+      "type": "group",
+      "hashes": {
+        "functorch/TensorWrapper.cpp": "1af514bb9dde6c76",
+        "functorch/TensorWrapper.h": "dfd331c232bae698"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/functorch/Interpreter": {
+      "type": "group",
+      "hashes": {
+        "functorch/Interpreter.cpp": "16b28c38c51ba33b",
+        "functorch/Interpreter.h": "27e8a0bc07555a99"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/functorch/BatchedTensorImpl": {
+      "type": "group",
+      "hashes": {
+        "functorch/BatchedTensorImpl.cpp": "f873afe5f1a07946",
+        "functorch/BatchedTensorImpl.h": "89db9a277ec887a8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/functorch/DynamicLayer": {
+      "type": "group",
+      "hashes": {
+        "functorch/DynamicLayer.cpp": "9a5eedbf47041672",
+        "functorch/DynamicLayer.h": "c74f0d885355da27"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ATenConfig.cmake.in": {
+      "type": "file",
+      "hashes": {
+        "ATenConfig.cmake.in": "cd103d199c1a4bc2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/functorch/LegacyVmapTransforms": {
+      "type": "group",
+      "hashes": {
+        "functorch/LegacyVmapTransforms.cpp": "d17c5c40c155b4fb",
+        "functorch/LegacyVmapTransforms.h": "8ead22d147d4fa5c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Config.h.in": {
+      "type": "file",
+      "hashes": {
+        "Config.h.in": "1102ba1c8243743f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "quantized/CMakeLists.txt": {
+      "type": "file",
+      "hashes": {
+        "quantized/CMakeLists.txt": "3a1aa40674c82622"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
     }
   }
 }

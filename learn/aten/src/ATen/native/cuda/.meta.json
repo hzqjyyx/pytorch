@@ -972,7 +972,8 @@
         "UnaryGeometricTanKernel.cu": "92a629ec6aeae68b"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "fused_adamw_impl.cu": {
@@ -991,7 +992,8 @@
         "MultiLabelMarginCriterion.cu": "b359d4bb1ae37e57"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "StepKernel.cu": {
@@ -1000,7 +1002,8 @@
         "StepKernel.cu": "3c3fb390b41b92bb"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "LinearAlgebraStubs.cpp": {
@@ -1009,7 +1012,8 @@
         "LinearAlgebraStubs.cpp": "a7cb642e9a60f501"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "MixedDtypesLinear.cu": {
@@ -1018,7 +1022,8 @@
         "MixedDtypesLinear.cu": "47ce99631d7eee75"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "bessel_j0.cu": {
@@ -1027,7 +1032,8 @@
         "bessel_j0.cu": "9d0dd310f466d921"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "AmpKernels.cu": {
@@ -1036,7 +1042,8 @@
         "AmpKernels.cu": "c61b085b99c6422e"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "DilatedMaxPool3d.cu": {
@@ -1045,7 +1052,8 @@
         "DilatedMaxPool3d.cu": "36107b9286440c8d"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "SegmentReduce.cu": {
@@ -1063,7 +1071,8 @@
         "TriangularOps.cu": "e14eff6bd33853e6"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "modified_bessel_k1.cu": {
@@ -1072,7 +1081,8 @@
         "modified_bessel_k1.cu": "7d38956ee14e96b2"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "CompareEQKernel.cu": {
@@ -1081,7 +1091,8 @@
         "CompareEQKernel.cu": "a28f9dd15250a239"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ZetaKernel.cu": {
@@ -1090,7 +1101,8 @@
         "ZetaKernel.cu": "1e06d0ad6e725f90"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "UnaryFractionKernels.cu": {
@@ -1099,7 +1111,8 @@
         "UnaryFractionKernels.cu": "7e5e29108431de8c"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ReduceMinValuesKernel.cu": {
@@ -1108,7 +1121,8 @@
         "ReduceMinValuesKernel.cu": "c15a3cc5679dc498"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ReplicationPadding.cu": {
@@ -1117,7 +1131,8 @@
         "ReplicationPadding.cu": "52d120d47d31e286"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "bessel_y1.cu": {
@@ -1126,7 +1141,8 @@
         "bessel_y1.cu": "f64c0f8de83ac4a1"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "Bucketization.cu": {
@@ -1135,7 +1151,8 @@
         "Bucketization.cu": "c1dffddaced23792"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "fused_adam_impl.cu": {
@@ -1144,7 +1161,8 @@
         "fused_adam_impl.cu": "4ee0b3ddd9146f6c"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "UnaryGeometricAcosKernel.cu": {
@@ -1153,7 +1171,8 @@
         "UnaryGeometricAcosKernel.cu": "2373657da08dd2ee"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "DilatedMaxPool2d.cu": {
@@ -1180,7 +1199,8 @@
         "int4mm.cu": "dec1aaf6183f205a"
       },
       "tasks": {
-        "purpose": "done"
+        "purpose": "done",
+        "pseudocode": "done"
       }
     },
     "ActivationLogSigmoidKernel.cu": {

@@ -1,0 +1,40 @@
+--------------------------------
+tan_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryGeometricTanKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    tan_kernel_cuda(iter: TensorIterator)
+
+【算法】
+    dtype = iter.common_dtype()
+    
+    if dtype is complex:
+        if AT_USE_JITERATOR():
+            # 使用 JIT 编译的 kernel
+            jitted_gpu_kernel(iter, "template <typename T> T tan_impl(T a) { return std::tan(a); }")
+        else:
+            # 使用预编译的 kernel
+            gpu_kernel(iter, λ(a: scalar_t) -> scalar_t {
+                return ::tan(cast<opmath_t>(a))
+            })
+    else:
+        # 实数类型 (float32, float16, bfloat16)
+        gpu_kernel(iter, λ(a: scalar_t) -> scalar_t {
+            return ::tan(a)
+        })
+
+【并行模式】
+    elementwise
+    
+    通过 TensorIterator 自动处理:
+    - 内存布局优化
+    - 跨设备并行
+    - 类型分发
+
+【备注】
+    - 复数类型需要通过 opmath_t 提升精度以保证数值稳定性
+    - 实数类型直接计算，无需类型提升
+    - JIT 模式下，复数 kernel 在运行时编译，可减少二进制大小
+    - 支持的类型: complex_half, complex32, complex64, float16, bfloat16, float32, float64

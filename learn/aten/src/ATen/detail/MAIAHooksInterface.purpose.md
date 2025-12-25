@@ -1,37 +1,29 @@
-# MAIA Hooks Interface 分析
+## 文件功能分析
 
-这两个文件定义了 PyTorch 中 MAIA 加速器的钩子接口系统。
+这两个文件实现了PyTorch中MAIA（一种加速器后端）的钩子接口系统。
 
-## 核心结构
+**MAIAHooksInterface.h** 定义了：
+- `MAIAHooksInterface` 结构体，继承自 `AcceleratorHooksInterface`
+- 提供虚函数接口，包括 `init()`、`hasPrimaryContext()`、`showConfig()`
+- 所有虚函数都会抛出错误，表示"Cannot initialize MAIA without ATen_maia library"
+- `MAIAHooksRegistry` 注册机制，用于动态注册MAIA实现
+- `REGISTER_MAIA_HOOKS` 宏用于注册自定义MAIA钩子类
 
-**MAIAHooksInterface** (in header) 是一个继承自 `AcceleratorHooksInterface` 的虚基类，定义了 MAIA 设备需要实现的接口。由于 MAIA 库可能不被编译或加载，该基类提供了默认实现，这些实现会抛出错误。
+**MAIAHooksInterface.cpp** 实现了：
+- `getMAIAHooks()` 函数，返回全局单例的MAIA钩子接口
+- 尝试从注册表中创建注册过的MAIA实现
+- 如果注册表中没有实现，则返回默认的空实现（会抛出错误）
+- 使用静态变量确保单例模式
 
-**getMAIAHooks()** (in cpp) 函数使用单例模式获取 MAIA hooks 实例。它首先尝试通过注册表创建一个具体的实现，如果失败则返回默认的空实现。
+**核心概念：**
+- 这是一个**可插拔的硬件加速器抽象层**
+- MAIA是PyTorch支持的一种加速器后端（类似CUDA、ROCm）
+- 如果用户没有安装相应的ATen_maia库，调用任何MAIA操作都会失败
 
-## 工作流程
+**主要功能：**
 
-1. 当代码调用 `getMAIAHooks()` 时，它检查 `MAIAHooksRegistry` 中是否有已注册的 "MAIAHooks" 实现
-2. 如果找到注册的实现（即 ATen_maia 库已加载），使用该实现
-3. 如果未找到，返回默认的 `MAIAHooksInterface` 实例，其所有方法都会抛出错误提示："Cannot initialize MAIA without ATen_maia library"
-
-## 关键特性
-
-- **Registry Pattern**: 使用 `C10_DEFINE_REGISTRY` 和 `C10_REGISTER_CLASS` 宏实现动态注册
-- **Lazy Initialization**: `static` 变量保证单次初始化
-- **Default Implementation**: 提供降级方案，使不包含 MAIA 支持的 PyTorch 不会崩溃
-- **Error Messaging**: 清晰的错误消息告诉用户需要 ATen_maia 库
-
-## 接口方法
-
-- `init()`: 初始化 MAIA 设备
-- `hasPrimaryContext(device_index)`: 检查设备是否有主上下文
-- `showConfig()`: 返回 MAIA 版本信息
-
----
-
-**Summary:**
-
-- MAIA hooks 接口的注册和获取系统
-- 支持可选的 MAIA 库动态加载
-- 单例模式确保全局唯一实例
-- 失败时提供有意义的错误消息
+- 定义MAIA加速器的统一接口规范
+- 提供动态注册机制支持第三方实现
+- 实现单例模式获取全局MAIA钩子实例
+- 通过错误消息提示用户缺少必要的MAIA库支持
+- 作为编译时的可选依赖，不强制要求MAIA库存在

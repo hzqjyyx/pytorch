@@ -750,6 +750,1467 @@
       "tasks": {
         "purpose": "done"
       }
+    },
+    "cuda/cuda/CUDAAllocatorConfig": {
+      "type": "group",
+      "hashes": {
+        "cuda/CUDAAllocatorConfig.cpp": "f01fc27ffc13cb14",
+        "cuda/CUDAAllocatorConfig.h": "4399acdfe24f557f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/cuda/CUDAFunctions": {
+      "type": "group",
+      "hashes": {
+        "cuda/CUDAFunctions.cpp": "b5797a2a5eaf4f64",
+        "cuda/CUDAFunctions.h": "0d4dc1c85c9bf54f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/cuda/CUDADeviceAssertionHost": {
+      "type": "group",
+      "hashes": {
+        "cuda/CUDADeviceAssertionHost.cpp": "97a1ea956358f052",
+        "cuda/CUDADeviceAssertionHost.h": "e4e17904dab172ee"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "xpu/xpu/XPUFunctions": {
+      "type": "group",
+      "hashes": {
+        "xpu/XPUFunctions.cpp": "7faeafb7c8281243",
+        "xpu/XPUFunctions.h": "6d9b41546e4d5bff"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "xpu/xpu/XPUStream": {
+      "type": "group",
+      "hashes": {
+        "xpu/XPUStream.cpp": "0e07744c00cb448e",
+        "xpu/XPUStream.h": "9ce57dfbf632da06"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/core/impl/HermeticPyObjectTLS": {
+      "type": "group",
+      "hashes": {
+        "core/impl/HermeticPyObjectTLS.cpp": "e0fe301da5d88a37",
+        "core/impl/HermeticPyObjectTLS.h": "0691beec28fe54d7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/core/impl/GPUTrace": {
+      "type": "group",
+      "hashes": {
+        "core/impl/GPUTrace.cpp": "0599f49408fea96e",
+        "core/impl/GPUTrace.h": "35a1a775fa732635"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/core/impl/PyObjectSlot": {
+      "type": "group",
+      "hashes": {
+        "core/impl/PyObjectSlot.cpp": "e96bcd45cb23caa8",
+        "core/impl/PyObjectSlot.h": "6b5bcf6b53441838"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "xpu/xpu/XPUCachingAllocator": {
+      "type": "group",
+      "hashes": {
+        "xpu/XPUCachingAllocator.cpp": "1ceb444dd921e1ea",
+        "xpu/XPUCachingAllocator.h": "fe6b789269b0dd1d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/core/impl/alloc_cpu": {
+      "type": "group",
+      "hashes": {
+        "core/impl/alloc_cpu.cpp": "bd7efaf5a7ee580f",
+        "core/impl/alloc_cpu.h": "7e3e7865161aac86"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/core/impl/COWDeleter": {
+      "type": "group",
+      "hashes": {
+        "core/impl/COWDeleter.cpp": "881ec8d5fab066dc",
+        "core/impl/COWDeleter.h": "c59d6874954d9923"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/core/impl/TorchDispatchModeTLS": {
+      "type": "group",
+      "hashes": {
+        "core/impl/TorchDispatchModeTLS.cpp": "d7895b17bf45d064",
+        "core/impl/TorchDispatchModeTLS.h": "af305c1a883dfbb7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/core/impl/PythonDispatcherTLS": {
+      "type": "group",
+      "hashes": {
+        "core/impl/PythonDispatcherTLS.cpp": "e198824c38549994",
+        "core/impl/PythonDispatcherTLS.h": "caca7d99d32aee68"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/core/impl/DeviceGuardImplInterface": {
+      "type": "group",
+      "hashes": {
+        "core/impl/DeviceGuardImplInterface.cpp": "02f11e857c14277e",
+        "core/impl/DeviceGuardImplInterface.h": "78afa68e54e6c6d1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/core/impl/LocalDispatchKeySet": {
+      "type": "group",
+      "hashes": {
+        "core/impl/LocalDispatchKeySet.cpp": "b0e59a09e40b0fe9",
+        "core/impl/LocalDispatchKeySet.h": "cb684549a2808998"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/core/impl/SizesAndStrides": {
+      "type": "group",
+      "hashes": {
+        "core/impl/SizesAndStrides.cpp": "f598b686a43b1e6a",
+        "core/impl/SizesAndStrides.h": "ed6f3cbb266c4217"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/impl/cuda/impl/CUDATest": {
+      "type": "group",
+      "hashes": {
+        "cuda/impl/CUDATest.cpp": "48d806be9c6356da",
+        "cuda/impl/CUDATest.h": "a668f6203a06ab15"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/core/impl/COW": {
+      "type": "group",
+      "hashes": {
+        "core/impl/COW.cpp": "b5462bf3905b3bad",
+        "core/impl/COW.h": "c38146c905b9de48"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/impl/cuda/impl/CUDAGuardImpl": {
+      "type": "group",
+      "hashes": {
+        "cuda/impl/CUDAGuardImpl.cpp": "b8ebb72a25e15539",
+        "cuda/impl/CUDAGuardImpl.h": "f944d828ba69c6c2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "xpu/impl/xpu/impl/XPUGuardImpl": {
+      "type": "group",
+      "hashes": {
+        "xpu/impl/XPUGuardImpl.cpp": "80708bba6d2ffb1a",
+        "xpu/impl/XPUGuardImpl.h": "7c8bf3e9827b54e7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/core/impl/PyInterpreter": {
+      "type": "group",
+      "hashes": {
+        "core/impl/PyInterpreter.cpp": "7924a7e882594b21",
+        "core/impl/PyInterpreter.h": "e94ae3ac083020ee"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "WARP.md": {
+      "type": "file",
+      "hashes": {
+        "WARP.md": "2c5bb97f53d92f3a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "build.bzl": {
+      "type": "file",
+      "hashes": {
+        "build.bzl": "9f885cd4f30dbebc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CMakeLists.txt": {
+      "type": "file",
+      "hashes": {
+        "CMakeLists.txt": "c21afeaba895bdfd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BUCK.oss": {
+      "type": "file",
+      "hashes": {
+        "BUCK.oss": "ea21cbbcbf8a2fb2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BUILD.bazel": {
+      "type": "file",
+      "hashes": {
+        "BUILD.bazel": "00f64afa4bbaffd1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "benchmark/build.bzl": {
+      "type": "file",
+      "hashes": {
+        "benchmark/build.bzl": "ae451df909739b6c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ovrsource_defs.bzl": {
+      "type": "file",
+      "hashes": {
+        "ovrsource_defs.bzl": "3480d416029f1fa3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "benchmark/CMakeLists.txt": {
+      "type": "file",
+      "hashes": {
+        "benchmark/CMakeLists.txt": "7dcfb701578feb4e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "benchmark/BUILD.bazel": {
+      "type": "file",
+      "hashes": {
+        "benchmark/BUILD.bazel": "25defa806e8b4259"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/BUILD.bazel": {
+      "type": "file",
+      "hashes": {
+        "core/BUILD.bazel": "25defa806e8b4259"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/build.bzl": {
+      "type": "file",
+      "hashes": {
+        "core/build.bzl": "1929539b13cbf9aa"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/build.bzl": {
+      "type": "file",
+      "hashes": {
+        "util/build.bzl": "f693a9ab390e4d57"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/BUILD.bazel": {
+      "type": "file",
+      "hashes": {
+        "util/BUILD.bazel": "25defa806e8b4259"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/build.bzl": {
+      "type": "file",
+      "hashes": {
+        "cuda/build.bzl": "3ea2046bbe4519a8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/README.md": {
+      "type": "file",
+      "hashes": {
+        "cuda/README.md": "2c21e996db6ad6bf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/CMakeLists.txt": {
+      "type": "file",
+      "hashes": {
+        "cuda/CMakeLists.txt": "32a56bfee94c6798"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/BUILD.bazel": {
+      "type": "file",
+      "hashes": {
+        "cuda/BUILD.bazel": "25defa806e8b4259"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "xpu/CMakeLists.txt": {
+      "type": "file",
+      "hashes": {
+        "xpu/CMakeLists.txt": "c8085b001079d448"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "macros/build.bzl": {
+      "type": "file",
+      "hashes": {
+        "macros/build.bzl": "145487fdb8f7a26a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "macros/cmake_macros.h.in": {
+      "type": "file",
+      "hashes": {
+        "macros/cmake_macros.h.in": "cfb951aab8171a27"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "macros/BUILD.bazel": {
+      "type": "file",
+      "hashes": {
+        "macros/BUILD.bazel": "25defa806e8b4259"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "macros/cmake_configure_file.bzl": {
+      "type": "file",
+      "hashes": {
+        "macros/cmake_configure_file.bzl": "ec82fd45b47db492"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/README.md": {
+      "type": "file",
+      "hashes": {
+        "core/impl/README.md": "e7d88c8f235f311b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/README-cow.md": {
+      "type": "file",
+      "hashes": {
+        "core/impl/README-cow.md": "71aea8dd232919b4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/impl/cuda_cmake_macros.h.in": {
+      "type": "file",
+      "hashes": {
+        "cuda/impl/cuda_cmake_macros.h.in": "3d85ddd26850e473"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "xpu/impl/xpu_cmake_macros.h.in": {
+      "type": "file",
+      "hashes": {
+        "xpu/impl/xpu_cmake_macros.h.in": "3e7a9d8ab7f9f4ba"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "benchmark/intrusive_ptr_benchmark.cpp": {
+      "type": "file",
+      "hashes": {
+        "benchmark/intrusive_ptr_benchmark.cpp": "63eaee9ae2d06271"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/QEngine.h": {
+      "type": "file",
+      "hashes": {
+        "core/QEngine.h": "f94a089e04c67175"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/DefaultTensorOptions.h": {
+      "type": "file",
+      "hashes": {
+        "core/DefaultTensorOptions.h": "d2ed9c6f14fa4cc6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/alignment.h": {
+      "type": "file",
+      "hashes": {
+        "core/alignment.h": "dfcf0ac6bcf9f426"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/Event.h": {
+      "type": "file",
+      "hashes": {
+        "core/Event.h": "3ae6980fcc2495fb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/DeviceArray.h": {
+      "type": "file",
+      "hashes": {
+        "core/DeviceArray.h": "2b8e0e9ebdc87484"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/CompileTimeFunctionPointer.h": {
+      "type": "file",
+      "hashes": {
+        "core/CompileTimeFunctionPointer.h": "2c4d87bd905cb19f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/Backend.h": {
+      "type": "file",
+      "hashes": {
+        "core/Backend.h": "0f14b142c1e0b7fd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/QScheme.h": {
+      "type": "file",
+      "hashes": {
+        "core/QScheme.h": "bdca88e1ab957e46"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/PyHandleCache.h": {
+      "type": "file",
+      "hashes": {
+        "core/PyHandleCache.h": "ec66fa9a1f7c8656"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/StreamGuard.h": {
+      "type": "file",
+      "hashes": {
+        "core/StreamGuard.h": "9a7d27e3b25f6ec2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/Layout.h": {
+      "type": "file",
+      "hashes": {
+        "core/Layout.h": "89ee556e14754911"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/DynamicCast.h": {
+      "type": "file",
+      "hashes": {
+        "core/DynamicCast.h": "3fac1eb4d79b79dc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/Contiguity.h": {
+      "type": "file",
+      "hashes": {
+        "core/Contiguity.h": "bbe7d98fc2c149e7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/DeviceGuard.h": {
+      "type": "file",
+      "hashes": {
+        "core/DeviceGuard.h": "4d38001023fb36d8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/MemoryFormat.h": {
+      "type": "file",
+      "hashes": {
+        "core/MemoryFormat.h": "c2c3d86c77a69e1f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/ScalarTypeToTypeMeta.h": {
+      "type": "file",
+      "hashes": {
+        "core/ScalarTypeToTypeMeta.h": "f32b81ae29e23117"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Type.h": {
+      "type": "file",
+      "hashes": {
+        "util/Type.h": "f8657095ff8ee82b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/OptionalRef.h": {
+      "type": "file",
+      "hashes": {
+        "core/OptionalRef.h": "8568cd10318632df"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/CachingDeviceAllocator.h": {
+      "type": "file",
+      "hashes": {
+        "core/CachingDeviceAllocator.h": "08582e4087c2c384"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/quint4x2.h": {
+      "type": "file",
+      "hashes": {
+        "util/quint4x2.h": "5c046d5c7a825502"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Float8_e4m3fn-inl.h": {
+      "type": "file",
+      "hashes": {
+        "util/Float8_e4m3fn-inl.h": "a8d4239168bb5bb8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/FbcodeMaps.h": {
+      "type": "file",
+      "hashes": {
+        "util/FbcodeMaps.h": "f2f0247c7a789dae"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/safe_numerics.h": {
+      "type": "file",
+      "hashes": {
+        "util/safe_numerics.h": "4031fa0b69309a47"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/order_preserving_flat_hash_map.h": {
+      "type": "file",
+      "hashes": {
+        "util/order_preserving_flat_hash_map.h": "ed72f6f85dbbe321"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/WaitCounterDynamicBackend.h": {
+      "type": "file",
+      "hashes": {
+        "util/WaitCounterDynamicBackend.h": "55e0e2242d853545"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/flat_hash_map.h": {
+      "type": "file",
+      "hashes": {
+        "util/flat_hash_map.h": "a1268bac665e8c98"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Float8_e8m0fnu-inl.h": {
+      "type": "file",
+      "hashes": {
+        "util/Float8_e8m0fnu-inl.h": "4b6d4b162615ed14"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/llvmMathExtras.h": {
+      "type": "file",
+      "hashes": {
+        "util/llvmMathExtras.h": "c7ec4913ab6d2e15"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Synchronized.h": {
+      "type": "file",
+      "hashes": {
+        "util/Synchronized.h": "f8d454878cd885c9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Float8_e4m3fnuz-inl.h": {
+      "type": "file",
+      "hashes": {
+        "util/Float8_e4m3fnuz-inl.h": "72db47f890a8e5dd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Bitset.h": {
+      "type": "file",
+      "hashes": {
+        "util/Bitset.h": "4a7b14dff056a837"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/string_utils.h": {
+      "type": "file",
+      "hashes": {
+        "util/string_utils.h": "0f881fcbeca11ddf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/TypeSafeSignMath.h": {
+      "type": "file",
+      "hashes": {
+        "util/TypeSafeSignMath.h": "22d6e82f6ec88a68"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/win32-headers.h": {
+      "type": "file",
+      "hashes": {
+        "util/win32-headers.h": "1f0c7a1de6f606f4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/AlignOf.h": {
+      "type": "file",
+      "hashes": {
+        "util/AlignOf.h": "3fc673756f021a8e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/static_tracepoint.h": {
+      "type": "file",
+      "hashes": {
+        "util/static_tracepoint.h": "bbf8d8602265be7f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/ssize.h": {
+      "type": "file",
+      "hashes": {
+        "util/ssize.h": "7d10b445a494e185"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/qint32.h": {
+      "type": "file",
+      "hashes": {
+        "util/qint32.h": "8b205486ec7f1842"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/CallOnce.h": {
+      "type": "file",
+      "hashes": {
+        "util/CallOnce.h": "fdaa047262a3a5fa"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/MaybeOwned.h": {
+      "type": "file",
+      "hashes": {
+        "util/MaybeOwned.h": "246f87751c118f2a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Half-inl.h": {
+      "type": "file",
+      "hashes": {
+        "util/Half-inl.h": "d89fa33358652d9f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/FunctionRef.h": {
+      "type": "file",
+      "hashes": {
+        "util/FunctionRef.h": "2f6b08439eb36ad1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Type_no_demangle.cpp": {
+      "type": "file",
+      "hashes": {
+        "util/Type_no_demangle.cpp": "f01b9d3b7147c299"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/overflows.h": {
+      "type": "file",
+      "hashes": {
+        "util/overflows.h": "d889bd40c6a1f330"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/ExclusivelyOwned.h": {
+      "type": "file",
+      "hashes": {
+        "util/ExclusivelyOwned.h": "ab0455a0948bc0d8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Load.h": {
+      "type": "file",
+      "hashes": {
+        "util/Load.h": "fc3896575045fccf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/static_tracepoint_elfx86.h": {
+      "type": "file",
+      "hashes": {
+        "util/static_tracepoint_elfx86.h": "c60ad8d63e3ac9e8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/ConstexprCrc.h": {
+      "type": "file",
+      "hashes": {
+        "util/ConstexprCrc.h": "5f1f523c26f0c01f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/BFloat16-inl.h": {
+      "type": "file",
+      "hashes": {
+        "util/BFloat16-inl.h": "ff6e93c4564fd755"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/ThreadLocal.h": {
+      "type": "file",
+      "hashes": {
+        "util/ThreadLocal.h": "e75c7c515958802f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/IdWrapper.h": {
+      "type": "file",
+      "hashes": {
+        "util/IdWrapper.h": "b9804e5906816ed6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Flags.h": {
+      "type": "file",
+      "hashes": {
+        "util/Flags.h": "b6e88a9a3036625f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/overloaded.h": {
+      "type": "file",
+      "hashes": {
+        "util/overloaded.h": "1eba0a9cf6c4a4f7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/quint8.h": {
+      "type": "file",
+      "hashes": {
+        "util/quint8.h": "9c48815c3b5e7cf5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Float8_e5m2-inl.h": {
+      "type": "file",
+      "hashes": {
+        "util/Float8_e5m2-inl.h": "6825d8b022faacb2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Registry.h": {
+      "type": "file",
+      "hashes": {
+        "util/Registry.h": "a34c3389a6c27e0a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/copysign.h": {
+      "type": "file",
+      "hashes": {
+        "util/copysign.h": "1067100b5f756a85"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/ArrayRef.h": {
+      "type": "file",
+      "hashes": {
+        "util/ArrayRef.h": "c5aebde544a22bfc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/strides.h": {
+      "type": "file",
+      "hashes": {
+        "util/strides.h": "eb7ea8dc861dc86e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Bfloat16.cpp": {
+      "type": "file",
+      "hashes": {
+        "util/Bfloat16.cpp": "59b7e4587ac1ffac"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/OptionalArrayRef.h": {
+      "type": "file",
+      "hashes": {
+        "util/OptionalArrayRef.h": "353da8e470be78ce"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/sparse_bitset.h": {
+      "type": "file",
+      "hashes": {
+        "util/sparse_bitset.h": "73dd6fac1a9dd7aa"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/BFloat16.h": {
+      "type": "file",
+      "hashes": {
+        "util/BFloat16.h": "ed3e17d2359a4bcc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/TypeIndex.h": {
+      "type": "file",
+      "hashes": {
+        "util/TypeIndex.h": "51d5a4217c8d3993"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Array.h": {
+      "type": "file",
+      "hashes": {
+        "util/Array.h": "3d48475803a5767e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/logging_is_google_glog.h": {
+      "type": "file",
+      "hashes": {
+        "util/logging_is_google_glog.h": "2d4eff5cfa503d5d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/quint2x4.h": {
+      "type": "file",
+      "hashes": {
+        "util/quint2x4.h": "c8627f7a1293532f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/floating_point_utils.h": {
+      "type": "file",
+      "hashes": {
+        "util/floating_point_utils.h": "fd46ec451d94a6d8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/BFloat16-math.h": {
+      "type": "file",
+      "hashes": {
+        "util/BFloat16-math.h": "a571883746733bcc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Lazy.h": {
+      "type": "file",
+      "hashes": {
+        "util/Lazy.h": "dbdcea8849e3a723"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Deprecated.h": {
+      "type": "file",
+      "hashes": {
+        "util/Deprecated.h": "b7235cc049e385d1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/irange.h": {
+      "type": "file",
+      "hashes": {
+        "util/irange.h": "256bb1202144c8d6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/SmallBuffer.h": {
+      "type": "file",
+      "hashes": {
+        "util/SmallBuffer.h": "f0585fa555da7794"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Unroll.h": {
+      "type": "file",
+      "hashes": {
+        "util/Unroll.h": "d51d734eb178065b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/ScopeExit.h": {
+      "type": "file",
+      "hashes": {
+        "util/ScopeExit.h": "ec857fc70bc07ab2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/bit_cast.h": {
+      "type": "file",
+      "hashes": {
+        "util/bit_cast.h": "c9fed6d0bedc79f3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/qint8.h": {
+      "type": "file",
+      "hashes": {
+        "util/qint8.h": "6dce529276437cef"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/logging_is_not_google_glog.h": {
+      "type": "file",
+      "hashes": {
+        "util/logging_is_not_google_glog.h": "112f6a7229997fee"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/flags_use_no_gflags.cpp": {
+      "type": "file",
+      "hashes": {
+        "util/flags_use_no_gflags.cpp": "74fc31c6eafeec74"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Type_demangle.cpp": {
+      "type": "file",
+      "hashes": {
+        "util/Type_demangle.cpp": "4a33212417cad8a6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/flags_use_gflags.cpp": {
+      "type": "file",
+      "hashes": {
+        "util/flags_use_gflags.cpp": "3bb70368e1d92093"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/AbortHandler.h": {
+      "type": "file",
+      "hashes": {
+        "util/AbortHandler.h": "0dcde2b57a1d5552"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/accumulate.h": {
+      "type": "file",
+      "hashes": {
+        "util/accumulate.h": "8686ec2635da2aa9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/DimVector.h": {
+      "type": "file",
+      "hashes": {
+        "util/DimVector.h": "910c6320ccc4ae4e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Float8_e5m2fnuz-inl.h": {
+      "type": "file",
+      "hashes": {
+        "util/Float8_e5m2fnuz-inl.h": "942a705c4210ffef"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/strong_type.h": {
+      "type": "file",
+      "hashes": {
+        "util/strong_type.h": "f60a67c0a6195f1d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/hash.h": {
+      "type": "file",
+      "hashes": {
+        "util/hash.h": "54eace7afe3c7562"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/python_stub.h": {
+      "type": "file",
+      "hashes": {
+        "util/python_stub.h": "36281ced91ab9e21"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/bits.h": {
+      "type": "file",
+      "hashes": {
+        "util/bits.h": "e6f90a81f7c56df7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/Float8_fnuz_cvt.h": {
+      "type": "file",
+      "hashes": {
+        "util/Float8_fnuz_cvt.h": "f668fbe74559d47d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/complex.h": {
+      "type": "file",
+      "hashes": {
+        "util/complex.h": "3594e9ceb804f114"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/complex_utils.h": {
+      "type": "file",
+      "hashes": {
+        "util/complex_utils.h": "eb8ed7f57368bde7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/string_view.h": {
+      "type": "file",
+      "hashes": {
+        "util/string_view.h": "1bf2643f33d0b6e9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/ExclusivelyOwnedTensorTraits.h": {
+      "type": "file",
+      "hashes": {
+        "util/ExclusivelyOwnedTensorTraits.h": "8a4f8f26aa2e051d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "util/generic_math.h": {
+      "type": "file",
+      "hashes": {
+        "util/generic_math.h": "a31f9397375c1451"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/CUDADeviceAssertion.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/CUDADeviceAssertion.h": "4261d494e96763a8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/CUDAMathCompat.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/CUDAMathCompat.h": "cd73fc8e5760c179"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/CUDAAlgorithm.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/CUDAAlgorithm.h": "fe8b1096c5c1dc32"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/CUDAGuard.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/CUDAGuard.h": "a97608286b8c749e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/CUDAGraphsC10Utils.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/CUDAGraphsC10Utils.h": "139be7bf29724bf6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/CUDAMacros.h": {
+      "type": "file",
+      "hashes": {
+        "cuda/CUDAMacros.h": "5c661ac3fe73f2d9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "xpu/XPUDeviceProp.h": {
+      "type": "file",
+      "hashes": {
+        "xpu/XPUDeviceProp.h": "895a28a054ebe0d7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "xpu/XPUMacros.h": {
+      "type": "file",
+      "hashes": {
+        "xpu/XPUMacros.h": "8f7ae02126601d72"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "xpu/XPUException.h": {
+      "type": "file",
+      "hashes": {
+        "xpu/XPUException.h": "652016a967fca27d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cuda/CUDAMallocAsyncAllocator.cpp": {
+      "type": "file",
+      "hashes": {
+        "cuda/CUDAMallocAsyncAllocator.cpp": "ba72d3d14b3c128b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "macros/Export.h": {
+      "type": "file",
+      "hashes": {
+        "macros/Export.h": "82ba5f3cc87a6ab1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/InlineStreamGuard.h": {
+      "type": "file",
+      "hashes": {
+        "core/impl/InlineStreamGuard.h": "aa187784abe4fc54"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "macros/Macros.h": {
+      "type": "file",
+      "hashes": {
+        "macros/Macros.h": "d997924833ef6768"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/InlineDeviceGuard.h": {
+      "type": "file",
+      "hashes": {
+        "core/impl/InlineDeviceGuard.h": "ff20b8beb5c2ffd6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/VirtualGuardImpl.h": {
+      "type": "file",
+      "hashes": {
+        "core/impl/VirtualGuardImpl.h": "152c11c313650e53"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/InlineEvent.h": {
+      "type": "file",
+      "hashes": {
+        "core/impl/InlineEvent.h": "8b37d64ff6230476"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "core/impl/FakeGuardImpl.h": {
+      "type": "file",
+      "hashes": {
+        "core/impl/FakeGuardImpl.h": "1a35743941a417ba"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
     }
   }
 }

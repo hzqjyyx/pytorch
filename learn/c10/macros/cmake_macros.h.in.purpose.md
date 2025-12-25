@@ -1,0 +1,9 @@
+- **自动生成的头文件**：由 CMake 在构建时根据配置生成实际的头文件
+- **配置选项定义**：使用 `#cmakedefine` 指令定义条件编译宏，包括：
+  - `C10_BUILD_SHARED_LIBS` - 控制是否构建共享库
+  - `C10_USE_GLOG` - 是否使用 Google Logging 库
+  - `C10_USE_GFLAGS` - 是否使用 Google Flags 库
+  - `C10_USE_NUMA` - 是否启用 NUMA 支持
+  - `C10_USE_MSVC_STATIC_RUNTIME` - Windows MSVC 是否使用静态运行时
+- **防重复包含**：标准的头文件保护机制（`#ifndef`/`#define`/`#endif`）
+- **使用说明**：注释明确指出不应直接包含此文件，而应包含 `c10/macros/Macros.h`

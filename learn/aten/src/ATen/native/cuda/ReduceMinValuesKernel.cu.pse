@@ -1,0 +1,73 @@
+--------------------------------
+min_values_kernel_cuda_impl
+来源: aten/src/ATen/native/cuda/ReduceMinValuesKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    min_values_kernel_cuda_impl<scalar_t, acc_t=scalar_t>(iter: TensorIterator)
+
+【算法】
+    gpu_reduce_kernel<scalar_t, scalar_t>(
+        iter,
+        func_wrapper<acc_t>(MinNanFunctor<acc_t>()),
+        at::numeric_limits<acc_t>::upper_bound()
+    )
+
+【备注】
+    - MinNanFunctor<acc_t>: device functor，定义为 (a, b) -> (isnan(a) || a < b) ? a : b
+    - upper_bound(): 归约初始值（最大可表示数）
+
+--------------------------------
+min_values_kernel_cuda
+来源: aten/src/ATen/native/cuda/ReduceMinValuesKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    min_values_kernel_cuda(iter: TensorIterator)
+
+【算法】
+    根据 iter.dtype() 分发到对应类型的 min_values_kernel_cuda_impl:
+        支持类型: ALL_TYPES + {bfloat16, half, bool}
+
+--------------------------------
+min_launch_kernel
+来源: aten/src/ATen/native/cuda/ReduceMinValuesKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    min_launch_kernel(iter: TensorIterator)
+
+【算法】
+    根据 iter.input_dtype() 分发到对应类型:
+        支持类型: ALL_TYPES + {bfloat16, half, bool}
+
+    gpu_reduce_kernel<scalar_t, scalar_t>(
+        iter,
+        MinOps<scalar_t>{},
+        pair(at::numeric_limits<scalar_t>::upper_bound(), 0)
+    )
+
+【备注】
+    - MinOps<scalar_t>: 返回值为 (最小值, 索引) 的 pair
+    - 归约初始值: (最大可表示数, 0)
+
+--------------------------------
+min_all_launch_kernel
+来源: aten/src/ATen/native/cuda/ReduceMinValuesKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    min_all_launch_kernel(iter: TensorIterator)
+
+【算法】
+    根据 iter.input_dtype() 分发到对应类型:
+        支持类型: ALL_TYPES + {bfloat16, half, bool}
+
+    min_values_kernel_cuda_impl<scalar_t>(iter)
+
+【备注】
+    - 与 min_values_kernel_cuda 逻辑相同，但用于全张量归约场景

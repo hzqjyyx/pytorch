@@ -1,26 +1,51 @@
 ## XPUHooksInterface 文件分析
 
-**XPUHooksInterface.h** 定义了一个接口结构体，用于 XPU（Intel Data Center GPU）硬件抽象：
+### 文件关系
 
-- 继承自 `AcceleratorHooksInterface`，提供统一的加速器接口
-- 定义了 XPU 相关的虚函数，包括设备管理、生成器管理、内存分配等
-- 所有虚函数都有默认实现，当未加载 ATen_xpu 库时会抛出 `TORCH_CHECK` 错误
-- 定义了 `XPUHooksRegistry` 和 `REGISTER_XPU_HOOKS` 宏，用于动态注册 XPU 实现
+**XPUHooksInterface.h** 定义了一个接口类，**XPUHooksInterface.cpp** 提供了具体实现。
 
-**XPUHooksInterface.cpp** 实现了获取 XPU 钩子的工厂函数：
+### 核心设计
 
-- `getXPUHooks()` 函数通过注册表尝试创建实际的 XPU 实现
-- 如果注册表中有真实的 XPU 实现则返回，否则返回默认的空实现
-- 使用静态变量缓存结果，确保全局只有一个实例
+`XPUHooksInterface` 继承自 `AcceleratorHooksInterface`，是一个**抽象接口**，用于定义 XPU（Intel Arc GPU）相关的硬件操作钩子。当 ATen_xpu 库未被链接时，提供默认的（通常是失败的）实现。
 
----
+### XPUHooksInterface.h 主要内容
 
-**核心功能列表：**
+- **结构体定义**：`XPUHooksInterface` 提供了一系列虚函数，包括：
+  - `init()` - 初始化 XPU
+  - `hasXPU()` - 检查是否有 XPU 设备
+  - `showConfig()` - 显示 XPU 配置信息
+  - `getGlobalIdxFromDevice()` - 获取全局设备索引
+  - `getDefaultGenerator()` / `getNewGenerator()` - 获取随机数生成器
+  - `getNumGPUs()` - 获取 GPU 数量
+  - `current_device()` - 获取当前设备
+  - `getDeviceFromPtr()` - 从指针获取设备信息
+  - `deviceSynchronize()` - 设备同步
+  - `getPinnedMemoryAllocator()` - 获取固定内存分配器
+  - `isPinnedPtr()` - 检查是否为固定内存指针
+  - `hasPrimaryContext()` - 检查是否有主要上下文
 
-- 设备查询：`hasXPU()`、`getNumGPUs()`、`current_device()`
-- 生成器管理：`getDefaultGenerator()`、`getNewGenerator()`
-- 内存管理：`getPinnedMemoryAllocator()`、`isPinnedPtr()`、`getDeviceFromPtr()`
-- 设备同步：`deviceSynchronize()`
-- 上下文检查：`hasPrimaryContext()`
-- 版本信息：`showConfig()`
-- 注册机制：支持动态注册具体的 XPU 实现类
+- **注册机制**：定义了 `XPUHooksRegistry` 和 `REGISTER_XPU_HOOKS` 宏，用于动态注册 XPU hooks 实现
+
+### XPUHooksInterface.cpp 主要内容
+
+- **getXPUHooks() 函数**：
+  - 尝试从 `XPUHooksRegistry` 中创建已注册的 XPU hooks 实现
+  - 如果注册表中无可用实现，回退到创建默认的 `XPUHooksInterface` 对象
+  - 使用静态变量缓存结果，保证单例模式
+
+- **注册表声明**：`C10_DEFINE_REGISTRY` 定义了全局注册表
+
+### 关键特性
+
+- **插件架构**：允许独立的 XPU 库在运行时动态注册具体实现
+- **优雅降级**：缺少 ATen_xpu 库时，默认实现通过 `TORCH_CHECK(false, ...)` 抛出错误
+- **单例模式**：确保全局只有一个 hooks 实例
+- **线程安全**：静态变量的初始化由 C++ 编译器保证线程安全
+
+### 简明总结
+
+- **用途**：为 Intel XPU 加速器提供硬件操作接口的抽象层
+- **实现方式**：注册表模式 + 单例模式 + 插件架构
+- **默认行为**：未链接 ATen_xpu 库时，所有操作都会失败并报错
+- **关键函数**：`getXPUHooks()` 用于获取全局 XPU hooks 实例
+- **扩展点**：通过 `REGISTER_XPU_HOOKS` 宏注册具体实现

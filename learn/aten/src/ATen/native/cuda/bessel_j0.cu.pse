@@ -1,0 +1,24 @@
+--------------------------------
+bessel_j0_kernel_cuda
+来源: aten/src/ATen/native/cuda/bessel_j0.cu
+--------------------------------
+
+【签名】
+    @host→device
+    bessel_j0_kernel_cuda(iterator: TensorIteratorBase) -> void
+
+【算法】
+    # 根据编译配置选择执行路径
+    if AT_USE_JITERATOR():
+        # JIT编译路径：动态生成CUDA kernel
+        jitted_gpu_kernel<bessel_j0_name, scalar_t, scalar_t, 1>(iterator, bessel_j0_string)
+    else:
+        # 直接调用路径：使用预编译的bessel_j0_forward函数
+        gpu_kernel(iterator, λ(a: scalar_t) -> scalar_t {
+            return bessel_j0_forward(a)
+        })
+
+【备注】
+    - 支持的dtype: float32, float64
+    - bessel_j0_forward: 第一类贝塞尔函数J₀的前向计算，定义在 Math.cuh
+    - 注册为 special_bessel_j0_stub 的CUDA实现

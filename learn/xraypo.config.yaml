@@ -44,6 +44,12 @@ exclude_patterns:
   - "xnnpack"
   - "test"
   - "mobile"
+  - "benchmarks"
+  - "cuda"
+  - "cudnn"
+  - "native"
+  - "xpu"
+  - "core"
 
 # 模型选择配置
 model_selection:

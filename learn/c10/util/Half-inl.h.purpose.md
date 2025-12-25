@@ -1,0 +1,8 @@
+- **Half类型的构造器与转换**：支持从float转换为Half类型，通过不同平台（CUDA、HIP、SYCL、AVX2/AVX512、ARM64）使用对应的转换函数
+- **隐式类型转换**：Half可隐式转换回float，根据编译平台选择最优的转换实现
+- **CUDA/HIP兼容性**：与__half类型的相互转换，支持CUDA intrinsics如__ldg()
+- **SYCL支持**：与sycl::half类型的转换和操作
+- **算术运算重载**：完整的+、-、*、/运算符，支持Half与Half、float、double、int、int64_t之间的混合运算
+- **复合赋值运算符**：+=、-=、*=、/=的实现
+- **std::numeric_limits特化**：为Half类型定义数值极限常数（min、max、epsilon、infinity、NaN等）
+- **平台优化**：根据编译环境（CUDA、HIP、SYCL、AVX2/AVX512、标准实现）选择最优的转换路径

@@ -1,0 +1,45 @@
+--------------------------------
+nextafter_kernel_cuda
+来源: aten/src/ATen/native/cuda/StepKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    nextafter_kernel_cuda(iter: TensorIterator)
+
+【算法】
+    # 对 float/double/bfloat16/half 类型执行逐元素 nextafter
+    gpu_kernel_with_scalars(iter, (a, b) -> nextafter(a, b))
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: float32, float64, bfloat16, float16
+    - nextafter(a, b): 返回 a 向 b 方向的下一个可表示浮点数
+
+
+--------------------------------
+heaviside_kernel_cuda
+来源: aten/src/ATen/native/cuda/StepKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    heaviside_kernel_cuda(iter: TensorIterator)
+
+【算法】
+    # Heaviside 阶跃函数
+    gpu_kernel_with_scalars(iter, (a, b) -> {
+        if a == 0:
+            return b
+        else:
+            return (a > 0) ? 1 : 0
+    })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: 所有数值类型 + bool + bfloat16 + float16
+    - b 为 a=0 时的自定义值

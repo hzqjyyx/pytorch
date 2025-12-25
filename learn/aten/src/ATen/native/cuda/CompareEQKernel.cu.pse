@@ -1,0 +1,46 @@
+--------------------------------
+compare_eq_ne_kernel (等于/不等于比较)
+来源: aten/src/ATen/native/cuda/CompareEQKernel.cu
+--------------------------------
+
+【签名】
+    @device
+    CompareEqFunctor<scalar_t>(op: EqOpType) -> (scalar_t, scalar_t) -> bool
+        
+    @host→device
+    compare_eq_ne_kernel(iter: TensorIteratorBase, op: EqOpType)
+    
+    @host→device
+    eq_kernel_cuda(iter: TensorIteratorBase)
+    
+    @host→device
+    ne_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    # CompareEqFunctor: 设备端比较函数对象
+    match op:
+        EqOpType::EQ:
+            return a == b
+        EqOpType::NE:
+            return a != b
+    
+    # compare_eq_ne_kernel: 统一的比较kernel调度
+    dtype = iter.common_dtype()
+    opmath_symmetric_gpu_kernel_with_scalars<scalar_t, bool>(
+        iter, CompareEqFunctor<scalar_t>(op))
+    
+    # eq_kernel_cuda: 等于比较
+    compare_eq_ne_kernel(iter, EqOpType::EQ)
+    
+    # ne_kernel_cuda: 不等于比较
+    compare_eq_ne_kernel(iter, EqOpType::NE)
+
+【并行模式】
+    elementwise
+    通过 opmath_symmetric_gpu_kernel_with_scalars 实现逐元素并行
+
+【备注】
+    - 支持类型: 所有整数/浮点/复数/bool/float8/无符号类型
+    - opmath_symmetric_gpu_kernel_with_scalars: 处理 Tensor-Tensor 和 Tensor-Scalar 对称比较
+    - 使用 AT_DISPATCH_V2 进行类型分发
+    - REGISTER_DISPATCH 将 kernel 注册到 eq_stub 和 ne_stub

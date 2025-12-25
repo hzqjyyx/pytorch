@@ -1,0 +1,105 @@
+--------------------------------
+_fused_adam_cuda_impl_ (double lr 版本)
+来源: aten/src/ATen/native/cuda/fused_adam_impl.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _fused_adam_cuda_impl_(
+        params: TensorList[N],           # 模型参数列表
+        grads: TensorList[N],            # 梯度列表
+        exp_avgs: TensorList[N],         # 一阶动量列表
+        exp_avg_sqs: TensorList[N],      # 二阶动量列表
+        state_steps: TensorList[N],      # 每个参数的步数
+        lr: double,                      # 学习率（标量）
+        beta1: double,                   # 一阶动量系数
+        beta2: double,                   # 二阶动量系数
+        weight_decay: double,            # 权重衰减
+        eps: double,                     # 数值稳定项
+        maximize: bool,                  # 是否最大化（梯度取反）
+        grad_scale: Optional[Tensor[1, float]],    # 梯度缩放因子
+        found_inf: Optional[Tensor[1, float]]      # 是否发现inf/nan
+    )
+
+    约束:
+    - 所有列表长度相同 (N)
+    - params[i].dtype ∈ {float, double, half, bfloat16}
+
+【算法】
+    # 准备指针
+    grad_scale_ptr = grad_scale.data_ptr<float>() if grad_scale.has_value() else nullptr
+    found_inf_ptr = found_inf.data_ptr<float>() if found_inf.has_value() else nullptr
+    lr_ptr = nullptr  # 本版本不使用tensor lr
+
+    # 根据参数类型分发
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, params[0].scalar_type()):
+        multi_tensor_apply_for_fused_optimizer<4>(
+            tensor_lists = [params, grads, exp_avgs, exp_avg_sqs],
+            state_steps,
+            FusedAdamMathFunctor<scalar_t, 4, ADAM_MODE::ORIGINAL, false>(),
+            lr_ptr = nullptr,
+            lr = lr,
+            beta1 = beta1,
+            beta2 = beta2,
+            weight_decay = weight_decay,
+            eps = eps,
+            maximize = maximize,
+            grad_scale_ptr = grad_scale_ptr,
+            found_inf_ptr = found_inf_ptr
+        )
+
+【备注】
+    - 调用 multi_tensor_apply_for_fused_optimizer 执行实际的 Adam 更新
+    - FusedAdamMathFunctor: ADAM_MODE::ORIGINAL 表示标准 Adam 算法
+    - 模板参数 4: 处理 4 个 tensor 列表
+
+
+--------------------------------
+_fused_adam_cuda_impl_ (Tensor lr 版本)
+来源: aten/src/ATen/native/cuda/fused_adam_impl.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _fused_adam_cuda_impl_(
+        params: TensorList[N],
+        grads: TensorList[N],
+        exp_avgs: TensorList[N],
+        exp_avg_sqs: TensorList[N],
+        state_steps: TensorList[N],
+        lr: Tensor[*, float],            # 学习率（张量，支持per-parameter lr）
+        beta1: double,
+        beta2: double,
+        weight_decay: double,
+        eps: double,
+        maximize: bool,
+        grad_scale: Optional[Tensor[1, float]],
+        found_inf: Optional[Tensor[1, float]]
+    )
+
+【算法】
+    # 准备指针
+    grad_scale_ptr = grad_scale.data_ptr<float>() if grad_scale.has_value() else nullptr
+    found_inf_ptr = found_inf.data_ptr<float>() if found_inf.has_value() else nullptr
+    lr_ptr = lr.const_data_ptr<float>()  # 使用 tensor lr
+
+    # 根据参数类型分发
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, params[0].scalar_type()):
+        multi_tensor_apply_for_fused_optimizer<4>(
+            tensor_lists = [params, grads, exp_avgs, exp_avg_sqs],
+            state_steps,
+            FusedAdamMathFunctor<scalar_t, 4, ADAM_MODE::ORIGINAL, false>(),
+            lr_ptr = lr_ptr,
+            1.0,  # 未使用（因为已传入 lr_ptr）
+            beta1 = beta1,
+            beta2 = beta2,
+            weight_decay = weight_decay,
+            eps = eps,
+            maximize = maximize,
+            grad_scale_ptr = grad_scale_ptr,
+            found_inf_ptr = found_inf_ptr
+        )
+
+【备注】
+    - 与 double lr 版本的区别：lr 是 Tensor，支持每个参数使用不同学习率
+    - 传入 lr_ptr，第二个参数 1.0 被忽略

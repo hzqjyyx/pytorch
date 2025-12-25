@@ -1,0 +1,12 @@
+- **文件用途**: 为 XPU (Intel GPU) 相关的异常处理提供支持
+- **关键组件**: 定义了 SYCL 异步异常处理器 (`asyncHandler`)
+- **异常捕获机制**: 
+  - 接收 SYCL 异常列表
+  - 遍历列表中的每个异常
+  - 使用 `std::rethrow_exception` 重新抛出异常
+  - 捕获 SYCL 异常并通过 `TORCH_WARN` 输出警告信息
+- **命名空间**: 位于 `c10::xpu` 命名空间下
+- **依赖**: 
+  - `c10/util/Exception.h` (PyTorch 异常工具)
+  - `sycl/sycl.hpp` (SYCL 标准库)
+- **异常处理策略**: 记录警告后重新抛出异常，允许上层代码处理

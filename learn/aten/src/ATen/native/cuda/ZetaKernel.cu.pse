@@ -1,0 +1,29 @@
+--------------------------------
+zeta_kernel_cuda
+来源: aten/src/ATen/native/cuda/ZetaKernel.cu
+--------------------------------
+
+【签名】
+    @host→device
+    zeta_kernel_cuda(iter: TensorIterator) -> void
+    
+    约束:
+    - iter 包含两个浮点输入 (x, q) 和一个输出
+
+【算法】
+    # 使用 JIT 编译或直接 kernel 调度
+    if AT_USE_JITERATOR():
+        # JIT 路径: 从 zeta_string 生成 kernel
+        opmath_jitted_gpu_kernel_with_scalars<zeta_name, scalar_t, scalar_t>(iter, zeta_string)
+    else:
+        # 直接调用路径
+        gpu_kernel_with_scalars(iter, λ(x, q) -> zeta<scalar_t, is_cuda=true>(x, q))
+
+【并行模式】
+    elementwise
+
+【备注】
+    - zeta<scalar_t, is_cuda=true>: Riemann zeta 函数实现，来自 Cephes Math Library
+    - 支持 float/double 类型 (AT_DISPATCH_FLOATING_TYPES)
+    - JIT 路径通过 zeta_string 字符串模板生成 CUDA 代码
+    - 已注册到 zeta_stub 分发器

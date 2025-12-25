@@ -1,0 +1,202 @@
+--------------------------------
+mixed_dtypes_linear_cutlass
+来源: aten/src/ATen/native/cuda/MixedDtypesLinear.cu
+--------------------------------
+
+【签名】
+    @host→device
+    mixed_dtypes_linear_cutlass<ElementInputA, ElementInputB, EpilogueTag>(
+        input: Tensor[M, K],
+        weight: Tensor[K, *],        # 特殊交错布局
+        scale: Tensor[N],
+        bias: Tensor[N] | Tensor[]   # 可选
+    ) -> Tensor[M, N]
+
+    模板参数:
+    - ElementInputA: cutlass::half_t | cutlass::bfloat16_t
+    - ElementInputB: uint8_t | cutlass::uint4b_t
+    - EpilogueTag: fastertransformer epilogue 类型
+
+    约束:
+    - K % 64 == 0 && N % 64 == 0
+    - weight 使用 ColumnMajorTileInterleave<64, ColumnsInterleaved> 布局
+
+【算法】
+    # CUTLASS GEMM 配置
+    架构: Sm80 (Ampere)
+    Threadblock: 32x128x64
+    Warp: 32x32x64
+    Instruction: 16x8x16 (Tensor Core)
+    算子: OpMultiplyAddDequantizeInterleavedBToA
+
+    # 输出分配
+    output = input.new_empty([M, N])
+
+    # GEMM 参数
+    ldb = K * GemmKernel::kInterleave
+    arguments = {
+        problem_size: (M, N, K),
+        ptr_A: input.data_ptr(),
+        lda: K,
+        ptr_B: weight.data_ptr(),
+        ldb: ldb,
+        ptr_Scale: scale.data_ptr(),
+        ptr_Bias: bias.data_ptr() if bias.numel() > 0 else nullptr,
+        ptr_D: output.data_ptr(),
+        ldd: N,
+        split_k_slices: 1,
+        alpha: 1.0,
+        beta: 0.0
+    }
+
+    # 执行 GEMM
+    gemm_op = GemmUniversalBase<GemmFpAIntB>()
+    gemm_op.can_implement(arguments)          # 验证可行性
+    workspace = allocate_workspace(gemm_op.get_workspace_size(arguments))
+    gemm_op.initialize(arguments, workspace, getCurrentCUDAStream())
+    gemm_op.run(getCurrentCUDAStream())
+
+    return output
+
+【并行模式】
+    Tensor Core 混合精度 GEMM (FP16/BF16 × INT8/INT4)
+    - A (input): RowMajor FP16/BF16
+    - B (weight): ColumnMajorTileInterleave INT8/INT4
+    - Epilogue: Dequantize + Scale + Bias + Activation
+    - Accumulator: FP32
+    - Output: FP16/BF16
+
+【备注】
+    - GemmFpAIntB: CUTLASS 扩展的混合精度 GEMM kernel
+    - EpilogueTag 控制融合操作: NoBias | Bias | BiasReLU | BiasSilu
+    - split_k_slices=1: 不使用 split-K (多值会导致错误结果)
+
+--------------------------------
+mixed_dtypes_linear_dispatch_bias_activation
+来源: aten/src/ATen/native/cuda/MixedDtypesLinear.cu
+--------------------------------
+
+【签名】
+    @host→device
+    mixed_dtypes_linear_dispatch_bias_activation<ElementInputA, ElementInputB>(
+        input: Tensor[M, K],
+        weight: Tensor[K, *],
+        scale: Tensor[N],
+        bias: Tensor[N] | Tensor[],
+        activation: "none" | "relu" | "silu"
+    ) -> Tensor[M, N]
+
+【算法】
+    if bias.numel() == 0:
+        match activation:
+            "none":
+                return mixed_dtypes_linear_cutlass<ElementInputA, ElementInputB, EpilogueOpNoBias>(
+                    input, weight, scale, bias)
+            _:
+                error("Activation not supported without bias")
+    else:
+        match activation:
+            "none":
+                return mixed_dtypes_linear_cutlass<ElementInputA, ElementInputB, EpilogueOpBias>(
+                    input, weight, scale, bias)
+            "relu":
+                return mixed_dtypes_linear_cutlass<ElementInputA, ElementInputB, EpilogueOpBiasReLU>(
+                    input, weight, scale, bias)
+            "silu":
+                return mixed_dtypes_linear_cutlass<ElementInputA, ElementInputB, EpilogueOpBiasSilu>(
+                    input, weight, scale, bias)
+            _:
+                error("Activation not supported")
+
+【备注】
+    - EpilogueOp 由 fastertransformer::Epilogue 提供
+    - 无 bias 时仅支持 activation="none"
+
+--------------------------------
+_mixed_dtypes_linear
+来源: aten/src/ATen/native/cuda/MixedDtypesLinear.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _mixed_dtypes_linear(
+        input: Tensor[*D, K],
+        weight: Tensor[K, weight_cols, uint8],
+        scale: Tensor[N],
+        bias: Optional[Tensor[N]] = None,
+        activation: Optional["none"|"relu"|"silu"] = "none"
+    ) -> Tensor[*D, N]
+
+    约束:
+    - 仅支持 Ampere (SM 8.x) GPU
+    - input.dtype: float16 | bfloat16
+    - weight.dtype: uint8
+    - scale.dtype == input.dtype
+    - bias.dtype == input.dtype (如果提供)
+    - K % 64 == 0 && N % 64 == 0
+    - weight_cols == N 或 weight_cols == N/2
+    - bias.size(0) == N (如果提供)
+
+【算法】
+    # Step 0: 设备与数据类型检查
+    assert getCurrentDeviceProperties().major == 8
+    assert input.dtype in [kHalf, kBFloat16]
+    assert weight.dtype == kByte
+    assert scale.dtype == input.dtype
+    if bias is not None:
+        assert bias.dtype == input.dtype
+
+    # Step 1: 展平 batch 维度
+    input_sizes = input.sizes()
+    input_2d = input.reshape([-1, input_sizes[-1]])    # [M, K]
+
+    # Step 2: 布局与形状验证
+    assert input_2d.layout == Strided && input_2d.dim() == 2
+    assert input_2d.strides()[1] == 1    # row-major
+    assert weight.layout == Strided && weight.dim() == 2
+    assert weight.strides()[1] == 1
+    assert scale.dim() == 1
+    if bias is not None:
+        assert bias.dim() == 1
+
+    # Step 3: 维度匹配检查
+    assert input_2d.size(1) == weight.size(0)    # K
+    assert weight.size(1) == scale.size(0) or 2 * weight.size(1) == scale.size(0)
+    if bias is not None:
+        assert bias.size(0) == scale.size(0)
+
+    # Step 4: 确定量化类型
+    scalar_type_quant = kByte
+    if weight.size(1) != scale.size(0):
+        scalar_type_quant = kQUInt4x2    # INT4 packed
+
+    # Step 5: 双重分发 (input dtype × weight quant type)
+    output = dispatch(input.scalar_type(), scalar_type_quant) {
+        (kHalf, kByte):
+            mixed_dtypes_linear_dispatch_bias_activation<cutlass::half_t, uint8_t>(
+                input_2d, weight, scale, bias, activation)
+
+        (kHalf, kQUInt4x2):
+            mixed_dtypes_linear_dispatch_bias_activation<cutlass::half_t, cutlass::uint4b_t>(
+                input_2d, weight, scale, bias, activation)
+
+        (kBFloat16, kByte):
+            mixed_dtypes_linear_dispatch_bias_activation<cutlass::bfloat16_t, uint8_t>(
+                input_2d, weight, scale, bias, activation)
+
+        (kBFloat16, kQUInt4x2):
+            mixed_dtypes_linear_dispatch_bias_activation<cutlass::bfloat16_t, cutlass::uint4b_t>(
+                input_2d, weight, scale, bias, activation)
+    }
+
+    # Step 6: 恢复原始 batch 维度
+    output_sizes = input_sizes
+    output_sizes[-1] = scale.size(0)
+    return output.reshape(output_sizes)
+
+【备注】
+    - 平台限制: 不支持 ROCm, Windows, CUDA < 11.8
+    - weight 量化类型从 weight_cols 推断: 
+      - weight_cols == N → INT8
+      - weight_cols == N/2 → INT4 (packed)
+    - CUTLASS 扩展见 cutlass_extensions/gemm/kernel/fpA_intB_gemm.h

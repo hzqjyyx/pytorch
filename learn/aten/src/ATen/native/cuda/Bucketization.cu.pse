@@ -1,0 +1,314 @@
+--------------------------------
+lower_bound
+来源: aten/src/ATen/native/cuda/Bucketization.cu
+--------------------------------
+
+【签名】
+    @device
+    lower_bound(
+        data_ss: const input_t*,
+        start: int64,
+        end: int64,
+        val: input_t,
+        data_sort: const int64* = nullptr
+    ) -> int64
+
+【算法】
+    orig_start = start
+    while start < end:
+        mid = start + ((end - start) >> 1)
+        mid_val = data_ss[orig_start + data_sort[mid]] if data_sort else data_ss[mid]
+        if mid_val < val:
+            start = mid + 1
+        else:
+            end = mid
+    return start
+
+【备注】
+    - data_sort 存储相对索引，需加上 orig_start 偏移
+    - 用于 ND 张量的按行二分查找
+
+--------------------------------
+upper_bound
+来源: aten/src/ATen/native/cuda/Bucketization.cu
+--------------------------------
+
+【签名】
+    @device
+    upper_bound(
+        data_ss: const input_t*,
+        start: int64,
+        end: int64,
+        val: input_t,
+        data_sort: const int64* = nullptr
+    ) -> int64
+
+【算法】
+    orig_start = start
+    while start < end:
+        mid = start + ((end - start) >> 1)
+        mid_val = data_ss[orig_start + data_sort[mid]] if data_sort else data_ss[mid]
+        if mid_val <= val:
+            start = mid + 1
+        else:
+            end = mid
+    return start
+
+【备注】
+    - 与 lower_bound 的区别在于比较条件 (> vs >=)
+
+--------------------------------
+searchsorted_cuda_kernel
+来源: aten/src/ATen/native/cuda/Bucketization.cu
+--------------------------------
+
+【签名】
+    @device
+    searchsorted_cuda_kernel(
+        data_out: output_t*,
+        data_in: const input_t*,
+        data_bd: const input_t*,
+        data_sort: const int64*,
+        idim_in: int64,
+        idim_bd: int64,
+        numel_in: int64,
+        right: bool,
+        is_1d_boundaries: bool
+    )
+
+【算法】
+    parallel_for tid in range(numel_in):
+        # 计算边界搜索范围
+        if is_1d_boundaries:
+            start_bd = 0
+            end_bd = idim_bd
+        else:
+            start_bd = (tid / idim_in) * idim_bd
+            end_bd = start_bd + idim_bd
+        
+        # 二分查找
+        if right:
+            pos = upper_bound(data_bd, start_bd, end_bd, data_in[tid], data_sort) - start_bd
+        else:
+            pos = lower_bound(data_bd, start_bd, end_bd, data_in[tid], data_sort) - start_bd
+        
+        data_out[tid] = pos
+
+【并行模式】
+    grid-stride loop: tid += blockDim.x * gridDim.x
+
+--------------------------------
+searchsorted_cuda_contiguous
+来源: aten/src/ATen/native/cuda/Bucketization.cu
+--------------------------------
+
+【签名】
+    @host→device
+    searchsorted_cuda_contiguous(
+        result: Tensor[*D, output_t],
+        input: Tensor[*D, input_t],
+        boundaries: Tensor[*, idim_bd, input_t],
+        right: bool,
+        sorter: Tensor[*, idim_bd, int64]
+    )
+
+【算法】
+    numel_in = input.numel()
+    is_scalar_input = (input.dim == 0 and numel_in == 1)
+    idim_in = 1 if is_scalar_input else input.size(-1)
+    idim_bd = boundaries.size(-1)
+    
+    data_in = input.const_data_ptr<input_t>()
+    data_bd = boundaries.const_data_ptr<input_t>()
+    data_sort = sorter.const_data_ptr<int64>() if sorter.defined() else nullptr
+    data_out = result.mutable_data_ptr<output_t>()
+    
+    maxThread = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock
+    block = min(maxThread, numel_in)
+    grid = min(1024, ceil_div(numel_in, block))
+    
+    searchsorted_cuda_kernel<<<grid, block, 0, stream>>>(
+        data_out, data_in, data_bd, data_sort,
+        idim_in, idim_bd, numel_in, right, boundaries.dim == 1
+    )
+
+【备注】
+    - grid 最多 1024
+    - sorter 为可选排序索引张量
+
+--------------------------------
+searchsorted_out_cuda (Tensor重载)
+来源: aten/src/ATen/native/cuda/Bucketization.cu
+--------------------------------
+
+【签名】
+    @host→device
+    searchsorted_out_cuda(
+        sorted_sequence: Tensor[*, idim_bd],
+        self: Tensor[*D],
+        out_int32: bool,
+        right: bool,
+        side_opt: Optional[str] = None,
+        sorter_opt: Optional[Tensor[*, idim_bd, int64]] = None,
+        result: Tensor[*D, int|int64]
+    ) -> Tensor[*D]
+
+【算法】
+    sorter = borrow_from_optional_tensor(sorter_opt)
+    searchsorted_pre_check(sorted_sequence, self, result, out_int32, right, side_opt, sorter)
+    resize_output(result, self.sizes())
+    
+    is_right = (side_opt == "right") or right
+    
+    if self.numel() == 0:
+        return result
+    
+    # 处理非连续张量
+    out = result.contiguous() if not result.is_contiguous() else result
+    
+    if sorted_sequence.is_contiguous() and self.is_contiguous() and 
+       sorted_sequence.dtype == self.dtype and sorter.is_contiguous():
+        dispatch(out, self, sorted_sequence, out_int32, is_right, sorter)
+    else:
+        trimmed_input, trimmed_boundaries, trimmed_sorter = 
+            searchsorted_maybe_trim_input_tensors(self, sorted_sequence, sorter)
+        final_input = trimmed_input if trimmed_input.defined() else self
+        final_boundaries = trimmed_boundaries if trimmed_boundaries.defined() else sorted_sequence
+        final_sorter = trimmed_sorter if trimmed_sorter.defined() else sorter
+        dispatch(out, final_input, final_boundaries, out_int32, is_right, final_sorter)
+    
+    if not result.is_contiguous():
+        result.copy_(out)
+    
+    return result
+
+【备注】
+    - dispatch: 根据 out_int32 和输入类型分发到 searchsorted_cuda_contiguous<scalar_t, int|int64>
+    - side_opt 和 right 参数功能重叠，pre_check 验证不冲突
+
+--------------------------------
+searchsorted_out_cuda (Scalar重载)
+来源: aten/src/ATen/native/cuda/Bucketization.cu
+--------------------------------
+
+【签名】
+    @host→device
+    searchsorted_out_cuda(
+        sorted_sequence: Tensor[*, idim_bd],
+        self: Scalar,
+        out_int32: bool,
+        right: bool,
+        side_opt: Optional[str] = None,
+        sorter_opt: Optional[Tensor[*, idim_bd, int64]] = None,
+        result: Tensor[int|int64]
+    ) -> Tensor
+
+【算法】
+    scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device())
+    return searchsorted_out_cuda(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt, result)
+
+--------------------------------
+searchsorted_cuda (Tensor重载)
+来源: aten/src/ATen/native/cuda/Bucketization.cu
+--------------------------------
+
+【签名】
+    @host→device
+    searchsorted_cuda(
+        sorted_sequence: Tensor[*, idim_bd],
+        self: Tensor[*D],
+        out_int32: bool,
+        right: bool,
+        side_opt: Optional[str] = None,
+        sorter: Optional[Tensor[*, idim_bd, int64]] = None
+    ) -> Tensor[*D, int|int64]
+
+【算法】
+    scalar_type = ScalarType::Int if out_int32 else ScalarType::Long
+    result = at::empty({0}, device=self.device(), dtype=scalar_type, memory_format=Contiguous)
+    searchsorted_out_cuda(sorted_sequence, self, out_int32, right, side_opt, sorter, result)
+    return result
+
+--------------------------------
+searchsorted_cuda (Scalar重载)
+来源: aten/src/ATen/native/cuda/Bucketization.cu
+--------------------------------
+
+【签名】
+    @host→device
+    searchsorted_cuda(
+        sorted_sequence: Tensor[*, idim_bd],
+        self: Scalar,
+        out_int32: bool,
+        right: bool,
+        side_opt: Optional[str] = None,
+        sorter: Optional[Tensor[*, idim_bd, int64]] = None
+    ) -> Tensor[int|int64]
+
+【算法】
+    scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device())
+    return searchsorted_cuda(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter)
+
+--------------------------------
+bucketize_out_cuda
+来源: aten/src/ATen/native/cuda/Bucketization.cu
+--------------------------------
+
+【签名】
+    @host→device
+    bucketize_out_cuda(
+        self: Tensor[*D],
+        boundaries: Tensor[N],
+        out_int32: bool,
+        right: bool,
+        result: Tensor[*D, int|int64]
+    ) -> Tensor[*D]
+
+    约束:
+    - boundaries.dim == 1
+
+【算法】
+    assert boundaries.dim == 1
+    searchsorted_out_cuda(boundaries, self, out_int32, right, None, None, result)
+    return result
+
+【备注】
+    - bucketize 是 searchsorted 的特化版本，强制 boundaries 为 1D
+
+--------------------------------
+bucketize_cuda (Tensor重载)
+来源: aten/src/ATen/native/cuda/Bucketization.cu
+--------------------------------
+
+【签名】
+    @host→device
+    bucketize_cuda(
+        self: Tensor[*D],
+        boundaries: Tensor[N],
+        out_int32: bool,
+        right: bool
+    ) -> Tensor[*D, int|int64]
+
+【算法】
+    scalar_type = ScalarType::Int if out_int32 else ScalarType::Long
+    result = at::empty({0}, device=self.device(), dtype=scalar_type, memory_format=Contiguous)
+    bucketize_out_cuda(self, boundaries, out_int32, right, result)
+    return result
+
+--------------------------------
+bucketize_cuda (Scalar重载)
+来源: aten/src/ATen/native/cuda/Bucketization.cu
+--------------------------------
+
+【签名】
+    @host→device
+    bucketize_cuda(
+        self: Scalar,
+        boundaries: Tensor[N],
+        out_int32: bool,
+        right: bool
+    ) -> Tensor[int|int64]
+
+【算法】
+    scalar_tensor = searchsorted_scalar_tensor(self, boundaries.device())
+    return bucketize_cuda(scalar_tensor, boundaries, out_int32, right)

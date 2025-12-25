@@ -1,0 +1,172 @@
+--------------------------------
+triu / tril (上/下三角矩阵)
+来源: aten/src/ATen/native/cuda/TriangularOps.cu
+--------------------------------
+
+【签名】
+    @device
+    triu_tril_kernel<scalar_t, IndexType, upper, elements_per_thread, inplace>(
+        result_info: TensorInfo<scalar_t, IndexType>,
+        self_info: TensorInfo<const scalar_t, IndexType>,
+        k: int64,                           # 对角线偏移
+        N_padded: int64,                    # 填充后总元素数
+        last_dim_padded: IndexType          # 最后一维填充后大小
+    )
+
+【算法】
+    # 每个线程处理 elements_per_thread 个连续元素
+    linear_idx = (blockIdx.x * blockDim.x + threadIdx.x) * elements_per_thread
+    
+    if linear_idx >= N_padded:
+        return
+    
+    # Step 1: 计算二维索引 (row, col)
+    col = linear_idx % last_dim_padded
+    row = (linear_idx / last_dim_padded) % self_info.sizes[dims-2]
+    
+    # Step 2: 提前退出优化 (inplace模式)
+    if inplace:
+        # 如果这个线程处理的所有元素都在保留区域，直接返回
+        if upper:
+            if col - row >= k:  # 全在上三角
+                return
+        else:
+            if col + elements_per_thread - row <= k:  # 全在下三角
+                return
+    
+    # Step 3: 计算高维偏移量
+    self_offset = self_info.strides[dims-1] * col + self_info.strides[dims-2] * row
+    result_offset = result_info.strides[dims-1] * col + result_info.strides[dims-2] * row
+    
+    # 处理剩余维度 (batch维度)
+    for i in range(dims-3, -1, -1):
+        running_index = (linear_idx / prod(self_info.sizes[i+1:dims-2])) % self_info.sizes[i]
+        self_offset += running_index * self_info.strides[i]
+        result_offset += running_index * result_info.strides[i]
+    
+    # Step 4: 写入结果
+    if inplace:
+        # 逐元素检查mask，零化不需要的元素
+        for i in range(elements_per_thread):
+            if col + i < self_info.sizes[dims-1]:
+                mask = (col + i - row >= k) if upper else (col + i - row <= k)
+                if not mask:
+                    result_info.data[result_offset + i * result_info.strides[dims-1]] = 0
+    else:
+        # 读取到寄存器，mask后写回
+        frag[elements_per_thread] = {0}
+        has_mask = (upper and col + elements_per_thread - row >= k) or (not upper and col - row <= k)
+        
+        if has_mask:
+            # 读取
+            for i in range(elements_per_thread):
+                if col + i < self_info.sizes[dims-1]:
+                    frag[i] = self_info.data[self_offset + i * self_info.strides[dims-1]]
+            
+            # 应用mask
+            for i in range(elements_per_thread):
+                mask = (col + i - row >= k) if upper else (col + i - row <= k)
+                frag[i] = frag[i] if mask else 0
+        
+        # 写回
+        for i in range(elements_per_thread):
+            if col + i < self_info.sizes[dims-1]:
+                result_info.data[result_offset + i * result_info.strides[dims-1]] = frag[i]
+
+【并行模式】
+    grid: ceil(N_padded / elements_per_thread / block_size)
+    block: 128
+    
+    - 每个线程处理 elements_per_thread 个连续列元素 (向量化访存)
+    - elements_per_thread = 8/sizeof(scalar_t) (最小为1，用于大类型如double/complex)
+    - last_dim 填充到 elements_per_thread 的倍数以对齐
+
+【备注】
+    - upper=true: 保留 col - row >= k 的元素 (上三角)
+    - upper=false: 保留 col - row <= k 的元素 (下三角)
+    - k=0: 主对角线; k>0: 向右上偏移; k<0: 向左下偏移
+    - inplace模式: 直接修改输入tensor，避免不必要的读取
+
+--------------------------------
+triu_tril_cuda_template:
+来源: aten/src/ATen/native/cuda/TriangularOps.cu
+--------------------------------
+
+【签名】
+    @host→device
+    triu_tril_cuda_template<upper>(
+        result: Tensor[*D, H, W],
+        self: Tensor[*D, H, W],
+        k: int64,
+        name: const char*
+    )
+
+【算法】
+    # 根据标量类型分发
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        ComplexHalf, Half, BFloat16, Bool, self.scalar_type()):
+        
+        # 向量化参数
+        elements_per_thread = 8/sizeof(scalar_t) if sizeof(scalar_t) < 8 else 1
+        last_dim_padded = round_up(self.size(-1), elements_per_thread)
+        N_padded = prod(self.shape[:-1]) * last_dim_padded
+        
+        # 启动配置
+        dim_grid = ceil(N_padded / elements_per_thread / 128)
+        dim_block = 128
+        
+        # 索引类型分发
+        if canUse32BitIndexMath(result) and canUse32BitIndexMath(self):
+            result_info = getTensorInfo<scalar_t, int32_t>(result)
+            self_info = getTensorInfo<const scalar_t, int32_t>(self)
+            IndexType = int32_t
+        else:
+            result_info = getTensorInfo<scalar_t, int64_t>(result)
+            self_info = getTensorInfo<const scalar_t, int64_t>(self)
+            IndexType = int64_t
+        
+        # inplace检测
+        inplace = self.is_same(result)
+        
+        # 启动kernel
+        triu_tril_kernel<scalar_t, IndexType, upper, elements_per_thread, inplace>
+            <<<dim_grid, dim_block, 0, getCurrentCUDAStream()>>>(
+                result_info, self_info, k, N_padded, last_dim_padded)
+
+【备注】
+    - 32位索引优化: 小tensor用int32_t索引，减少寄存器压力
+    - inplace编译期特化: 避免运行时分支
+
+--------------------------------
+tril_cuda / triu_cuda:
+来源: aten/src/ATen/native/cuda/TriangularOps.cu
+--------------------------------
+
+【签名】
+    @host→device
+    tril_cuda(self: Tensor[*D, H, W], k: int64, result: Tensor[*D, H, W]) -> Tensor[*D, H, W]
+    
+    @host→device
+    triu_cuda(self: Tensor[*D, H, W], k: int64, result: Tensor[*D, H, W]) -> Tensor[*D, H, W]
+
+【算法】
+    if self.numel() != 0:
+        triu_tril_cuda_template<false>(result, self, k, "tril")  # tril
+        # 或
+        triu_tril_cuda_template<true>(result, self, k, "triu")   # triu
+
+--------------------------------
+trace_cuda:
+来源: aten/src/ATen/native/cuda/TriangularOps.cu
+--------------------------------
+
+【签名】
+    trace_cuda(self: Tensor[H, W]) -> Tensor[]
+
+【算法】
+    assert self.dim() == 2
+    return self.diagonal().sum()
+
+【备注】
+    - diagonal(): 提取主对角线
+    - sum(): 求和，返回标量tensor

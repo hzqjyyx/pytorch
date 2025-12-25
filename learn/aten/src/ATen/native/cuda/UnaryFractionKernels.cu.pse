@@ -1,0 +1,155 @@
+--------------------------------
+ceil_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryFractionKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    ceil_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    gpu_kernel(iter, λ(a: scalar_t) -> scalar_t {
+        return ceil_wrapper(a)
+    })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: Half, BFloat16, Float, Double
+    - ceil_wrapper: 对实数调用 std::ceil，对复数分别对实部和虚部调用 ceil
+
+--------------------------------
+frac_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryFractionKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    frac_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    y = a - trunc(a)
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: Half, BFloat16, Float, Double
+    - 返回浮点数的小数部分
+
+--------------------------------
+floor_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryFractionKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    floor_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    gpu_kernel(iter, λ(a: scalar_t) -> scalar_t {
+        return floor_wrapper(a)
+    })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: Half, BFloat16, Float, Double
+    - floor_wrapper: 对实数调用 std::floor，对复数分别对实部和虚部调用 floor
+
+--------------------------------
+reciprocal_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryFractionKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    reciprocal_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    对于实数:
+        y = 1 / a
+
+    对于复数:
+        if isnan(real(a)) or isnan(imag(a)):
+            return {NaN, NaN}
+        if isinf(real(a)) and isinf(imag(a)):
+            return {NaN, NaN}
+        if isinf(real(a)) or isinf(imag(a)):
+            return {0, 0}
+        return 1 / a
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: Half, BFloat16, Float, Double, ComplexFloat, ComplexDouble
+    - 复数版本处理极端情况以兼容 NumPy 行为
+
+--------------------------------
+round_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryFractionKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    round_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    y = nearbyint_wrapper(a)
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: Half, BFloat16, Float, Double
+    - 使用银行家舍入法(round half to even)
+    - nearbyint_wrapper: Half/BFloat16 转 float 后调用 nearbyintf，Double 调用 nearbyint
+
+--------------------------------
+round_decimals_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryFractionKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    round_decimals_kernel_cuda(iter: TensorIteratorBase, decimals: int64)
+
+【算法】
+    ten_pow = 10^abs(decimals)
+
+    if decimals < 0:
+        y = nearbyint(a / ten_pow) * ten_pow
+    else:
+        y = nearbyint(a * ten_pow) / ten_pow
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: Half, BFloat16, Float, Double
+    - decimals > 0: 保留小数点后 decimals 位
+    - decimals < 0: 保留到 10^(-decimals) 的整数倍
+
+--------------------------------
+trunc_kernel_cuda
+来源: aten/src/ATen/native/cuda/UnaryFractionKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    trunc_kernel_cuda(iter: TensorIteratorBase)
+
+【算法】
+    gpu_kernel(iter, λ(a: scalar_t) -> scalar_t {
+        return trunc_wrapper(a)
+    })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持类型: Half, BFloat16, Float, Double
+    - trunc_wrapper: Half/BFloat16 转 float 后调用 truncf，Double 调用 trunc，复数分别对实部和虚部 trunc

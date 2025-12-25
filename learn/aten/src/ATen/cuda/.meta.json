@@ -351,6 +351,249 @@
       "tasks": {
         "purpose": "done"
       }
+    },
+    "tunable/README.md": {
+      "type": "file",
+      "hashes": {
+        "tunable/README.md": "67925f39b3eb9285"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CublasHandlePool.cpp": {
+      "type": "file",
+      "hashes": {
+        "CublasHandlePool.cpp": "6df9ac960b25f78b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDADevice.h": {
+      "type": "file",
+      "hashes": {
+        "CUDADevice.h": "d67e1aed4c6de22d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDAUtils.h": {
+      "type": "file",
+      "hashes": {
+        "CUDAUtils.h": "6a0596d287db4a36"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PinnedMemoryAllocator.h": {
+      "type": "file",
+      "hashes": {
+        "PinnedMemoryAllocator.h": "6dfa995f2740402e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDAEvent.h": {
+      "type": "file",
+      "hashes": {
+        "CUDAEvent.h": "187531803ceb8e9d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CuSparseHandlePool.cpp": {
+      "type": "file",
+      "hashes": {
+        "CuSparseHandlePool.cpp": "f2b039b89282d337"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDADataType.h": {
+      "type": "file",
+      "hashes": {
+        "CUDADataType.h": "f27bf3b2e3e9c9a4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDAContextLight.h": {
+      "type": "file",
+      "hashes": {
+        "CUDAContextLight.h": "6bd5ee5810e5d015"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "llvm_complex.cpp": {
+      "type": "file",
+      "hashes": {
+        "llvm_complex.cpp": "4a97027ecd52f8f0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ThrustAllocator.h": {
+      "type": "file",
+      "hashes": {
+        "ThrustAllocator.h": "2602b53210f0a0cd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cub-RadixSortKeys.cu": {
+      "type": "file",
+      "hashes": {
+        "cub-RadixSortKeys.cu": "e57f4881bcc979c5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "llvm_basic.cpp": {
+      "type": "file",
+      "hashes": {
+        "llvm_basic.cpp": "0d9121a6030bf5fa"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cub-RadixSortPairs.cu": {
+      "type": "file",
+      "hashes": {
+        "cub-RadixSortPairs.cu": "56731d9d62a8a406"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "llvm_jit_strings.h": {
+      "type": "file",
+      "hashes": {
+        "llvm_jit_strings.h": "c419f2735156ae65"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CUDASparse.h": {
+      "type": "file",
+      "hashes": {
+        "CUDASparse.h": "231d025f61e45739"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PhiloxCudaState.h": {
+      "type": "file",
+      "hashes": {
+        "PhiloxCudaState.h": "f4285f95d9451782"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "jiterator_impl.h": {
+      "type": "file",
+      "hashes": {
+        "jiterator_impl.h": "2f3e5a76e2294735"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ATenCUDAGeneral.h": {
+      "type": "file",
+      "hashes": {
+        "ATenCUDAGeneral.h": "873b19b9ff4c5310"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/IndexUtils.cu": {
+      "type": "file",
+      "hashes": {
+        "detail/IndexUtils.cu": "177d6f27e9df2b83"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/KernelUtils.h": {
+      "type": "file",
+      "hashes": {
+        "detail/KernelUtils.h": "b23d1650a0ab7e36"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/DeviceThreadHandles.h": {
+      "type": "file",
+      "hashes": {
+        "detail/DeviceThreadHandles.h": "eb83af814b7e3454"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "tunable/TunableGemm.h": {
+      "type": "file",
+      "hashes": {
+        "tunable/TunableGemm.h": "bd83c1e30331bbce"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "tunable/TunableOp.h": {
+      "type": "file",
+      "hashes": {
+        "tunable/TunableOp.h": "f8dec89a28f4ef62"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "tunable/GemmRocblas.h": {
+      "type": "file",
+      "hashes": {
+        "tunable/GemmRocblas.h": "bcb13ec5930e7ccc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "tunable/GemmCommon.h": {
+      "type": "file",
+      "hashes": {
+        "tunable/GemmCommon.h": "b50456fc8bb7c649"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "tunable/GemmHipblaslt.h": {
+      "type": "file",
+      "hashes": {
+        "tunable/GemmHipblaslt.h": "c008003d63fd80ee"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
     }
   }
 }

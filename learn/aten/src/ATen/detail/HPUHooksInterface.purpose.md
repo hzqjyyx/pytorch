@@ -1,25 +1,52 @@
 ## HPUHooksInterface 文件分析
 
-**HPUHooksInterface.h** 定义了一个 HPU（Habana Processing Unit）加速器的接口类：
+### HPUHooksInterface.h
 
-- 继承自 `AcceleratorHooksInterface`，是一个虚拟接口
-- 提供了多个虚函数的默认实现，都返回 false 或抛出错误
-- `hasHPU()` - 检查是否有 HPU 设备，默认返回 false
-- `getDeviceFromPtr()` - 从内存指针获取设备信息，默认抛出错误
-- `isPinnedPtr()` - 检查内存是否被锁定，默认返回 false
-- `getPinnedMemoryAllocator()` - 获取锁定内存分配器，默认抛出错误
-- `hasPrimaryContext()` - 检查设备是否有主上下文，默认抛出错误
-- 定义了 `HPUHooksRegistry` 注册表和 `REGISTER_HPU_HOOKS` 宏用于注册具体实现
+这是一个接口类定义文件，定义了 HPU（Huawei Processing Unit）硬件加速器的钩子接口。
 
-**HPUHooksInterface.cpp** 实现了获取 HPU hooks 的工厂函数：
+**主要结构：**
 
-- `getHPUHooks()` - 返回全局单例 HPU hooks 对象
-- 首先尝试从注册表创建具体实现（如果已注册 HPU 后端）
-- 如果注册表中没有实现，则返回默认的 `HPUHooksInterface` 实例
-- 使用静态变量保证单例模式
+1. **HPUHooksInterface 结构体** (第12-44行)
+   - 继承自 `AcceleratorHooksInterface`
+   - 提供 HPU 硬件相关操作的虚拟接口
+   - 所有方法都包含 `TORCH_CHECK(false, ...)` 的默认实现，用于在未注册 HPU 后端时抛出错误提示
 
-**核心设计：**
+2. **关键方法：**
+   - `init()`: HPU 初始化
+   - `hasHPU()`: 检查是否有可用的 HPU
+   - `getDeviceFromPtr()`: 根据内存指针获取设备信息
+   - `isPinnedPtr()`: 检查指针是否指向固定内存
+   - `getPinnedMemoryAllocator()`: 获取固定内存分配器
+   - `hasPrimaryContext()`: 检查是否存在主上下文
 
-- 提供了一个扩展点，当 HPU 后端可用时可以注册具体实现
-- 默认实现都会抛出错误，迫使用户在使用 HPU 功能前先注册后端
-- 遵循注册表模式，支持运行时动态加载不同的 HPU 实现
+3. **HPUHooksArgs 结构体** (第46行)
+   - 空结构体，用于注册系统的参数传递
+
+4. **注册机制** (第48-50行)
+   - `TORCH_DECLARE_REGISTRY`: 声明 HPU 钩子注册表
+   - `REGISTER_HPU_HOOKS` 宏：便捷注册 HPU 钩子实现类
+
+### HPUHooksInterface.cpp
+
+这是实现文件，定义了获取 HPU 钩子的工厂函数。
+
+**主要功能：**
+
+1. **getHPUHooks() 函数** (第6-16行)
+   - 返回全局单例 HPU 钩子实例
+   - 使用 lambda 表达式进行延迟初始化
+   - 优先尝试从注册表创建 HPU 钩子实现
+   - 若无注册实现，则返回默认的空实现（所有操作都会报错）
+
+2. **C10_DEFINE_REGISTRY** (第20行)
+   - 定义注册表实现，允许外部代码注册真实的 HPU 后端
+
+---
+
+### 总结
+
+- HPU 硬件加速器支持的接口抽象层
+- 提供内存管理、设备查询、上下文管理等核心功能的接口定义
+- 采用注册表模式，允许 HPU 后端独立实现具体功能
+- 默认实现为空实现，未注册后端时会直接报错提示用户
+- 确保 PyTorch 核心代码与特定 HPU 后端实现解耦

@@ -1,0 +1,145 @@
+--------------------------------
+LinearAlgebraStubs (延迟加载线性代数库)
+来源: aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp
+--------------------------------
+
+【概述】
+当定义 BUILD_LAZY_CUDA_LINALG 时，线性代数函数采用延迟加载策略：
+- 初始注册为占位函数
+- 首次调用时动态加载 libtorch_cuda_linalg.so
+- 库加载后覆盖注册为真实实现
+- 减少未使用线性代数时的GPU内存占用
+
+【全局状态】
+disp: LinalgDispatch                # 旧式调度表，初始指向占位函数
+invoke_count: int = 0               # 防止无限递归的调用计数
+
+【工具函数】
+getTorchLinalgLibrary() -> DynamicLibrary&
+    用途: 获取线性代数库的单例引用
+    逻辑: 首次调用时加载 libtorch_cuda_linalg.so
+
+loadLazyTorchLinalgLibrary()
+    用途: 确保库只加载一次
+    逻辑:
+        getTorchLinalgLibrary()
+        assert invoke_count++ == 0    # 防止递归调用
+
+registerLinalgDispatch(disp_: LinalgDispatch)
+    用途: 真实库加载后注册实际实现
+    逻辑: disp = disp_
+
+【延迟加载包装函数】
+lazy_cholesky_kernel(input: Tensor, info: Tensor, upper: bool)
+    逻辑:
+        loadLazyTorchLinalgLibrary()
+        cholesky_stub(DeviceType::CUDA, input, info, upper)
+
+lazy_cholesky_inverse_kernel(result: Tensor&, infos: Tensor&, upper: bool) -> Tensor&
+    逻辑:
+        loadLazyTorchLinalgLibrary()
+        return cholesky_inverse_stub(DeviceType::CUDA, result, infos, upper)
+
+lazy_lu_factor(input: Tensor, pivots: Tensor, infos: Tensor, compute_pivots: bool)
+    逻辑:
+        loadLazyTorchLinalgLibrary()
+        lu_factor_stub(DeviceType::CUDA, input, pivots, infos, compute_pivots)
+
+lazy_triangular_solve_kernel(A: Tensor, B: Tensor, left: bool, upper: bool, transpose: TransposeType, unitriangular: bool)
+    逻辑:
+        loadLazyTorchLinalgLibrary()
+        triangular_solve_stub(DeviceType::CUDA, A, B, left, upper, transpose, unitriangular)
+
+lazy_orgqr_kernel(result: Tensor&, tau: Tensor) -> Tensor&
+    逻辑:
+        loadLazyTorchLinalgLibrary()
+        return orgqr_stub(DeviceType::CUDA, result, tau)
+
+lazy_ormqr_kernel(input: Tensor, tau: Tensor, other: Tensor, left: bool, transpose: bool)
+    逻辑:
+        loadLazyTorchLinalgLibrary()
+        ormqr_stub(DeviceType::CUDA, input, tau, other, left, transpose)
+
+lazy_geqrf_kernel(input: Tensor, tau: Tensor)
+    逻辑:
+        loadLazyTorchLinalgLibrary()
+        geqrf_stub(DeviceType::CUDA, input, tau)
+
+lazy_linalg_eigh_kernel(eigenvalues: Tensor, eigenvectors: Tensor, infos: Tensor, upper: bool, compute_eigenvectors: bool)
+    逻辑:
+        loadLazyTorchLinalgLibrary()
+        linalg_eigh_stub(DeviceType::CUDA, eigenvalues, eigenvectors, infos, upper, compute_eigenvectors)
+
+lazy_linalg_eig_kernel(eigenvalues: Tensor&, eigenvectors: Tensor&, infos: Tensor&, input: Tensor, compute_eigenvectors: bool)
+    逻辑:
+        getTorchLinalgLibrary()
+        linalg_eig_stub(DeviceType::CUDA, eigenvalues, eigenvectors, infos, input, compute_eigenvectors)
+
+lazy_svd_kernel(
+    A: Tensor,
+    full_matrices: bool,
+    compute_uv: bool,
+    driver: Optional[string_view],
+    U: Tensor,
+    S: Tensor,
+    Vh: Tensor,
+    info: Tensor
+)
+    逻辑:
+        getTorchLinalgLibrary()
+        svd_stub(DeviceType::CUDA, A, full_matrices, compute_uv, driver, U, S, Vh, info)
+
+lazy_lu_solve(LU: Tensor, pivots: Tensor, B: Tensor, trans: TransposeType)
+    逻辑:
+        getTorchLinalgLibrary()
+        lu_solve_stub(DeviceType::CUDA, LU, pivots, B, trans)
+
+lazy_lstsq_kernel(a: Tensor, b: Tensor&, rank: Tensor&, singular_values: Tensor&, infos: Tensor&, rcond: double, driver_name: string)
+    逻辑:
+        getTorchLinalgLibrary()
+        lstsq_stub(DeviceType::CUDA, a, b, rank, singular_values, infos, rcond, driver_name)
+
+lazy_ldl_factor(LD: Tensor, pivots: Tensor, info: Tensor, upper: bool, hermitian: bool)
+    逻辑:
+        loadLazyTorchLinalgLibrary()
+        ldl_factor_stub(DeviceType::CUDA, LD, pivots, info, upper, hermitian)
+
+lazy_ldl_solve(LD: Tensor, pivots: Tensor, B: Tensor, upper: bool, hermitian: bool)
+    逻辑:
+        loadLazyTorchLinalgLibrary()
+        ldl_solve_stub(DeviceType::CUDA, LD, pivots, B, upper, hermitian)
+
+【旧式调度实现】
+_cholesky_solve_helper_cuda(self: Tensor, A: Tensor, upper: bool) -> Tensor
+    用途: Cholesky分解求解的旧式调度入口
+    逻辑:
+        getTorchLinalgLibrary()
+        assert disp.cholesky_solve_helper != _cholesky_solve_helper_cuda
+        return disp.cholesky_solve_helper(self, A, upper)
+
+【注册】
+以下函数注册为延迟加载包装:
+- cholesky_stub → lazy_cholesky_kernel
+- cholesky_inverse_stub → lazy_cholesky_inverse_kernel
+- lu_factor_stub → lazy_lu_factor
+- ldl_factor_stub → lazy_ldl_factor
+- ldl_solve_stub → lazy_ldl_solve
+- triangular_solve_stub → lazy_triangular_solve_kernel
+- orgqr_stub → lazy_orgqr_kernel
+- ormqr_stub → lazy_ormqr_kernel
+- geqrf_stub → lazy_geqrf_kernel
+- linalg_eigh_stub → lazy_linalg_eigh_kernel
+- linalg_eig_stub → lazy_linalg_eig_kernel
+- svd_stub → lazy_svd_kernel
+- lu_solve_stub → lazy_lu_solve
+- lstsq_stub → lazy_lstsq_kernel
+
+【依赖】
+at::DynamicLibrary              # 动态库加载
+REGISTER_CUDA_DISPATCH          # CUDA调度注册宏
+cholesky_stub, lu_factor_stub, ...    # 各线性代数操作的调度点
+
+【MAGMA集成】
+若启用 AT_MAGMA_ENABLED:
+    初始化时设置 magma_init_fn 为空操作
+    用途: 禁用MAGMA的自动初始化，由真实库负责

@@ -1,0 +1,15 @@
+- **包含XPU配置**：导入 `../../cmake/public/xpu.cmake` 的构建配置
+- **库查找**（非libtorchless模式）：在 `$ENV{LIBTORCH_LIB_PATH}` 中搜索 `c10_xpu` 库
+- **生成宏头文件**：基于 `xpu_cmake_macros.h.in` 模板生成 `xpu_cmake_macros.h`，传入 `C10_XPU_BUILD_SHARED_LIBS` 参数
+- **定义源文件**：`C10_XPU_SRCS` 包含4个实现文件（CachingAllocator、Functions、Stream、GuardImpl）
+- **定义头文件**：`C10_XPU_HEADERS` 包含7个公开头文件
+- **构建库目标**（非libtorchless模式）：
+  - 创建 `c10_xpu` 库
+  - 添加编译标记 `-DC10_XPU_BUILD_MAIN_LIB`
+  - 启用符号隐藏（如编译器支持）
+  - 链接依赖：`c10` 和 `torch::xpurt`
+- **安装配置**：
+  - 安装库到 `lib` 目录
+  - 安装头文件到 `include/c10/xpu/` 目录及其子目录
+  - 在MSVC共享库模式下安装PDB调试符号
+- **子目录处理**：添加 `test` 子目录构建测试

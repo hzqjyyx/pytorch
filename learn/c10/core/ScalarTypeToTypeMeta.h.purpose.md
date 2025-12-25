@@ -1,0 +1,7 @@
+- **文件目的**: 提供 ScalarType 枚举和 TypeMeta 之间的转换函数
+- **核心转换函数**:
+  - `scalarTypeToTypeMeta()`: 将 ScalarType 转换为 caffe2::TypeMeta
+  - `typeMetaToScalarType()`: 将 TypeMeta 转换为 ScalarType
+  - `optTypeMetaToScalarType()`: 将 optional<TypeMeta> 转换为 optional<ScalarType>
+- **便利操作符**: 重载 `==` 和 `!=` 用于 ScalarType 和 TypeMeta 的直接比较
+- **设计意图**: 作为临时桥接层，待 TypeMeta 从 caffe2 迁移到 c10 后可能会重构或删除

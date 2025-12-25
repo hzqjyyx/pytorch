@@ -1,0 +1,355 @@
+--------------------------------
+multilabel_margin_loss_shape_check
+来源: aten/src/ATen/native/cuda/MultiLabelMarginCriterion.cu
+--------------------------------
+
+【签名】
+    multilabel_margin_loss_shape_check(
+        nframe: int64 (out),
+        dim: int64 (out),
+        ndims: int64,
+        input: Tensor,
+        target: Tensor
+    )
+
+【算法】
+    assert (ndims == 2 and input.size(1) != 0) or (ndims == 1 and input.size(0) != 0) or ndims == 0
+
+    if ndims <= 1:
+        nframe = 1
+        dim = 1 if ndims == 0 else input.size(0)
+        assert target.dim <= 1 and target.numel == dim
+    else:
+        nframe = input.size(0)
+        dim = input.size(1)
+        assert target.dim == 2 and target.size(0) == nframe and target.size(1) == dim
+
+【备注】
+    - 计算并验证 batch 大小 (nframe) 和特征维度 (dim)
+    - 支持 0D/1D/2D 输入
+
+--------------------------------
+multilabel_margin_loss_forward_kernel
+来源: aten/src/ATen/native/cuda/MultiLabelMarginCriterion.cu
+--------------------------------
+
+【签名】
+    @device
+    multilabel_margin_loss_forward_kernel(
+        output: Tensor[nframe],
+        input: Tensor[nframe, dim],
+        target: Tensor[nframe, dim, int64],
+        is_target: Tensor[nframe, dim],
+        nframe: int,
+        dim: int,
+        size_average: bool
+    )
+
+【算法】
+    k = blockIdx.x  # 处理第 k 个样本
+
+    # Step 1: 初始化 is_target 为 0
+    parallel_for d in range(dim):
+        is_target[k, d] = 0
+
+    __syncthreads()
+
+    # Step 2: 标记目标位置 (单线程)
+    if threadIdx.x == 0:
+        for dt in range(dim):
+            target_idx = target[k, dt]
+            if target_idx < 0:
+                break
+            is_target[k, target_idx] = 1
+
+    __syncthreads()
+
+    # Step 3: 计算损失
+    sum = 0
+    for dt in range(dim):
+        target_idx = target[k, dt]
+        if target_idx < 0:
+            break
+
+        input_target = input[k, target_idx]
+
+        # 并行比较目标与所有非目标类
+        parallel_for d in range(dim):
+            if is_target[k, d] == 0:  # 只考虑非目标类
+                z = 1 - input_target + input[k, d]
+                if z > 0:
+                    sum += z
+
+    # Step 4: Block 级归约求和
+    total_sum = block_reduce(sum, op=sum)
+
+    if threadIdx.x == 0:
+        if size_average:
+            output[k] = (total_sum / dim) / nframe
+        else:
+            output[k] = total_sum / dim
+
+【并行模式】
+    grid: (nframe,)
+    block: (128,)
+
+    - 每个 block 处理一个样本
+    - 线程并行处理类别维度
+    - 使用 block_reduce 聚合损失
+
+【备注】
+    - 损失公式: max(0, 1 - input[target] + input[non_target]) / dim
+    - target[k, dt] < 0 表示该位置之后没有有效目标
+
+--------------------------------
+multilabel_margin_loss_backward_kernel
+来源: aten/src/ATen/native/cuda/MultiLabelMarginCriterion.cu
+--------------------------------
+
+【签名】
+    @device
+    multilabel_margin_loss_backward_kernel(
+        grad_input: Tensor[nframe, dim],
+        grad_output: Tensor[1] | Tensor[nframe],
+        input: Tensor[nframe, dim],
+        target: Tensor[nframe, dim, int64],
+        is_target: Tensor[nframe, dim],
+        nframe: int,
+        dim: int,
+        size_average: bool,
+        reduce: bool
+    )
+
+【算法】
+    k = blockIdx.x
+
+    grad_output_k = grad_output if reduce else grad_output[k]
+
+    # 梯度缩放因子
+    g = 1 / (nframe * dim) if (size_average and reduce) else 1 / dim
+
+    # Step 1: 初始化梯度为 0
+    parallel_for d in range(dim):
+        grad_input[k, d] = 0
+
+    __syncthreads()
+
+    # Step 2: 计算梯度
+    for dt in range(dim):
+        target_idx = target[k, dt]
+        if target_idx < 0:
+            break
+
+        input_target = input[k, target_idx]
+
+        # 对非目标类的梯度贡献
+        sum = 0
+        parallel_for d in range(dim):
+            if is_target[k, d] == 0:
+                z = 1 - input_target + input[k, d]
+                if z > 0:
+                    sum -= g
+                    grad_input[k, d] += g  # 非目标类: +g
+
+        __syncthreads()
+
+        # 对目标类的梯度贡献
+        total_sum = block_reduce(sum, op=sum)
+        if threadIdx.x == 0:
+            grad_input[k, target_idx] += total_sum  # 目标类: -g * count
+
+    # Step 3: 乘以上游梯度
+    parallel_for d in range(dim):
+        grad_input[k, d] *= grad_output_k
+
+【并行模式】
+    grid: (nframe,)
+    block: (128,)
+
+    - 每个 block 处理一个样本
+    - 线程并行处理类别维度
+    - 使用 block_reduce 聚合目标类梯度
+
+【备注】
+    - 梯度规则: 若 z > 0，则 ∂L/∂input[target] -= g, ∂L/∂input[non_target] += g
+    - reduce=False 时，grad_output 维度为 [nframe]
+
+--------------------------------
+multilabel_margin_loss_forward_out_cuda_template
+来源: aten/src/ATen/native/cuda/MultiLabelMarginCriterion.cu
+--------------------------------
+
+【签名】
+    @host→device
+    multilabel_margin_loss_forward_out_cuda_template(
+        input: Tensor[nframe, dim] | Tensor[dim],
+        target: Tensor[nframe, dim, int64] | Tensor[dim, int64],
+        reduction: int64,
+        output: Tensor (out),
+        is_target: Tensor (out)
+    )
+
+【算法】
+    nframe, dim = multilabel_margin_loss_shape_check(input, target)
+
+    if input.numel == 0:
+        return
+
+    input_ = input.contiguous()
+    target_ = target.contiguous()
+    is_target_ = is_target.contiguous().resize_as_(target)
+
+    if input.dim <= 1:
+        # 单样本情况
+        output.resize_({})
+        multilabel_margin_loss_forward_kernel<<<1, 128>>>(
+            output, input_, target_, is_target_, 1, dim, reduction == Mean
+        )
+
+    elif input.dim == 2:
+        if reduction != None:
+            # 需要归约: 先计算每个样本损失，再求和
+            output_tmp = at::empty({nframe}, input_.options())
+            output.resize_({})
+            multilabel_margin_loss_forward_kernel<<<nframe, 128>>>(
+                output_tmp, input_, target_, is_target_, nframe, dim, reduction == Mean
+            )
+            at::cuda::sum_out(output, output_tmp, {}, false, output.scalar_type())
+        else:
+            # 不归约: 直接输出每个样本损失
+            output.resize_({nframe})
+            multilabel_margin_loss_forward_kernel<<<nframe, 128>>>(
+                output, input_, target_, is_target_, nframe, dim, false
+            )
+
+【备注】
+    - 支持 1D (单样本) 和 2D (batch) 输入
+    - reduction: None | Mean
+
+--------------------------------
+multilabel_margin_loss_backward_cuda_out_template
+来源: aten/src/ATen/native/cuda/MultiLabelMarginCriterion.cu
+--------------------------------
+
+【签名】
+    @host→device
+    multilabel_margin_loss_backward_cuda_out_template(
+        grad_output: Tensor[1] | Tensor[nframe],
+        input: Tensor[nframe, dim] | Tensor[dim],
+        target: Tensor[nframe, dim, int64] | Tensor[dim, int64],
+        reduction: int64,
+        is_target: Tensor[nframe, dim] | Tensor[dim],
+        grad_input: Tensor (out)
+    )
+
+【算法】
+    nframe, dim = multilabel_margin_loss_shape_check(input, target)
+
+    if input.numel == 0:
+        return
+
+    input_ = input.contiguous()
+    target_ = target.contiguous()
+    is_target_ = is_target.contiguous()
+    grad_output_ = grad_output.contiguous()
+    grad_input.resize_as_(input_)
+
+    if grad_input.dim <= 1:
+        # 单样本情况
+        assert target_.dim <= 1 and target_.size(0) == dim
+        assert target_.sizes == is_target_.sizes
+        multilabel_margin_loss_backward_kernel<<<1, 128>>>(
+            grad_input, grad_output_, input_, target_, is_target_,
+            1, dim, reduction == Mean, reduction != None
+        )
+
+    elif grad_input.dim == 2:
+        # batch 情况
+        assert target_.dim == 2 and target_.size(0) == nframe and target_.size(1) == dim
+        assert target_.sizes == is_target_.sizes
+        multilabel_margin_loss_backward_kernel<<<nframe, 128>>>(
+            grad_input, grad_output_, input_, target_, is_target_,
+            nframe, dim, reduction == Mean, reduction != None
+        )
+
+【备注】
+    - 支持 1D (单样本) 和 2D (batch) 输入
+    - reduce 参数: reduction != None
+
+--------------------------------
+multilabel_margin_loss_forward_out_cuda
+来源: aten/src/ATen/native/cuda/MultiLabelMarginCriterion.cu
+--------------------------------
+
+【签名】
+    @host→device
+    multilabel_margin_loss_forward_out_cuda(
+        self: Tensor,
+        target: Tensor,
+        reduction: int64,
+        output: Tensor (out),
+        is_target: Tensor (out)
+    ) -> (Tensor, Tensor)
+
+【算法】
+    multilabel_margin_loss_forward_out_cuda_template(self, target, reduction, output, is_target)
+    return (output, is_target)
+
+--------------------------------
+multilabel_margin_loss_forward_cuda
+来源: aten/src/ATen/native/cuda/MultiLabelMarginCriterion.cu
+--------------------------------
+
+【签名】
+    @host→device
+    multilabel_margin_loss_forward_cuda(
+        self: Tensor,
+        target: Tensor,
+        reduction: int64
+    ) -> (Tensor, Tensor)
+
+【算法】
+    output = at::empty({0}, self.options())
+    is_target = at::empty({0}, self.options())
+    multilabel_margin_loss_forward_out_cuda_template(self, target, reduction, output, is_target)
+    return (output, is_target)
+
+--------------------------------
+multilabel_margin_loss_backward_cuda_out
+来源: aten/src/ATen/native/cuda/MultiLabelMarginCriterion.cu
+--------------------------------
+
+【签名】
+    @host→device
+    multilabel_margin_loss_backward_cuda_out(
+        grad_output: Tensor,
+        self: Tensor,
+        target: Tensor,
+        reduction: int64,
+        is_target: Tensor,
+        grad_input: Tensor (out)
+    ) -> Tensor
+
+【算法】
+    multilabel_margin_loss_backward_cuda_out_template(grad_output, self, target, reduction, is_target, grad_input)
+    return grad_input
+
+--------------------------------
+multilabel_margin_loss_backward_cuda
+来源: aten/src/ATen/native/cuda/MultiLabelMarginCriterion.cu
+--------------------------------
+
+【签名】
+    @host→device
+    multilabel_margin_loss_backward_cuda(
+        grad_output: Tensor,
+        self: Tensor,
+        target: Tensor,
+        reduction: int64,
+        is_target: Tensor
+    ) -> Tensor
+
+【算法】
+    grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT)
+    multilabel_margin_loss_backward_cuda_out_template(grad_output, self, target, reduction, is_target, grad_input)
+    return grad_input

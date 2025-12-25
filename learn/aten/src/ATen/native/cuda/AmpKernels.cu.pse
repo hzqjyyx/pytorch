@@ -1,0 +1,207 @@
+--------------------------------
+isfinite_ensure_cuda_math (辅助函数)
+来源: aten/src/ATen/native/cuda/AmpKernels.cu
+--------------------------------
+
+【签名】
+    @host @device
+    isfinite_ensure_cuda_math(val: float) -> int
+
+【算法】
+    return isfinite(val)
+
+【备注】
+    - 确保调用的是 CUDA math library 的 isfinite，而非 at::native::isfinite(Tensor&)
+    - 定义在全局命名空间以避免名称冲突
+
+
+--------------------------------
+_amp_non_finite_check_and_unscale_cuda_ (单tensor回退)
+来源: aten/src/ATen/native/cuda/AmpKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _amp_non_finite_check_and_unscale_cuda_(
+        scaled_grad: Tensor[*D, float|float16],  # in-place修改
+        found_inf: Tensor[1, float],             # 发现inf/nan时置1
+        inv_scale: Tensor[1, float]              # 逆缩放因子
+    ) -> void
+
+【算法】
+    iter = TensorIterator::unary_op(scaled_grad, scaled_grad)
+    
+    found_inf_ptr = found_inf.mutable_data_ptr<float>()
+    inv_scale_ptr = inv_scale.const_data_ptr<float>()
+    
+    gpu_kernel(iter, lambda (val_in: scalar_t) -> scalar_t:
+        val = static_cast<opmath_t>(val_in)
+        
+        if not isfinite_ensure_cuda_math(val):
+            *found_inf_ptr = 1.0
+        
+        inv_scale_val = *inv_scale_ptr
+        return static_cast<scalar_t>(
+            val if inv_scale_val == 1.0 else val * inv_scale_val
+        )
+    )
+
+【并行模式】
+    elementwise (通过 TensorIterator)
+
+【备注】
+    - opmath_t: 浮点运算类型 (float16->float, float->float)
+    - 仅由 _amp_foreach_* 调用，用于非MTA安全的tensor
+    - 自动设备保护
+
+
+--------------------------------
+_amp_foreach_non_finite_check_and_unscale_cuda_ (批量unscale)
+来源: aten/src/ATen/native/cuda/AmpKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _amp_foreach_non_finite_check_and_unscale_cuda_(
+        scaled_grads: TensorList[*D, float|float16],  # in-place修改
+        found_inf: Tensor[1, float],                   # 任一tensor有inf/nan时置1
+        inv_scale: Tensor[1, float]                    # 逆缩放因子
+    ) -> void
+
+    约束:
+    - scaled_grads 所有tensor同dtype (由 check_foreach_api_restrictions 检查)
+    - inv_scale.numel == 1, found_inf.numel == 1
+    - inv_scale, found_inf 都是 CUDA float tensor
+
+【算法】
+    if len(scaled_grads) == 0:
+        return
+    
+    # 快速路径: 所有tensor都MTA安全
+    if can_use_fast_route(scaled_grads):
+        tensor_lists = [scaled_grads.vec()]
+    
+    # 慢速路径: 过滤MTA安全的tensor
+    else:
+        tensor_lists = [[]]
+        expected_device = scaled_grads[0].device()
+        expected_dtype = scaled_grads[0].scalar_type()
+        
+        for t in scaled_grads:
+            if not t.is_non_overlapping_and_dense() or t.scalar_type() != expected_dtype:
+                # 回退到单tensor kernel
+                _amp_non_finite_check_and_unscale_cuda_(t, found_inf, inv_scale)
+            else:
+                tensor_lists[0].append(t)
+        
+        if len(tensor_lists[0]) == 0:
+            return
+    
+    # MTA批处理
+    found_inf_ptr = found_inf.mutable_data_ptr<float>()
+    inv_scale_ptr = inv_scale.const_data_ptr<float>()
+    
+    multi_tensor_apply<1>(
+        tensor_lists,
+        UnaryOpFunctor<scalar_t, depth=1, r_args_depth=1, res_arg_index=0>(),
+        lambda (val: opmath_t) -> opmath_t:
+            if not isfinite_ensure_cuda_math(val):
+                *found_inf_ptr = 1.0
+            
+            inv_scale_val = *inv_scale_ptr
+            return val if inv_scale_val == 1.0 else val * inv_scale_val
+    )
+
+【并行模式】
+    - 快速路径: multi_tensor_apply (MTA) 批处理所有tensor
+    - 慢速路径: MTA安全的用MTA，其余用 TensorIterator elementwise
+
+【备注】
+    - can_use_fast_route 检查: strided, non_overlapping_and_dense, 同device, 同dtype
+    - MTA lambda 接收 opmath_t 而非 scalar_t
+    - found_inf 由调用者预清零
+
+
+--------------------------------
+amp_update_scale_cuda_kernel (scale更新kernel)
+来源: aten/src/ATen/native/cuda/AmpKernels.cu
+--------------------------------
+
+【签名】
+    @device
+    amp_update_scale_cuda_kernel(
+        current_scale: float*,       # 当前缩放因子 (in-place更新)
+        growth_tracker: int*,        # 连续成功步数 (in-place更新)
+        found_inf: const float*,     # 是否发现inf/nan
+        growth_factor: double,       # 增长因子 (>1, 如1.02)
+        backoff_factor: double,      # 回退因子 (<1, 如0.5)
+        growth_interval: int         # 增长周期
+    ) -> void
+
+【算法】
+    if *found_inf:
+        # 发现inf/nan: 回退scale并重置tracker
+        *current_scale = (*current_scale) * backoff_factor
+        *growth_tracker = 0
+    else:
+        # 成功步: 增加tracker
+        successful = (*growth_tracker) + 1
+        
+        if successful == growth_interval:
+            # 达到增长周期: 尝试增长scale
+            new_scale = (*current_scale) * growth_factor
+            
+            # 防止溢出到inf
+            if isfinite_ensure_cuda_math(new_scale):
+                *current_scale = new_scale
+            
+            *growth_tracker = 0
+        else:
+            *growth_tracker = successful
+
+【并行模式】
+    单线程 kernel (<<<1, 1>>>)
+
+【备注】
+    - 异步更新，避免CPU-GPU同步
+    - 增长时检查 isfinite 防止 scale 溢出
+
+
+--------------------------------
+_amp_update_scale_cuda_ (scale更新API)
+来源: aten/src/ATen/native/cuda/AmpKernels.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _amp_update_scale_cuda_(
+        current_scale: Tensor[1, float],    # in-place更新
+        growth_tracker: Tensor[1, int],     # in-place更新
+        found_inf: Tensor[1, float],
+        growth_factor: double,
+        backoff_factor: double,
+        growth_interval: int64
+    ) -> Tensor[1, float]
+
+    约束:
+    - current_scale, growth_tracker, found_inf 都是 CUDA tensor
+    - 都是单元素 tensor (numel == 1)
+    - current_scale, found_inf 是 float, growth_tracker 是 int
+
+【算法】
+    amp_update_scale_cuda_kernel<<<1, 1, 0, getCurrentCUDAStream()>>>(
+        current_scale.mutable_data_ptr<float>(),
+        growth_tracker.mutable_data_ptr<int>(),
+        found_inf.const_data_ptr<float>(),
+        growth_factor,
+        backoff_factor,
+        growth_interval
+    )
+    
+    C10_CUDA_KERNEL_LAUNCH_CHECK()
+    
+    return current_scale
+
+【备注】
+    - 异步执行，维护 GPU 侧的 scale 状态
+    - 配合 GradScaler 使用，避免 CPU-GPU 同步

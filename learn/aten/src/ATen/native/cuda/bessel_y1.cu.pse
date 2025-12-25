@@ -1,0 +1,27 @@
+--------------------------------
+bessel_y1_kernel_cuda
+来源: aten/src/ATen/native/cuda/bessel_y1.cu
+--------------------------------
+
+【签名】
+    @host→device
+    bessel_y1_kernel_cuda(iterator: TensorIteratorBase)
+
+【算法】
+    # 根据编译配置选择实现方式
+    if AT_USE_JITERATOR():
+        # 使用 JIT 编译的 GPU kernel
+        jitted_gpu_kernel<bessel_y1_name, scalar_t, scalar_t, 1>(iterator, bessel_y1_string)
+    else:
+        # 使用预编译的 GPU kernel
+        gpu_kernel(iterator, λ(a: scalar_t) -> scalar_t {
+            return bessel_y1_forward(a)
+        })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - 支持 float 和 double 类型（通过 AT_DISPATCH_FLOATING_TYPES）
+    - bessel_y1_forward: 第一类贝塞尔函数 Y₁(x) 的实现，定义在 ATen/native/Math.h
+    - 通过 REGISTER_DISPATCH 注册为 special_bessel_y1_stub 的 CUDA 实现

@@ -1,0 +1,418 @@
+--------------------------------
+数学工具函数
+来源: aten/src/ATen/native/cuda/int4mm.cu
+--------------------------------
+
+【函数】
+    divDown(a: U, b: V) -> decltype(a + b)
+        用途: 向下整除
+
+    divUp(a: U, b: V) -> decltype(a + b)
+        用途: 向上整除，溢出安全
+
+    roundDown(a: U, b: V) -> decltype(a + b)
+        用途: 向下对齐到 b 的倍数
+
+    roundUp(a: U, b: V) -> decltype(a + b)
+        用途: 向上对齐到 b 的倍数
+
+    isEvenDivisor(a: U, b: V) -> bool
+        用途: 检查 a 是否是 b 的倍数且商 >= 1
+
+    pow(n: T, power: int) -> T
+        用途: constexpr 整数幂
+
+    log2(n: T, p: int = 0) -> int
+        用途: constexpr 整数 log2
+
+    isPowerOf2(v: T) -> bool
+        用途: 检查是否是 2 的幂
+
+    nextHighestPowerOf2(v: T) -> T
+        用途: 获取下一个更大的 2 的幂
+
+    nextLowestPowerOf2(v: T) -> T
+        用途: 获取下一个更小的 2 的幂
+
+    isPointerAligned(p: void*, align: int) -> bool
+        用途: 检查指针是否按 align 对齐
+
+    getAlignmentRoundUp<Align>(p: void*) -> uint32_t
+        用途: 计算对齐到下一个边界所需的增量
+
+--------------------------------
+平台检测工具
+来源: aten/src/ATen/native/cuda/int4mm.cu
+--------------------------------
+
+【函数】
+    isCDNA2orLater(index: int) -> bool
+        用途: 检查指定索引的 AMD GPU 是否为 CDNA2 及以后架构 (gfx90a, gfx942)
+        调用: at::cuda::getDeviceProperties()
+
+【依赖】
+    hipDeviceProp_t    # AMD GPU 设备属性
+
+--------------------------------
+convert_i4x8_to_bf16x2x4 (INT4 解包与反量化)
+来源: aten/src/ATen/native/cuda/int4mm.cu
+--------------------------------
+
+【签名】
+    @device
+    convert_i4x8_to_bf16x2x4(source: uint32) -> bf16x2x4
+
+【算法】
+    # 将 8 个 int4 值从一个 uint32 解包为 4 个 bf16x2
+
+    # Step 1: 提取 int4 并构造中间 BF16
+    # 每个 int4 通过位运算 (i4 & 0x000f000f) | 0x43004300 转为 BF16
+    for ii in range(4):
+        i4s = source >> (4 * ii)
+        h[ii] = (i4s & MASK) | I4s_TO_BF16s_MAGIC_NUM
+
+    # Step 2: 减去偏置以还原有符号 int4 的值
+    # BF16_BIAS = -136, BF16_ONE = 1.0
+    for ii in range(4):
+        result.vals[ii] = result.vals[ii] * BF16_ONE + BF16_BIAS
+
+    return result
+
+【并行模式】
+    elementwise
+
+【备注】
+    - MASK = 0x000f000f
+    - I4s_TO_BF16s_MAGIC_NUM = 0x43004300
+    - BF16_BIAS = -136 (以 BF16 表示)
+    - BF16_ONE = 1.0 (以 BF16 表示)
+    - NVIDIA 使用 lop3.b32 和 fma.rn.bf16x2 指令
+    - AMD 使用 v_and_or_b32 和 __hfma2 内建函数
+
+--------------------------------
+ALayout_RM (A 矩阵行主序布局)
+来源: aten/src/ATen/native/cuda/int4mm.cu
+--------------------------------
+
+【常量】
+    kMTileSize = 16
+    kNTileSize = 8 (NVIDIA) / 16 (AMD)
+    kKTileSize = 16
+
+【接口】
+    load<KTilesToLoad>(
+        A: const void*,
+        m: int32, k: int32,
+        mTiles: int32, mTile: int32,
+        kTiles: int32, kTileStart: int32,
+        laneId: int32,
+        out: bf16x2x4_u32[KTilesToLoad]  // AMD: bf16x2x2_u32
+    )
+        用途: 从行主序 A 矩阵加载数据到 tensor core 格式
+        算法:
+            # NVIDIA: 每个 lane 负责 (laneId / 4) 行，(laneId % 4) * 2 列起始的 2x16 块
+            # AMD: 每个 lane 负责 (laneId % 16) 行，(laneId / 16) * 4 列起始的 1x4 块
+            
+            for i in range(KTilesToLoad):
+                加载 k 维度上的第 i 个 tile
+                越界时填充 0
+
+    store(
+        C: void*,
+        m: int32, n: int32,
+        mOutTiles: int32, mTile: int32,
+        nOutTiles: int32, nTile: int32,
+        laneId: int32,
+        out: float4
+    )
+        用途: 将计算结果存回行主序 C 矩阵
+        算法:
+            # NVIDIA: 
+            #   out.x/y 写入 [laneId / 4][(laneId % 4) * 2 : (laneId % 4) * 2 + 2]
+            #   out.z/w 写入 [8 + laneId / 4][(laneId % 4) * 2 : (laneId % 4) * 2 + 2]
+            # AMD:
+            #   out.x/y/z/w 分别写入 [laneId / 16 + {0,1,2,3}][laneId % 16]
+            
+            转换 float -> bf16
+            越界检查后写入
+
+--------------------------------
+BLayout_TC_int4 (INT4 量化 B 矩阵 Tensor Core 布局)
+来源: aten/src/ATen/native/cuda/int4mm.cu
+--------------------------------
+
+【常量】
+    kInnerKTiles: 2/4/8
+    kMTileSize = 16
+    kNTileSize = 8 (NVIDIA) / 16 (AMD)
+    kKTileSize = 16
+
+【接口】
+    load<KTilesToLoad>(
+        B: const void*,              # [n/8][k/(InnerKTiles*16)][32][InnerKTiles/2]
+        quantizationInfo: const void*, # [k/qGroupSize][n][2]
+        n: int32, k: int32,
+        nTiles: int32, nTile: int32,
+        kTiles: int32, kTileStart: int32,
+        laneId: int32,
+        out: bf16x2x4_u32[KTilesToLoad/InnerKTiles][InnerKTiles/2]
+    )
+        用途: 从 INT4 量化 B 矩阵加载并反量化
+        算法:
+            # Step 1: 加载 INT4 packed 数据
+            for i in range(KTilesToLoad / InnerKTiles):
+                bPtr = B[nTile][kTileStart/InnerKTiles + i][laneId][0]
+                根据 InnerKTiles 加载 1/2/4 个 int32
+
+            # Step 2: 加载量化参数 (scale, zero)
+            laneN = nTile * kNTileSize + lane 的 n 维度偏移
+            groupStart = (kTileStart * kKTileSize) / QGroupSize
+            for i in range(kNumQGroups):
+                qScaleAndZero[i] = quantizationInfo[groupStart + i][laneN]
+
+            # Step 3: 反量化
+            for i, j in 遍历所有 tile:
+                v = convert_i4x8_to_bf16x2x4(b_int4[i][j])
+                curQGroup = (curKTile * kKTileSize) / QGroupSize
+                for k in range(4):
+                    v.vals[k] = v.vals[k] * qScale[curQGroup] + qZero[curQGroup]
+                memcpy(&out[i][j], &v)
+
+【备注】
+    - QGroupSize: 32/64/128/256，每组共享一对 (scale, zero)
+    - 反量化公式: bf16_val = (int4_val * scale) + zero
+    - InnerKTiles 决定加载粒度: 2->4 字节, 4->8 字节, 8->16 字节
+
+--------------------------------
+tinygemm_m16n8k16_chunk_kernel (INT4 量化 GEMM Kernel)
+来源: aten/src/ATen/native/cuda/int4mm.cu
+--------------------------------
+
+【签名】
+    @device
+    tinygemm_m16n8k16_chunk_kernel<ALayout, BLayout, CLayout, Warps, KTilesPerIteration>(
+        A: const void*,
+        B: const void*,
+        B_quantizationInfo: const void*,
+        C: void*,
+        m: int32, n: int32, k: int32,
+        mTiles: int32, nTiles: int32, kTiles: int32
+    )
+
+【算法】
+    warpId = threadIdx.y
+    laneId = threadIdx.x
+    mTile = blockIdx.z
+    nTile = blockIdx.y
+
+    c = float4{0, 0, 0, 0}
+
+    # Phase 1: 处理完整的 KTilesPerIteration 倍数
+    kTilesLimit = roundDown(kTiles, KTilesPerIteration)
+    for kTileBase in range(0, kTilesLimit, Warps * KTilesPerIteration):
+        kTileBase += (blockIdx.x * Warps + warpId) * KTilesPerIteration
+
+        # 加载 A 和 B
+        ALayout::load<KTilesPerIteration>(..., a)
+        BLayout::load<KTilesPerIteration>(..., b)
+
+        # Tensor Core MMA
+        for i in range(KTilesPerIteration / kInnerKTiles):
+            for j in range(kInnerKTiles / 2):
+                cTmp[0] = cTmp[1] = float4{0, 0, 0, 0}
+
+                for k in range(2):
+                    # NVIDIA: mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32
+                    # AMD: __builtin_amdgcn_mfma_f32_16x16x16bf16_1k
+                    cTmp[k] = MMA(a[...], b[...], cTmp[k])
+
+                c += cTmp[0] + cTmp[1]
+
+    # Phase 2: 处理剩余 k-tiles (< KTilesPerIteration)
+    kTileBaseRemaining = kTilesLimit + warpId * kInnerKTiles
+    if kTileBaseRemaining < kTiles:
+        ALayout::load<kInnerKTiles>(..., a)
+        BLayout::load<kInnerKTiles>(..., b)
+
+        for j in range(kInnerKTiles / 2):
+            cTmp[0] = cTmp[1] = float4{0, 0, 0, 0}
+            for k in range(2):
+                cTmp[k] = MMA(a[...], b[...], cTmp[k])
+            c += cTmp[0] + cTmp[1]
+
+    # Phase 3: Warp 间归约
+    __shared__ smem_sum[Warps][kWarpSize]
+    smem_sum[warpId][laneId] = c
+    __syncthreads()
+
+    if warpId == 0:
+        sum_f32 = float4{0, 0, 0, 0}
+        for i in range(Warps):
+            sum_f32 += smem_sum[i][laneId]
+        CLayout::store(C, ..., sum_f32)
+
+【并行模式】
+    grid: (postKernelKTiles, nTiles, mTiles)
+    block: (kWarpSize, Warps)
+
+    - 每个 block 处理一个 (mTile, nTile) 对应的输出块
+    - Warps 个 warp 沿 k 维度分块处理后归约
+
+【备注】
+    - NVIDIA: m16n8k16 (M=16, N=8, K=16)
+    - AMD: m16n16k16 (M=16, N=16, K=16)，仅支持 CDNA2+
+    - 使用 shared memory 做 warp 间归约
+
+--------------------------------
+launch_tinygemm_kernel (Kernel 启动器)
+来源: aten/src/ATen/native/cuda/int4mm.cu
+--------------------------------
+
+【函数】
+    launch_tinygemm_kernel<ALayout, BLayout, CLayout, Warps, KTilesPerWarp>(
+        A: Tensor,
+        B: Tensor,
+        qScaleAndZeros: Tensor*,
+        C_final: Tensor,
+        mTiles: int32, nTiles: int32, kTiles: int32,
+        m: int32, n: int32, k: int32,
+        stream: cudaStream_t
+    )
+        用途: 配置并启动 tinygemm kernel
+        算法:
+            grid = dim3(1, nTiles, mTiles)
+            block = dim3(kWarpSize, Warps)
+
+            tinygemm_m16n8k16_chunk_kernel<...><<<grid, block, 0, stream>>>(
+                A.data_ptr(), B.data_ptr(), qScaleAndZeros->data_ptr(),
+                C_final.data_ptr(), m, n, k, mTiles, nTiles, kTiles
+            )
+
+            C10_CUDA_KERNEL_LAUNCH_CHECK()
+            cudaFuncGetAttributes(&funcAttr, func)
+
+--------------------------------
+matrix_to_m16n8k16_Bint4_layout (权重转换 Kernel)
+来源: aten/src/ATen/native/cuda/int4mm.cu
+--------------------------------
+
+【签名】
+    @device
+    matrix_to_m16n8k16_Bint4_layout<InnerKTiles>(
+        in: Tensor[n, k/2, uint8],
+        out: Tensor[ceil(n/8), ceil(k/(InnerKTiles*16)), 32, InnerKTiles/2, int32]
+    )
+
+【算法】
+    kOuterTile = blockIdx.x
+    nTile = blockIdx.y
+    t = threadIdx.x
+
+    for innerKTile in range(0, InnerKTiles, 2):
+        # NVIDIA: n0 = nTile * 8 + t / 4
+        # AMD: n0 = nTile * 16 + t % 16
+        n0 = ...
+
+        # 计算 k 索引（4 个 uint8）
+        ks[0:4] = ...
+
+        # 加载 4 个 uint8，越界填充 0
+        for i in range(4):
+            v[i] = in[n0][ks[i]] if 有效 else 0
+
+        # 打包为 int32
+        # 布局: v[3]L | v[2]L | v[1]L | v[0]L | v[3]H | v[2]H | v[1]H | v[0]H
+        pack = ((v[3] & 0xF) << 28) | ((v[2] & 0xF) << 24) | ... | ((v[0] & 0xF0) >> 4)
+
+        out[nTile][kOuterTile][t][innerKTile / 2] = pack
+
+【并行模式】
+    grid: (kSuperTiles, nTiles)
+    block: kWarpSize
+
+    每个线程处理 InnerKTiles / 2 个 int32 输出
+
+【备注】
+    - AMD 需要特殊指针计算以匹配 n/16 的布局
+    - INT4 存储为 uint8，每个 uint8 包含 2 个 INT4 值
+
+--------------------------------
+_weight_int4pack_mm_cuda (INT4 量化矩阵乘法)
+来源: aten/src/ATen/native/cuda/int4mm.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _weight_int4pack_mm_cuda(
+        A: Tensor[m, k, bf16],
+        B: Tensor[n/8, k/(InnerKTiles*16), 32, InnerKTiles/2, int32],
+        qGroupSize: int64,
+        qScaleAndZeros: Tensor[k/qGroupSize, n, 2, bf16]
+    ) -> Tensor[m, n, bf16]
+
+    约束:
+    - A.device == B.device == qScaleAndZeros.device
+    - A 行主序连续
+    - B 特殊 tensor core 布局
+    - qGroupSize in {32, 64, 128, 256}
+    - InnerKTiles in {2, 4, 8}
+
+【算法】
+    # 计算 tile 数量
+    mTiles = divUp(m, 16)
+    nTiles = B.size(0)
+    kTiles = divUp(k, 16)
+    B_innerKTiles = B.size(3) * 2
+
+    # 分配输出
+    C_final = empty([m, n], dtype=bf16)
+
+    # 根据 qGroupSize 和 InnerKTiles 分发 kernel
+    switch (qGroupSize, B_innerKTiles):
+        case (32, 2): launch_tinygemm_kernel<..., BLayout_TC_int4<2, 32>, ..., 8, 8>(...)
+        case (64, 4): launch_tinygemm_kernel<..., BLayout_TC_int4<4, 64>, ..., 8, 8>(...)
+        case (128, 8): launch_tinygemm_kernel<..., BLayout_TC_int4<8, 128>, ..., 8, 8>(...)
+        ...
+
+    return C_final
+
+【备注】
+    - AMD 需检查 isCDNA2orLater
+    - 固定使用 8 个 warp，每个 warp 处理 8 个 k-tiles
+
+--------------------------------
+_convert_weight_to_int4pack_cuda (权重转换)
+来源: aten/src/ATen/native/cuda/int4mm.cu
+--------------------------------
+
+【签名】
+    @host→device
+    _convert_weight_to_int4pack_cuda(
+        in: Tensor[n, k/2, uint8],
+        innerKTiles: int64
+    ) -> Tensor[n/8, k/(innerKTiles*16), 32, innerKTiles/2, int32]
+
+    约束:
+    - in 连续
+    - innerKTiles in {2, 4, 8}
+    - k/2 是 innerKTiles * 16 的倍数
+
+【算法】
+    nTiles = divUp(n, 8)
+    kSuperTiles = divUp(k * 2, innerKTiles * 16)
+
+    out = empty([n/8, kSuperTiles, 32, innerKTiles/2], dtype=int32)
+
+    grid = dim3(kSuperTiles, nTiles)
+    block = kWarpSize
+
+    switch innerKTiles:
+        case 2: matrix_to_m16n8k16_Bint4_layout<2><<<grid, block, 0, stream>>>(in, out)
+        case 4: matrix_to_m16n8k16_Bint4_layout<4><<<grid, block, 0, stream>>>(in, out)
+        case 8: matrix_to_m16n8k16_Bint4_layout<8><<<grid, block, 0, stream>>>(in, out)
+
+    return out
+
+【备注】
+    - AMD 需检查 isCDNA2orLater
+    - 输出形状固定为 n/8 以匹配 GPT-FAST 规范

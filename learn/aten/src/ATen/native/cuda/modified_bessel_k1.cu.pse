@@ -1,0 +1,33 @@
+--------------------------------
+modified_bessel_k1_kernel_cuda
+来源: aten/src/ATen/native/cuda/modified_bessel_k1.cu
+--------------------------------
+
+【签名】
+    @host→device
+    modified_bessel_k1_kernel_cuda(iterator: TensorIteratorBase)
+
+【算法】
+    if AT_USE_JITERATOR:
+        # JIT编译方式：运行时生成kernel
+        AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), [&]() {
+            jitted_gpu_kernel<modified_bessel_k1_name, scalar_t, scalar_t, 1>(
+                iterator, 
+                modified_bessel_k1_string
+            )
+        })
+    else:
+        # 预编译方式：直接调用设备函数
+        AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), [&]() {
+            gpu_kernel(iterator, [](a: scalar_t) -> scalar_t {
+                return modified_bessel_k1_forward(a)
+            })
+        })
+
+【并行模式】
+    elementwise
+
+【备注】
+    - modified_bessel_k1_forward: 第一类修正贝塞尔函数 K₁ 的实际计算，定义在 Math.cuh 或 jit_utils.h
+    - 注册为 special_modified_bessel_k1_stub 的 CUDA 实现
+    - JIT模式使用字符串模板 modified_bessel_k1_string 在运行时编译

@@ -1,0 +1,11 @@
+- **文件位置**: `aten/src/ATen/core/CheckMemoryFormat.h`
+- **命名空间**: `c10::impl`
+- **主要函数**: `check_tensor_options_and_extract_memory_format()`
+- **功能目的**: 检查并提取张量的内存格式配置
+- **具体逻辑**:
+  - 验证 `TensorOptions` 中 `requires_grad` 未设置为 true（该功能尚未实现）
+  - 检查内存格式不能同时在 `TensorOptions` 和显式参数中设置
+  - 优先返回显式传入的 `memory_format` 参数
+  - 若无显式参数，则返回 `TensorOptions` 中的内存格式配置
+- **依赖**: `c10/core/TensorOptions.h`
+- **用途**: 作为工具函数供 ATen 操作符使用，确保内存格式配置的一致性和合法性
