@@ -1,0 +1,49 @@
+--------------------------------
+UndefinedTensorImpl (未定义张量实现)
+来源: c10/core/UndefinedTensorImpl.cpp, c10/core/UndefinedTensorImpl.h
+--------------------------------
+
+【状态】
+    继承自: TensorImpl
+    dispatch_key: DispatchKey::Undefined
+    storage_: nullptr (永远不设置)
+    sizes_strides_policy: CustomStrides
+
+【接口】
+    singleton() -> TensorImpl*
+        用途: 获取全局单例实例
+        平台: Windows 使用 getInstance()，其他平台使用 constexpr _singleton
+
+    is_contiguous_custom(format: MemoryFormat) -> bool
+        用途: 检查连续性，委托给 is_contiguous_default()
+
+    strides_custom() -> IntArrayRef
+        用途: 获取步长，抛出错误 "strides() called on an undefined Tensor"
+
+    sym_strides_custom() -> SymIntArrayRef
+        用途: 获取符号步长，抛出错误 "sym_strides() called on an undefined Tensor"
+
+    set_storage_offset(offset: int64)
+        用途: 设置存储偏移，抛出错误 "set_storage_offset() called on an undefined Tensor"
+
+    tensorimpl_type_name() -> const char*
+        用途: 返回类型名称 "UndefinedTensorImpl"
+
+    has_storage() -> bool (仅 DEBUG 模式)
+        用途: 检查是否有存储，断言 storage_ 永远为空，返回 false
+
+【构造】
+    UndefinedTensorImpl()
+        初始化: TensorImpl(DispatchKey::Undefined, caffe2::TypeMeta(), nullopt)
+        设置: set_storage_access_should_throw()
+        设置: set_custom_sizes_strides(SizesStridesPolicy::CustomStrides)
+
+【平台特定】
+    Windows: 使用 getInstance() 返回静态局部变量
+    其他平台: 使用 constexpr 静态成员 _singleton
+
+【备注】
+    - 用于表示未定义/未初始化的张量
+    - 访问存储会抛出异常
+    - 访问步长会抛出错误
+    - sizes 访问不会报错（TODO 注释指出这不合理但保持现状）

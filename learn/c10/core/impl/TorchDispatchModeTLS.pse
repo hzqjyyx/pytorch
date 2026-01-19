@@ -1,0 +1,163 @@
+--------------------------------
+TorchDispatchModeTLS (Torch调度模式线程局部存储)
+来源: c10/core/impl/TorchDispatchModeTLS.h, c10/core/impl/TorchDispatchModeTLS.cpp
+--------------------------------
+
+【状态】
+    stack_: vector<shared_ptr<PyObject_TorchDispatchMode>>
+        # 用户模式栈，支持多个ProxyTorchDispatchMode
+
+    infra_modes_: array<optional<shared_ptr<PyObject_TorchDispatchMode>>, NUM_MODE_KEYS>
+        # 基础设施模式数组，每种模式最多一个实例
+        # 索引对应: FAKE=0, PROXY=1, FUNCTIONAL=2
+
+【接口】
+    any_modes_set(skip_infra_modes: bool = false) -> bool
+        用途: 检查是否有任何模式被激活
+        逻辑:
+            if stack_ 非空: return true
+            if not skip_infra_modes:
+                for i in range(NUM_MODE_KEYS):
+                    if infra_modes_[i] != nullopt: return true
+            return false
+
+    push_non_infra_mode_onto_stack(mode: shared_ptr<PyObject_TorchDispatchMode>)
+        用途: 将用户模式压入栈（不能是基础设施模式）
+        逻辑:
+            if not any_modes_set():
+                tls_set_dispatch_key_included(DispatchKey::Python, true)
+                tls_set_dispatch_key_included(DispatchKey::PythonTLSSnapshot, true)
+            stack_.push_back(mode)
+
+    pop_stack() -> shared_ptr<PyObject_TorchDispatchMode>
+        用途: 弹出栈顶模式，优先弹出用户模式
+        逻辑:
+            if stack_ 非空:
+                out = stack_.back()
+                stack_.pop_back()
+            else:
+                # 从高优先级到低优先级遍历基础设施模式
+                for i in range(NUM_MODE_KEYS-1, -1, -1):
+                    if infra_modes_[i].has_value():
+                        out = infra_modes_[i].value()
+                        infra_modes_[i] = nullopt
+                        break
+            
+            assert out != null, "trying to pop from empty mode stack"
+            
+            if not any_modes_set():
+                tls_set_dispatch_key_included(DispatchKey::Python, false)
+                tls_set_dispatch_key_included(DispatchKey::PythonTLSSnapshot, false)
+            
+            return out
+
+    pop_highest_infra_mode() -> tuple<shared_ptr<PyObject_TorchDispatchMode>, TorchDispatchModeKey>
+        用途: 弹出最高优先级的基础设施模式及其键
+        逻辑:
+            for i in range(NUM_MODE_KEYS-1, -1, -1):
+                if infra_modes_[i].has_value():
+                    out_mode = infra_modes_[i].value()
+                    infra_modes_[i] = nullopt
+                    
+                    if not any_modes_set():
+                        tls_set_dispatch_key_included(DispatchKey::Python, false)
+                        tls_set_dispatch_key_included(DispatchKey::PythonTLSSnapshot, false)
+                    
+                    return (out_mode, TorchDispatchModeKey(i))
+            
+            assert false, "Called pop_highest_infra_mode, but no infra modes were active."
+
+    get_stack_at(idx: int64) -> shared_ptr<PyObject_TorchDispatchMode>&
+        用途: 获取逻辑栈中指定索引的模式（0=栈底）
+        逻辑:
+            # 逻辑栈 = [infra_modes低到高] + [stack_]
+            curr_idx = idx
+            
+            # 先遍历基础设施模式（低优先级到高优先级）
+            for i in range(NUM_MODE_KEYS):
+                if infra_modes_[i].has_value():
+                    if curr_idx == 0:
+                        return infra_modes_[i].value()
+                    curr_idx -= 1
+            
+            # 再访问用户模式栈
+            return stack_[curr_idx]
+
+    stack_len() -> int64
+        用途: 返回逻辑栈长度
+        逻辑:
+            stack_len = stack_.size()
+            infra_modes_len = count(infra_modes_, lambda x: x != nullopt)
+            return stack_len + infra_modes_len
+
+    get_mode(mode_key: TorchDispatchModeKey) -> optional<shared_ptr<PyObject_TorchDispatchMode>>
+        用途: 获取指定基础设施模式
+        逻辑:
+            return infra_modes_[mode_key]
+
+    set_mode(mode: shared_ptr<PyObject_TorchDispatchMode>, mode_key: TorchDispatchModeKey)
+        用途: 设置指定基础设施模式
+        逻辑:
+            assert infra_modes_[mode_key] == nullopt, 
+                   "trying to set the current {mode_key}, but one already exists"
+            
+            if not any_modes_set():
+                tls_set_dispatch_key_included(DispatchKey::Python, true)
+                tls_set_dispatch_key_included(DispatchKey::PythonTLSSnapshot, true)
+            
+            infra_modes_[mode_key] = mode
+
+    unset_mode(mode_key: TorchDispatchModeKey) -> optional<shared_ptr<PyObject_TorchDispatchMode>>
+        用途: 取消设置指定基础设施模式
+        逻辑:
+            out = infra_modes_[mode_key]
+            infra_modes_[mode_key] = nullopt
+            
+            if out.has_value() and not any_modes_set():
+                tls_set_dispatch_key_included(DispatchKey::Python, false)
+                tls_set_dispatch_key_included(DispatchKey::PythonTLSSnapshot, false)
+            
+            return out
+
+    get_state() -> TorchDispatchModeTLS&
+        用途: 获取当前线程的TLS状态
+        逻辑:
+            return torchDispatchModeState
+
+    set_state(state: TorchDispatchModeTLS)
+        用途: 设置当前线程的TLS状态
+        逻辑:
+            torchDispatchModeState = state
+            
+            if not any_modes_set():
+                tls_set_dispatch_key_included(DispatchKey::Python, false)
+                tls_set_dispatch_key_included(DispatchKey::PythonTLSSnapshot, false)
+            else:
+                tls_set_dispatch_key_included(DispatchKey::Python, true)
+                tls_set_dispatch_key_included(DispatchKey::PythonTLSSnapshot, true)
+
+【工具函数】
+    dispatch_mode_enabled() -> bool
+        用途: 检查调度模式是否启用
+        逻辑:
+            return not tls_is_dispatch_key_excluded(DispatchKey::Python) 
+                   and TorchDispatchModeTLS::any_modes_set()
+
+    to_string(mode_key: TorchDispatchModeKey) -> string
+        用途: 将模式键转换为字符串
+        逻辑:
+            match mode_key:
+                PROXY: return "ProxyTorchDispatchMode"
+                FAKE: return "FakeTensorMode"
+                default: return "UNKNOWN_MODE"
+
+【依赖】
+    tls_set_dispatch_key_included / tls_is_dispatch_key_excluded    # TLS调度键管理
+    c10::irange                                                      # 范围迭代器
+
+【备注】
+    - thread_local torchDispatchModeState: 每线程独立的全局实例
+    - 模式优先级: FUNCTIONAL > PROXY > FAKE (数组索引越大优先级越高)
+    - 用户模式栈优先级高于所有基础设施模式
+    - 当任何模式激活时，自动启用 DispatchKey::Python 和 PythonTLSSnapshot
+    - FakeTensorMode 只允许单实例，ProxyTorchDispatchMode 允许多实例

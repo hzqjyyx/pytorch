@@ -1,0 +1,108 @@
+--------------------------------
+VirtualGuardImpl (设备守卫虚拟分发实现)
+来源: c10/core/impl/VirtualGuardImpl.h
+--------------------------------
+
+【状态】
+    impl_: const DeviceGuardImplInterface*    # 实际的设备守卫实现指针
+
+【接口】
+    VirtualGuardImpl(device_type: DeviceType)用途: 根据设备类型构造，从注册表获取对应实现
+        调用: getDeviceGuardImpl(device_type)
+
+    VirtualGuardImpl(impl: const DeviceGuardImplInterface*)
+        用途: 直接使用给定实现构造（仅用于测试）
+
+    type() -> DeviceType
+        用途: 获取设备类型
+        调用: impl_->type()
+
+    exchangeDevice(d: Device) -> Device
+        用途: 切换当前设备，返回旧设备
+        调用: impl_->exchangeDevice(d)
+
+    getDevice() -> Device
+        用途: 获取当前设备
+        调用: impl_->getDevice()
+
+    setDevice(d: Device)
+        用途: 设置当前设备
+        调用: impl_->setDevice(d)
+
+    uncheckedSetDevice(d: Device) noexcept
+        用途: 无检查地设置当前设备（性能优化）
+        调用: impl_->uncheckedSetDevice(d)
+
+    getStream(d: Device) -> Stream
+        用途: 获取指定设备的当前流
+        调用: impl_->getStream(d)
+
+    getNewStream(d: Device, priority: int = 0) -> Stream
+        用途: 为指定设备创建新流
+        调用: impl_->getNewStream(d, priority)
+
+    getDefaultStream(d: Device) -> Stream
+        用途: 获取指定设备的默认流
+        调用: impl_->getDefaultStream(d)
+
+    getStreamFromGlobalPool(d: Device, isHighPriority: bool = false) -> Stream
+        用途: 从全局流池获取流
+        调用: impl_->getStreamFromGlobalPool(d, isHighPriority)
+
+    exchangeStream(s: Stream) -> Stream
+        用途: 切换当前流，返回旧流
+        调用: impl_->exchangeStream(s)
+
+    deviceCount() -> DeviceIndex noexcept
+        用途: 获取设备数量
+        调用: impl_->deviceCount()
+
+    record(event: void**, stream: Stream, device_index: DeviceIndex, flag: EventFlag)
+        用途: 在流上记录事件
+        调用: impl_->record(event, stream, device_index, flag)
+
+    block(event: void*, stream: Stream)
+        用途: 让流等待事件完成
+        调用: impl_->block(event, stream)
+
+    queryEvent(event: void*) -> bool
+        用途: 查询事件是否完成
+        调用: impl_->queryEvent(event)
+
+    destroyEvent(event: void*, device_index: DeviceIndex) noexcept
+        用途: 销毁事件对象
+        调用: impl_->destroyEvent(event, device_index)
+
+    queryStream(stream: Stream) -> bool
+        用途: 查询流是否完成所有操作
+        调用: impl_->queryStream(stream)
+
+    synchronizeStream(stream: Stream)
+        用途: 同步等待流完成
+        调用: impl_->synchronizeStream(stream)
+
+    recordDataPtrOnStream(data_ptr: c10::DataPtr, stream: Stream)
+        用途: 在流上记录数据指针（用于内存管理）
+        调用: impl_->recordDataPtrOnStream(data_ptr, stream)
+
+    elapsedTime(event1: void*, event2: void*, device_index: DeviceIndex) -> double
+        用途: 计算两个事件之间的时间差（毫秒）
+        调用: impl_->elapsedTime(event1, event2, device_index)
+
+    synchronizeEvent(event: void*)
+        用途: 同步等待事件完成
+        调用: impl_->synchronizeEvent(event)
+
+    synchronizeDevice(device_index: DeviceIndex)
+        用途: 同步等待设备完成所有操作
+        调用: impl_->synchronizeDevice(device_index)
+
+【依赖】
+    DeviceGuardImplInterface    # 设备守卫接口基类
+    getDeviceGuardImpl          # 设备守卫实现注册表
+
+【备注】
+    - 该类是 DeviceGuardImplInterface 的虚拟分发包装器
+    - 所有操作都委托给 impl_ 指向的实际实现
+    - 支持拷贝和移动语义
+    - 用于在运行时根据设备类型动态选择具体实现

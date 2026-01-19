@@ -1,0 +1,28 @@
+--------------------------------
+OptionalRef (可选引用包装器)
+来源: c10/core/OptionalRef.h
+--------------------------------
+
+【状态】
+    data_: const T*    # 指向被引用对象的指针，nullptr表示无值
+
+【接口】
+    OptionalRef()用途: 默认构造，创建空引用
+
+    OptionalRef(data: const T*)
+        用途: 从指针构造，要求指针非空
+
+    OptionalRef(data: const T&)
+        用途: 从引用构造
+
+    has_value() -> bool
+        用途: 检查是否持有有效引用
+
+    get() -> const T&
+        用途: 获取引用值，要求持有有效引用
+
+    operator bool() -> bool
+        用途: 隐式转换为bool，等价于has_value()
+
+【依赖】
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY    # 调试模式断言

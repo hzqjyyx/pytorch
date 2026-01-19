@@ -1,0 +1,158 @@
+--------------------------------
+SymBool (符号布尔值)
+来源: c10/core/SymBool.h, c10/core/SymBool.cpp
+--------------------------------
+
+【状态】
+    data_: bool           # 具体布尔值（非堆分配时）
+    ptr_: SymNode         # 符号节点指针（堆分配时）
+
+【接口】
+    SymBool(b: bool)
+        用途: 从具体布尔值构造
+
+    SymBool(ptr: SymNode)
+        用途: 从符号节点构造
+        调用: ptr_->is_bool()
+
+    toSymNodeImplUnowned() -> SymNodeImpl*
+        用途: 获取底层符号节点指针（不转移所有权）
+
+    toSymNodeImpl() -> SymNode
+        用途: 获取符号节点（拷贝引用计数）
+        调用: SymNode::reclaim_copy()
+
+    wrap_node(base: SymNode) -> SymNode
+        用途: 包装为符号节点，具体值时用 base 包装
+        调用: base->wrap_bool()
+
+    maybe_as_bool() -> Optional[bool]
+        用途: 尝试获取具体布尔值
+        调用: toSymNodeImplUnowned()->constant_bool()
+
+    expect_bool() -> bool
+        用途: 期望为具体值，否则报错
+
+    is_heap_allocated() -> bool
+        用途: 判断是否为符号节点（堆分配）
+
+    sym_and(other: SymBool) -> SymBool
+        用途: 符号逻辑与
+        调用: toSymNodeImpl()->sym_and()
+
+    sym_or(other: SymBool) -> SymBool
+        用途: 符号逻辑或
+        调用: toSymNodeImpl()->sym_or()
+
+    sym_not() -> SymBool
+        用途: 符号逻辑非
+        调用: toSymNodeImpl()->sym_not()
+
+    guard_bool(file: str, line: int64) -> bool
+        用途: 插入 guard 并返回具体值
+        调用: toSymNodeImpl()->guard_bool()
+
+    guard_size_oblivious(file: str, line: int64) -> bool
+        用途: 插入 size-oblivious guard
+        调用: toSymNodeImpl()->guard_size_oblivious()
+
+    expect_true(file: str, line: int64) -> bool
+        用途: 期望为真，插入 guard
+        调用: toSymNodeImpl()->expect_true()
+
+    has_hint() -> bool
+        用途: 判断是否有 hint 值
+        调用: toSymNodeImpl()->has_hint()
+
+    operator&(other: SymBool) -> SymBool
+        用途: 位与运算符重载，调用 sym_and
+
+    operator|(other: SymBool) -> SymBool
+        用途: 位或运算符重载，调用 sym_or
+
+    operator||(other: SymBool) -> SymBool
+        用途: 逻辑或运算符重载，调用 sym_or
+
+    operator~() -> SymBool
+        用途: 位非运算符重载，调用 sym_not
+
+【算法】
+    # sym_and 实现逻辑
+    sym_and(other: SymBool) -> SymBool:
+        if self.maybe_as_bool() is Some(a):
+            if other.maybe_as_bool() is Some(b):
+                return SymBool(a && b)
+            else:
+                b_node = other.toSymNodeImpl()
+                return SymBool(b_node->wrap_bool(a)->sym_and(b_node))
+        else:
+            if other.maybe_as_bool() is Some(b):
+                a_node = self.toSymNodeImplUnowned()
+                return SymBool(a_node->sym_and(a_node->wrap_bool(b)))
+            else:
+                return SymBool(self.toSymNodeImplUnowned()->sym_and(other.toSymNodeImpl()))
+
+    # sym_or 实现逻辑（同 sym_and，运算符改为 ||）
+    sym_or(other: SymBool) -> SymBool:
+        if self.maybe_as_bool() is Some(a):
+            if other.maybe_as_bool() is Some(b):
+                return SymBool(a || b)
+            else:
+                b_node = other.toSymNodeImpl()
+                return SymBool(b_node->wrap_bool(a)->sym_or(b_node))
+        else:
+            if other.maybe_as_bool() is Some(b):
+                a_node = self.toSymNodeImplUnowned()
+                return SymBool(a_node->sym_or(a_node->wrap_bool(b)))
+            else:
+                return SymBool(self.toSymNodeImplUnowned()->sym_or(other.toSymNodeImpl()))
+
+    # sym_not 实现逻辑
+    sym_not() -> SymBool:
+        if self.maybe_as_bool() is Some(a):
+            return SymBool(!a)
+        return SymBool(self.toSymNodeImpl()->sym_not())
+
+    # guard_bool 实现逻辑
+    guard_bool(file: str, line: int64) -> bool:
+        if self.maybe_as_bool() is Some(a):
+            return a
+        return self.toSymNodeImpl()->guard_bool(file, line)
+
+    # guard_size_oblivious 实现逻辑
+    guard_size_oblivious(file: str, line: int64) -> bool:
+        if self.maybe_as_bool() is Some(a):
+            return a
+        return self.toSymNodeImpl()->guard_size_oblivious(file, line)
+
+    # expect_true 实现逻辑
+    expect_true(file: str, line: int64) -> bool:
+        if self.maybe_as_bool() is Some(a):
+            return a
+        return self.toSymNodeImpl()->expect_true(file, line)
+
+    # has_hint 实现逻辑
+    has_hint() -> bool:
+        if self.maybe_as_bool() is Some(_):
+            return true
+        return self.toSymNodeImpl()->has_hint()
+
+    # 输出流运算符
+    operator<<(os: ostream, s: SymBool) -> ostream:
+        if s.maybe_as_bool() is Some(a):
+            os << a
+        else:
+            os << s.toSymNodeImpl()->str()
+        return os
+
+【依赖】
+    SymNode / SymNodeImpl    # 符号节点基础设施
+    TORCH_CHECK              # 错误检查
+
+【备注】
+    - 设计模式: 具体值与符号值的混合表示（tagged union）
+    - 具体值时直接存储 bool，符号值时存储 SymNode 指针
+    - 二元运算时优先尝试具体值计算，否则委托给 SymNode
+    - 宏定义:
+        - TORCH_SYM_CHECK: 符号布尔值的断言宏
+        - TORCH_GUARD_SIZE_OBLIVIOUS: size-oblivious guard 宏

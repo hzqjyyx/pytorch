@@ -1,0 +1,121 @@
+--------------------------------
+Storage (存储管理)
+来源: c10/core/Storage.h, c10/core/Storage.cpp
+--------------------------------
+
+【状态】
+    storage_impl_: intrusive_ptr<StorageImpl>    # 底层存储实现的智能指针
+
+【接口】
+    Storage()
+        用途: 默认构造空存储
+
+    Storage(ptr: intrusive_ptr<StorageImpl>)
+        用途: 从 StorageImpl 智能指针构造
+
+    Storage(use_byte_size, size_bytes: SymInt, allocator: Allocator* = nullptr, resizable: bool = false)
+        参数: size_bytes=字节大小（可符号化）, allocator=内存分配器, resizable=是否可调整大小
+        用途: 分配新内存并创建存储
+        调用: make_intrusive<StorageImpl>()
+
+    Storage(use_byte_size, size_bytes: size_t, data_ptr: DataPtr, allocator: Allocator* = nullptr, resizable: bool = false)
+        参数: size_bytes=字节大小, data_ptr=预分配内存, allocator=分配器, resizable=是否可调整大小
+        用途: 从已有内存创建存储
+
+    create_legacy(device: Device) -> Storage
+        用途: 创建遗留的部分初始化存储（Caffe2 API兼容）
+        调用: GetAllocator(device.type()), allocator->allocate(0)
+
+    reset_legacy()
+        用途: 重置为遗留状态（0字节，重新分配）
+        调用: allocator()->allocate(0)
+
+    set_nbytes(size_bytes: size_t | SymInt)
+        用途: 设置存储字节大小
+
+    nbytes() -> size_t
+        用途: 获取存储字节大小
+
+    sym_nbytes() -> SymInt
+        用途: 获取符号化字节大小
+
+    resizable() -> bool
+        用途: 查询是否可调整大小
+
+    data() -> const void*
+        用途: 获取只读数据指针
+
+    mutable_data() -> void*
+        用途: 获取可写数据指针
+
+    data_ptr() -> const DataPtr&
+        用途: 获取数据指针包装器（只读）
+
+    mutable_data_ptr() -> DataPtr&
+        用途: 获取数据指针包装器（可写）
+
+    set_data_ptr(data_ptr: DataPtr) -> DataPtr
+        用途: 替换数据指针，返回旧指针
+
+    set_data_ptr_noswap(data_ptr: DataPtr)
+        用途: 替换数据指针，不返回旧指针
+
+    device_type() -> DeviceType
+        用途: 获取设备类型（CPU/CUDA等）
+
+    device() -> Device
+        用途: 获取完整设备信息
+
+    allocator() -> Allocator*
+        用途: 获取内存分配器
+
+    use_count() -> size_t
+        用途: 获取引用计数
+
+    unique() -> bool
+        用途: 检查是否唯一引用
+
+    is_alias_of(other: Storage) -> bool
+        用途: 检查是否与另一存储共享内存
+        调用: isSharedStorageAlias(*this, other)
+
+    UniqueStorageShareExternalPointer(src: void*, capacity: size_t, d: DeleterFnPtr = nullptr)
+        参数: src=外部指针, capacity=容量, d=删除器
+        用途: 共享外部指针（仅当 use_count == 1）
+        调用: storage_impl_->UniqueStorageShareExternalPointer()
+
+    UniqueStorageShareExternalPointer(data_ptr: DataPtr, capacity: size_t)
+        用途: 共享外部 DataPtr（仅当 use_count == 1）
+
+    unsafeReleaseStorageImpl() -> StorageImpl*
+        用途: 释放所有权并返回裸指针
+
+    unsafeGetStorageImpl() -> StorageImpl*
+        用途: 获取裸指针但保留所有权
+
+    getWeakStorageImpl() -> weak_intrusive_ptr<StorageImpl>
+        用途: 获取弱引用指针
+
+【函数】
+    isSharedStorageAlias(storage0: Storage, storage1: Storage) -> bool
+        用途: 检查两个存储是否通过 refcounted_deleter 共享同一内存上下文
+        算法:
+            deleter0 = storage0.data_ptr().get_deleter()
+            deleter1 = storage1.data_ptr().get_deleter()
+            
+            if deleter0 != refcounted_deleter or deleter1 != refcounted_deleter:
+                return false
+            
+            return storage0.data_ptr().get_context() == storage1.data_ptr().get_context()
+
+【依赖】
+    StorageImpl                      # 底层存储实现intrusive_ptr / weak_intrusive_ptr    # 智能指针
+    DataPtr                          # 数据指针包装器
+    Allocator / GetAllocator         # 内存分配器
+    refcounted_deleter               # 引用计数删除器
+
+【备注】
+    - Storage 是 StorageImpl 的轻量级包装，使用侵入式智能指针管理生命周期
+    - MaybeOwnedTraits: 支持借用语义（unsafe_borrow_t），通过 reclaim() 创建 +0 引用
+    - ExclusivelyOwnedTraits: 支持独占所有权语义
+    - 遗留 API (create_legacy/reset_legacy): 为 Caffe2 兼容性保留

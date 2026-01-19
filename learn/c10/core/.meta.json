@@ -1,0 +1,678 @@
+{
+  "version": 1,
+  "units": {
+    "SymIntArrayRef": {
+      "type": "group",
+      "hashes": {
+        "SymIntArrayRef.cpp": "65fc1228a653e3db",
+        "SymIntArrayRef.h": "254d708fc673b194"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "RefcountedDeleter": {
+      "type": "group",
+      "hashes": {
+        "RefcountedDeleter.cpp": "11fbd199408c6b91",
+        "RefcountedDeleter.h": "9bd8f824225e2c5e"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "DispatchKey": {
+      "type": "group",
+      "hashes": {
+        "DispatchKey.cpp": "d325ff9141084b19",
+        "DispatchKey.h": "5b2a18494d47b656"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "SymFloat": {
+      "type": "group",
+      "hashes": {
+        "SymFloat.cpp": "da8f3240fbb05fce",
+        "SymFloat.h": "9336afa7d6a1b90e"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "TensorOptions": {
+      "type": "group",
+      "hashes": {
+        "TensorOptions.cpp": "793b174e54b4c285",
+        "TensorOptions.h": "6deb24d4d518efae"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "GradMode": {
+      "type": "group",
+      "hashes": {
+        "GradMode.cpp": "e2bdb47b154aad32",
+        "GradMode.h": "f1b2e858b2d6754b"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "AutogradState": {
+      "type": "group",
+      "hashes": {
+        "AutogradState.cpp": "0c3ce40558a5b502",
+        "AutogradState.h": "9a197baa3657cb94"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "Device": {
+      "type": "group",
+      "hashes": {
+        "Device.cpp": "4a54a416062147b3",
+        "Device.h": "8d4fddb6b361ae13"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "GeneratorImpl": {
+      "type": "group",
+      "hashes": {
+        "GeneratorImpl.cpp": "5b577980be44bde9",
+        "GeneratorImpl.h": "aa92c724dc7bc4e3"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "InferenceMode": {
+      "type": "group",
+      "hashes": {
+        "InferenceMode.cpp": "0804d6e46b5a2978",
+        "InferenceMode.h": "c3eeb067ef7848af"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "CPUAllocator": {
+      "type": "group",
+      "hashes": {
+        "CPUAllocator.cpp": "6ef376d6e5d108ef",
+        "CPUAllocator.h": "714c17e13a79842d"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "DefaultDtype": {
+      "type": "group",
+      "hashes": {
+        "DefaultDtype.cpp": "97a78d18e5bba4e1",
+        "DefaultDtype.h": "8c0f1d9d12dd9f86"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "Scalar": {
+      "type": "group",
+      "hashes": {
+        "Scalar.cpp": "ae36f6bde73173ca",
+        "Scalar.h": "a9005fa8a1b43a3e"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "SymInt": {
+      "type": "group",
+      "hashes": {
+        "SymInt.cpp": "8422c057500931c3",
+        "SymInt.h": "6b8eee0c006e5c70"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "SafePyObject": {
+      "type": "group",
+      "hashes": {
+        "SafePyObject.cpp": "97e478a660253a19",
+        "SafePyObject.h": "8105c1f7a7db770e"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "ConstantSymNodeImpl": {
+      "type": "group",
+      "hashes": {
+        "ConstantSymNodeImpl.cpp": "c62c59b2e8289f10",
+        "ConstantSymNodeImpl.h": "c05beabd504bb5fb"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "StorageImpl": {
+      "type": "group",
+      "hashes": {
+        "StorageImpl.cpp": "e4236ef8e73725e0",
+        "StorageImpl.h": "7588384601828b30"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "Stream": {
+      "type": "group",
+      "hashes": {
+        "Stream.cpp": "05331f4034c654ef",
+        "Stream.h": "66c40e3d6ef0a19e"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "Storage": {
+      "type": "group",
+      "hashes": {
+        "Storage.cpp": "fee1fb620ccad0f2",
+        "Storage.h": "83dc34047b590c23"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "UndefinedTensorImpl": {
+      "type": "group",
+      "hashes": {
+        "UndefinedTensorImpl.cpp": "78b74f7f3203ae16",
+        "UndefinedTensorImpl.h": "083983e3e3dbedcd"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "WrapDimMinimal": {
+      "type": "group",
+      "hashes": {
+        "WrapDimMinimal.cpp": "a9e017f11d7c37cb",
+        "WrapDimMinimal.h": "05946d25f50b1e9e"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "CopyBytes": {
+      "type": "group",
+      "hashes": {
+        "CopyBytes.cpp": "ab0730e7eedaaa4a",
+        "CopyBytes.h": "ed6e36d48767b76d"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "thread_pool": {
+      "type": "group",
+      "hashes": {
+        "thread_pool.cpp": "4c464b577ce68653",
+        "thread_pool.h": "1d4f5c062f23415c"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "Allocator": {
+      "type": "group",
+      "hashes": {
+        "Allocator.cpp": "b2d35a52de9d905b",
+        "Allocator.h": "787cf04477ad88ca"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "ScalarType": {
+      "type": "group",
+      "hashes": {
+        "ScalarType.cpp": "01861f1b8ded4473",
+        "ScalarType.h": "00e976bbb5732f5f"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "SymBool": {
+      "type": "group",
+      "hashes": {
+        "SymBool.cpp": "60eab52ddb5bba15",
+        "SymBool.h": "d3d8a93f5ad4d3cc"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/impl/GPUTrace": {
+      "type": "group",
+      "hashes": {
+        "impl/GPUTrace.cpp": "0599f49408fea96e",
+        "impl/GPUTrace.h": "35a1a775fa732635"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "SymbolicShapeMeta": {
+      "type": "group",
+      "hashes": {
+        "SymbolicShapeMeta.cpp": "83646cd65908cfda",
+        "SymbolicShapeMeta.h": "a09668757e26ab07"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/impl/PyObjectSlot": {
+      "type": "group",
+      "hashes": {
+        "impl/PyObjectSlot.cpp": "e96bcd45cb23caa8",
+        "impl/PyObjectSlot.h": "6b5bcf6b53441838"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/impl/alloc_cpu": {
+      "type": "group",
+      "hashes": {
+        "impl/alloc_cpu.cpp": "bd7efaf5a7ee580f",
+        "impl/alloc_cpu.h": "7e3e7865161aac86"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/impl/COWDeleter": {
+      "type": "group",
+      "hashes": {
+        "impl/COWDeleter.cpp": "881ec8d5fab066dc",
+        "impl/COWDeleter.h": "c59d6874954d9923"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/impl/DeviceGuardImplInterface": {
+      "type": "group",
+      "hashes": {
+        "impl/DeviceGuardImplInterface.cpp": "02f11e857c14277e",
+        "impl/DeviceGuardImplInterface.h": "78afa68e54e6c6d1"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/impl/TorchDispatchModeTLS": {
+      "type": "group",
+      "hashes": {
+        "impl/TorchDispatchModeTLS.cpp": "d7895b17bf45d064",
+        "impl/TorchDispatchModeTLS.h": "af305c1a883dfbb7"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/impl/SizesAndStrides": {
+      "type": "group",
+      "hashes": {
+        "impl/SizesAndStrides.cpp": "f598b686a43b1e6a",
+        "impl/SizesAndStrides.h": "ed6f3cbb266c4217"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/impl/PyInterpreter": {
+      "type": "group",
+      "hashes": {
+        "impl/PyInterpreter.cpp": "7924a7e882594b21",
+        "impl/PyInterpreter.h": "e94ae3ac083020ee"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/impl/LocalDispatchKeySet": {
+      "type": "group",
+      "hashes": {
+        "impl/LocalDispatchKeySet.cpp": "b0e59a09e40b0fe9",
+        "impl/LocalDispatchKeySet.h": "cb684549a2808998"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/README.md": {
+      "type": "file",
+      "hashes": {
+        "impl/README.md": "e7d88c8f235f311b"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "QEngine.h": {
+      "type": "file",
+      "hashes": {
+        "QEngine.h": "f94a089e04c67175"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "DefaultTensorOptions.h": {
+      "type": "file",
+      "hashes": {
+        "DefaultTensorOptions.h": "d2ed9c6f14fa4cc6"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "alignment.h": {
+      "type": "file",
+      "hashes": {
+        "alignment.h": "dfcf0ac6bcf9f426"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/README-cow.md": {
+      "type": "file",
+      "hashes": {
+        "impl/README-cow.md": "71aea8dd232919b4"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "Event.h": {
+      "type": "file",
+      "hashes": {
+        "Event.h": "3ae6980fcc2495fb"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "Backend.h": {
+      "type": "file",
+      "hashes": {
+        "Backend.h": "0f14b142c1e0b7fd"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "CompileTimeFunctionPointer.h": {
+      "type": "file",
+      "hashes": {
+        "CompileTimeFunctionPointer.h": "2c4d87bd905cb19f"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "PyHandleCache.h": {
+      "type": "file",
+      "hashes": {
+        "PyHandleCache.h": "ec66fa9a1f7c8656"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "DeviceArray.h": {
+      "type": "file",
+      "hashes": {
+        "DeviceArray.h": "2b8e0e9ebdc87484"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "QScheme.h": {
+      "type": "file",
+      "hashes": {
+        "QScheme.h": "bdca88e1ab957e46"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "DynamicCast.h": {
+      "type": "file",
+      "hashes": {
+        "DynamicCast.h": "3fac1eb4d79b79dc"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "StreamGuard.h": {
+      "type": "file",
+      "hashes": {
+        "StreamGuard.h": "9a7d27e3b25f6ec2"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "Layout.h": {
+      "type": "file",
+      "hashes": {
+        "Layout.h": "89ee556e14754911"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "DeviceGuard.h": {
+      "type": "file",
+      "hashes": {
+        "DeviceGuard.h": "4d38001023fb36d8"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "Contiguity.h": {
+      "type": "file",
+      "hashes": {
+        "Contiguity.h": "bbe7d98fc2c149e7"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "MemoryFormat.h": {
+      "type": "file",
+      "hashes": {
+        "MemoryFormat.h": "c2c3d86c77a69e1f"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "OptionalRef.h": {
+      "type": "file",
+      "hashes": {
+        "OptionalRef.h": "8568cd10318632df"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "ScalarTypeToTypeMeta.h": {
+      "type": "file",
+      "hashes": {
+        "ScalarTypeToTypeMeta.h": "f32b81ae29e23117"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "CachingDeviceAllocator.h": {
+      "type": "file",
+      "hashes": {
+        "CachingDeviceAllocator.h": "08582e4087c2c384"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/InlineStreamGuard.h": {
+      "type": "file",
+      "hashes": {
+        "impl/InlineStreamGuard.h": "aa187784abe4fc54"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/InlineDeviceGuard.h": {
+      "type": "file",
+      "hashes": {
+        "impl/InlineDeviceGuard.h": "ff20b8beb5c2ffd6"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/InlineEvent.h": {
+      "type": "file",
+      "hashes": {
+        "impl/InlineEvent.h": "8b37d64ff6230476"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/VirtualGuardImpl.h": {
+      "type": "file",
+      "hashes": {
+        "impl/VirtualGuardImpl.h": "152c11c313650e53"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/FakeGuardImpl.h": {
+      "type": "file",
+      "hashes": {
+        "impl/FakeGuardImpl.h": "1a35743941a417ba"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "SymNodeImpl": {
+      "type": "group",
+      "hashes": {
+        "SymNodeImpl.cpp": "3517aeecdecb2962",
+        "SymNodeImpl.h": "35ec38081c9f4d2a"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "DeviceType": {
+      "type": "group",
+      "hashes": {
+        "DeviceType.cpp": "cdd6253a097e4a52",
+        "DeviceType.h": "82fc99dc5dfcc805"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "DispatchKeySet": {
+      "type": "group",
+      "hashes": {
+        "DispatchKeySet.cpp": "a8844507b54e24ca",
+        "DispatchKeySet.h": "5c84a1e540714b1c"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/impl/HermeticPyObjectTLS": {
+      "type": "group",
+      "hashes": {
+        "impl/HermeticPyObjectTLS.cpp": "e0fe301da5d88a37",
+        "impl/HermeticPyObjectTLS.h": "0691beec28fe54d7"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "TensorImpl": {
+      "type": "group",
+      "hashes": {
+        "TensorImpl.cpp": "15b2b12e1b154a9b",
+        "TensorImpl.h": "3572f51698aaf199"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/impl/PythonDispatcherTLS": {
+      "type": "group",
+      "hashes": {
+        "impl/PythonDispatcherTLS.cpp": "e198824c38549994",
+        "impl/PythonDispatcherTLS.h": "caca7d99d32aee68"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "impl/impl/COW": {
+      "type": "group",
+      "hashes": {
+        "impl/COW.cpp": "b5462bf3905b3bad",
+        "impl/COW.h": "c38146c905b9de48"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "build.bzl": {
+      "type": "file",
+      "hashes": {
+        "build.bzl": "1929539b13cbf9aa"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    },
+    "BUILD.bazel": {
+      "type": "file",
+      "hashes": {
+        "BUILD.bazel": "25defa806e8b4259"
+      },
+      "tasks": {
+        "pseudocode": "done"
+      }
+    }
+  }
+}

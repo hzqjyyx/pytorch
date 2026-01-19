@@ -1,0 +1,99 @@
+--------------------------------
+DeviceGuard (RAII设备切换)
+来源: c10/core/DeviceGuard.h
+--------------------------------
+
+【状态】
+    guard_: InlineDeviceGuard<VirtualGuardImpl>    # 内部实际的设备守卫实现
+
+【接口】
+    DeviceGuard(device: Device)
+        用途: 构造时切换到指定设备，析构时恢复原设备
+        调用: InlineDeviceGuard<VirtualGuardImpl>(device)
+
+    DeviceGuard(device: Device, impl: DeviceGuardImplInterface*)
+        用途: 测试用构造函数，可指定自定义实现
+        调用: InlineDeviceGuard<VirtualGuardImpl>(device, impl)
+
+    reset_device(device: Device)
+        用途: 切换到新设备（必须与构造时设备类型一致）
+        调用: guard_.reset_device(device)
+
+    reset_device(device: Device, impl: DeviceGuardImplInterface*)
+        用途: 测试用，切换设备并指定实现
+        调用: guard_.reset_device(device, impl)
+
+    set_index(index: DeviceIndex)
+        用途: 仅切换设备索引，保持设备类型不变
+        调用: guard_.set_index(index)
+
+    original_device() -> Device
+        用途: 返回构造时的原始设备current_device() -> Device
+        用途: 返回当前设置的设备
+
+【约束】
+    - 禁止拷贝和移动（无未初始化状态，析构必须恢复设备）
+    - 无默认构造函数（必须指定设备）
+
+【备注】
+    - 析构时总是恢复到构造时的设备，即使中途调用过 reset_device
+    - 如需可选的设备守卫，使用 OptionalDeviceGuard
+
+
+--------------------------------
+OptionalDeviceGuard (可选RAII设备切换)
+来源: c10/core/DeviceGuard.h
+--------------------------------
+
+【状态】
+    guard_: InlineOptionalDeviceGuard<VirtualGuardImpl>    # 可选的设备守卫实现
+
+【接口】
+    OptionalDeviceGuard()
+        用途: 创建未初始化的守卫（不切换设备，析构时无操作）
+
+    OptionalDeviceGuard(device: Device)
+        用途: 初始化守卫并切换到指定设备
+        调用: InlineOptionalDeviceGuard<VirtualGuardImpl>(device)
+
+    OptionalDeviceGuard(device: Optional[Device])
+        用途: 如果 device 有值则初始化，否则保持未初始化
+        调用: InlineOptionalDeviceGuard<VirtualGuardImpl>(device)
+
+    OptionalDeviceGuard(device: Device, impl: DeviceGuardImplInterface*)
+        用途: 测试用构造函数
+        调用: InlineOptionalDeviceGuard<VirtualGuardImpl>(device, impl)
+
+    reset_device(device: Device)
+        用途: 初始化或重新设置设备（记录当前设备作为恢复点）
+        调用: guard_.reset_device(device)
+
+    reset_device(device: Device, impl: DeviceGuardImplInterface*)
+        用途: 测试用，设置设备并指定实现
+        调用: guard_.reset_device(device, impl)
+
+    original_device() -> Optional[Device]
+        用途: 返回初始化时的原始设备（未初始化时返回 nullopt）
+
+    current_device() -> Optional[Device]
+        用途: 返回当前设置的设备（未初始化时返回 nullopt）
+
+【约束】
+    - 禁止拷贝和移动
+    - 可以保持未初始化状态
+
+【备注】
+    - 未初始化的守卫不执行任何设备切换和恢复操作
+    - 初始化后，析构时恢复到 **初始化时** 的设备，而非构造时的设备
+    - 典型用法：循环中复用守卫，避免每次迭代都重置设备
+      ```
+      OptionalDeviceGuard g;
+      for (const auto& t : tensors) {
+          g.reset_device(t.device());  // 首次调用时初始化
+          do_something_with(t);
+      }
+      ```
+
+【依赖】
+    InlineDeviceGuard / InlineOptionalDeviceGuard    # 实际的内联实现
+    VirtualGuardImpl                # 虚拟设备守卫实现接口

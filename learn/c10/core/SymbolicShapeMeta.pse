@@ -1,0 +1,524 @@
+# SymbolicShapeMeta (符号形状元数据管理)
+
+来源: c10/core/SymbolicShapeMeta.cpp, c10/core/SymbolicShapeMeta.h
+
+---
+
+## 【状态】
+
+```
+sizes_: SymDimVector = [0]                              # 张量各维度大小
+strides_: SymDimVector = [1]                            # 张量各维度步长
+storage_offset_: SymInt = 0                             # 存储偏移量
+strides_valid_: bool = true                             # 步长是否有效（稀疏张量无步长）
+
+# 懒初始化的缓存字段（mutable，通过 mutables_ 互斥锁保护）
+numel_: SymInt = 1                                      # 元素总数
+is_contiguous_: SymBool = true                          # 是否连续
+is_channels_last_contiguous_: SymBool = false           # 是否 channels_last 连续
+is_channels_last_3d_contiguous_: SymBool = false        # 是否 channels_last_3d 连续
+is_channels_last_: SymBool = false                      # 是否 channels_last 布局
+is_channels_last_3d_: SymBool = false                   # 是否 channels_last_3d 布局
+is_non_overlapping_and_dense_: SymBool = true           # 是否非重叠且稠密
+
+# 可用性标记（原子变量，位掩码）
+available_: atomic<int> = 0
+    # 位定义:
+    # bit 0: numel_avail
+    # bit 1: is_contiguous_avail
+    # bit 2: is_channels_last_contiguous_avail
+    # bit 3: is_channels_last_3d_contiguous_avail
+    # bit 4: is_channels_last_avail
+    # bit 5: is_channels_last_3d_avail
+    # bit 6: is_non_overlapping_and_dense_avail
+
+mutables_: mutex                                        # 保护可变字段的互斥锁
+```
+
+---
+
+## 【接口】
+
+### 构造与状态管理
+
+```
+SymbolicShapeMeta(other: SymbolicShapeMeta)
+    用途: 拷贝构造，非可变字段直接拷贝，可变字段加锁拷贝
+    算法:
+        sizes_ = other.sizes_
+        strides_ = other.strides_
+        storage_offset_ = other.storage_offset_
+        strides_valid_ = other.strides_valid_
+        
+        lock(other.mutables_):
+            numel_ = other.numel_
+            is_contiguous_ = other.is_contiguous_
+            is_channels_last_contiguous_ = other.is_channels_last_contiguous_
+            is_channels_last_3d_contiguous_ = other.is_channels_last_3d_contiguous_
+            is_channels_last_ = other.is_channels_last_
+            is_channels_last_3d_ = other.is_channels_last_3d_
+            is_non_overlapping_and_dense_ = other.is_non_overlapping_and_dense_
+            available_.store(other.available_.load())
+
+refresh_numel()
+    用途: 清除 numel 缓存，重置为 1
+    算法:
+        available_.fetch_and(~numel_avail)
+        numel_ = 1
+
+refresh_contiguous()
+    用途: 清除所有连续性缓存，重置为默认值
+    算法:
+        available_.fetch_and(numel_avail)  # 只保留 numel_avail
+        is_contiguous_ = false
+        is_channels_last_contiguous_ = false
+        is_channels_last_3d_contiguous_ = false
+        is_channels_last_ = false
+        is_channels_last_3d_ = false
+        is_non_overlapping_and_dense_ = false
+
+dim() -> int64
+    用途: 返回张量维度数
+    算法: return sizes_.size()
+```
+
+### 懒初始化访问器
+
+```
+numel() -> SymInt
+    用途: 获取元素总数，首次访问时计算
+    算法:
+        if not has_numel():
+            init_numel()
+        return numel_
+
+is_contiguous() -> SymBool
+    用途: 获取连续性，首次访问时计算
+    算法:
+        if not has_is_contiguous():
+            init_is_contiguous()
+        return is_contiguous_
+
+is_channels_last_contiguous() -> SymBool
+    用途: 获取 channels_last 连续性，首次访问时计算
+    算法:
+        if not has_is_channels_last_contiguous():
+            init_is_channels_last_contiguous()
+        return is_channels_last_contiguous_
+
+is_channels_last_3d_contiguous() -> SymBool
+    用途: 获取 channels_last_3d 连续性，首次访问时计算
+    算法:
+        if not has_is_channels_last_3d_contiguous():
+            init_is_channels_last_3d_contiguous()
+        return is_channels_last_3d_contiguous_
+
+is_channels_last() -> SymBool
+    用途: 获取 channels_last 布局，首次访问时计算
+    算法:
+        if not has_is_channels_last():
+            init_is_channels_last()
+        return is_channels_last_
+
+is_channels_last_3d() -> SymBool
+    用途: 获取 channels_last_3d 布局，首次访问时计算
+    算法:
+        if not has_is_channels_last_3d():
+            init_is_channels_last_3d()
+        return is_channels_last_3d_
+
+is_non_overlapping_and_dense() -> SymBool
+    用途: 获取非重叠且稠密属性，首次访问时计算
+    算法:
+        if not has_is_non_overlapping_and_dense():
+            init_is_non_overlapping_and_dense()
+        return is_non_overlapping_and_dense_
+```
+
+### 假设接口（非 const，无需加锁）
+
+```
+assume_contiguous(val: SymBool = true)
+    用途: 直接设置连续性假设，跳过计算
+    算法:
+        is_contiguous_ = val
+        available_.fetch_or(is_contiguous_avail)
+
+assume_channels_last_contiguous(val: SymBool = true)
+    用途: 直接设置 channels_last 连续性假设
+    算法:
+        is_contiguous_ = val  # 注意：原代码有 bug，应该是 is_channels_last_contiguous_
+        available_.fetch_or(is_channels_last_contiguous_avail)
+
+assume_channels_last_3d_contiguous(val: SymBool = true)
+    用途: 直接设置 channels_last_3d 连续性假设
+    算法:
+        is_channels_last_3d_contiguous_ = val
+        available_.fetch_or(is_channels_last_3d_contiguous_avail)
+
+assume_channels_last(val: SymBool = true)
+    用途: 直接设置 channels_last 布局假设
+    算法:
+        is_channels_last_ = val
+        available_.fetch_or(is_channels_last_avail)
+
+assume_channels_last_3d(val: SymBool = true)
+    用途: 直接设置 channels_last_3d 布局假设
+    算法:
+        is_channels_last_3d_ = val
+        available_.fetch_or(is_channels_last_3d_avail)
+
+assume_non_overlapping_and_dense(val: SymBool = true)
+    用途: 直接设置非重叠且稠密假设
+    算法:
+        is_non_overlapping_and_dense_ = val
+        available_.fetch_or(is_non_overlapping_and_dense_avail)
+```
+
+---
+
+## 【私有计算函数】
+
+### 基础计算
+
+```
+compute_contiguous() -> SymBool
+    用途: 计算是否连续
+    算法:
+        if not strides_valid_:
+            return false
+        return _compute_contiguous(sizes_, strides_, numel())
+
+compute_channels_last_contiguous_2d() -> SymBool
+    用途: 计算是否 2D channels_last 连续
+    算法:
+        if not strides_valid_:
+            return false
+        return _compute_channels_last_contiguous_2d(sizes_, strides_)
+
+compute_channels_last_contiguous_3d() -> SymBool
+    用途: 计算是否 3D channels_last 连续
+    算法:
+        if not strides_valid_:
+            return false
+        return _compute_channels_last_contiguous_3d(sizes_, strides_)
+
+compute_strides_like_channels_last_2d() -> SymBool
+    用途: 计算步长是否类似 2D channels_last
+    算法:
+        if not strides_valid_:
+            return false
+        return is_channels_last_strides_2d(sizes_, strides_)
+
+compute_strides_like_channels_last_3d() -> SymBool
+    用途: 计算步长是否类似 3D channels_last
+    算法:
+        if not strides_valid_:
+            return false
+        return is_channels_last_strides_3d(sizes_, strides_)
+
+compute_non_overlapping_and_dense() -> SymBool
+    用途: 计算是否非重叠且稠密（带符号节点优化）
+    算法:
+        if not strides_valid_:
+            return false
+        
+        n = normalize_sym_sizes_strides(sizes_, strides_)
+        if n.has_value():
+            [base, size_nodes, stride_nodes] = n
+            return SymBool(base->is_non_overlapping_and_dense(size_nodes, stride_nodes))
+        else:
+            return _compute_non_overlapping_and_dense(sizes_, strides_)
+```
+
+### 维度特定的组合计算（带短路优化）
+
+```
+compute_is_non_overlapping_and_dense_dim4() -> SymBool
+    用途: 4D 张量的非重叠且稠密计算
+    算法:
+        init_is_contiguous()
+        if definitely_true(is_contiguous()):
+            return true
+        
+        init_is_channels_last_contiguous()
+        if definitely_true(is_channels_last_contiguous()):
+            return true
+        
+        return is_contiguous() | is_channels_last_contiguous() | compute_non_overlapping_and_dense()
+
+compute_channels_last_contiguous_3d_dim5() -> SymBool
+    用途: 5D 张量的 3D channels_last 连续性计算
+    算法:
+        init_is_channels_last_contiguous()
+        if definitely_true(is_channels_last_contiguous()):
+            return false
+        
+        return ~is_channels_last_contiguous() & compute_channels_last_contiguous_3d()
+
+compute_channels_last_2d_dim5() -> SymBool
+    用途: 5D 张量的 2D channels_last 布局计算
+    算法:
+        init_is_channels_last_3d_contiguous()
+        if definitely_true(is_channels_last_3d_contiguous()):
+            return false
+        
+        return ~is_channels_last_3d_contiguous() & compute_strides_like_channels_last_2d()
+
+compute_channels_last_3d_dim5() -> SymBool
+    用途: 5D 张量的 3D channels_last 布局计算
+    算法:
+        if definitely_true(is_channels_last()):
+            return false
+        
+        return ~is_channels_last() & compute_strides_like_channels_last_3d()
+
+compute_is_non_overlapping_and_dense_dim5() -> SymBool
+    用途: 5D 张量的非重叠且稠密计算
+    算法:
+        if definitely_true(is_contiguous()):
+            return true
+        if definitely_true(is_channels_last_contiguous()):
+            return true
+        if definitely_true(is_channels_last_3d_contiguous()):
+            return true
+        
+        return is_contiguous() | is_channels_last_contiguous() | 
+               is_channels_last_3d_contiguous() | compute_non_overlapping_and_dense()
+
+compute_is_non_overlapping_and_dense_anydim() -> SymBool
+    用途: 任意维度的非重叠且稠密计算
+    算法:
+        if definitely_true(is_contiguous()):
+            return true
+        
+        return is_contiguous() | compute_non_overlapping_and_dense()
+```
+
+### 初始化函数（加锁设置）
+
+```
+init_numel()
+    用途: 初始化元素总数
+    算法: set_numel(multiply_integers(sizes_))
+
+init_is_contiguous()
+    用途: 初始化连续性
+    算法: set_is_contiguous(compute_contiguous())
+
+init_is_channels_last_contiguous()
+    用途: 初始化 channels_last 连续性
+    算法:
+        match dim():
+            4 | 5:
+                set_is_channels_last_contiguous(compute_channels_last_contiguous_2d())
+            _:
+                set_is_channels_last_contiguous(false)
+
+init_is_channels_last_3d_contiguous()
+    用途: 初始化 channels_last_3d 连续性
+    算法:
+        match dim():
+            5:
+                set_is_channels_last_3d_contiguous(compute_channels_last_contiguous_3d_dim5())
+            _:
+                set_is_channels_last_3d_contiguous(false)
+
+init_is_channels_last()
+    用途: 初始化 channels_last 布局
+    算法:
+        match dim():
+            5:
+                set_is_channels_last(compute_channels_last_2d_dim5())
+            4:
+                set_is_channels_last(compute_strides_like_channels_last_2d())
+            _:
+                set_is_channels_last(false)
+
+init_is_channels_last_3d()
+    用途: 初始化 channels_last_3d 布局
+    算法:
+        match dim():
+            5:
+                set_is_channels_last_3d(compute_channels_last_3d_dim5())
+            _:
+                set_is_channels_last_3d(false)
+
+init_is_non_overlapping_and_dense()
+    用途: 初始化非重叠且稠密属性
+    算法:
+        match dim():
+            5:
+                set_is_non_overlapping_and_dense(compute_is_non_overlapping_and_dense_dim5())
+            4:
+                set_is_non_overlapping_and_dense(compute_is_non_overlapping_and_dense_dim4())
+            _:
+                set_is_non_overlapping_and_dense(compute_is_non_overlapping_and_dense_anydim())
+```
+
+### Setter 函数（加锁，仅在未设置时生效）
+
+```
+set_numel(val: SymInt)
+    用途: 设置 numel 缓存
+    算法:
+        lock(mutables_):
+            if has_numel():
+                return
+            numel_ = val
+            available_.fetch_or(numel_avail)
+
+set_is_contiguous(val: SymBool)
+    用途: 设置连续性缓存
+    算法:
+        lock(mutables_):
+            if has_is_contiguous():
+                return
+            is_contiguous_ = val
+            available_.fetch_or(is_contiguous_avail)
+
+set_is_channels_last_contiguous(val: SymBool)
+    用途: 设置 channels_last 连续性缓存
+    算法:
+        lock(mutables_):
+            if has_is_channels_last_contiguous():
+                return
+            is_channels_last_contiguous_ = val
+            available_.fetch_or(is_channels_last_contiguous_avail)
+
+set_is_channels_last_3d_contiguous(val: SymBool)
+    用途: 设置 channels_last_3d 连续性缓存
+    算法:
+        lock(mutables_):
+            if has_is_channels_last_3d_contiguous():
+                return
+            is_channels_last_3d_contiguous_ = val
+            available_.fetch_or(is_channels_last_3d_contiguous_avail)
+
+set_is_channels_last(val: SymBool)
+    用途: 设置 channels_last 布局缓存
+    算法:
+        lock(mutables_):
+            if has_is_channels_last():
+                return
+            is_channels_last_ = val
+            available_.fetch_or(is_channels_last_avail)
+
+set_is_channels_last_3d(val: SymBool)
+    用途: 设置 channels_last_3d 布局缓存
+    算法:
+        lock(mutables_):
+            if has_is_channels_last_3d():
+                return
+            is_channels_last_3d_ = val
+            available_.fetch_or(is_channels_last_3d_avail)
+
+set_is_non_overlapping_and_dense(val: SymBool)
+    用途: 设置非重叠且稠密缓存
+    算法:
+        lock(mutables_):
+            if has_is_non_overlapping_and_dense():
+                return
+            is_non_overlapping_and_dense_ = val
+            available_.fetch_or(is_non_overlapping_and_dense_avail)
+```
+
+---
+
+## 【辅助函数】
+
+```
+normalize_sym_sizes_strides(
+    sizes: SymIntArrayRef, 
+    strides: SymIntArrayRef
+) -> Optional<(SymNode, vector<SymNode>, vector<SymNode>)>
+
+    用途: 将 sizes 和 strides 规范化为 SymNode 数组，用于调用符号节点的优化方法
+    
+    算法:
+        # 寻找一个堆分配的 SymNode 作为 base
+        base = None
+        all_hinted = true
+        
+        for s in sizes:
+            if not s.has_hint():
+                all_hinted = false
+            if base is None and s.is_heap_allocated():
+                base = s.toSymNode()
+        
+        for s in strides:
+            if not s.has_hint():
+                all_hinted = false
+            if base is None and s.is_heap_allocated():
+                base = s.toSymNode()
+        
+        # 如果找不到 base 或全部都有 hint，返回 nullopt（走普通计算路径）
+        if base is None or all_hinted:
+            return nullopt
+        
+        # 将所有 SymInt 包装为 SymNode
+        size_nodes = [s.wrap_node(base) for s in sizes]
+        stride_nodes = [s.wrap_node(base) for s in strides]
+        
+        return (base, size_nodes, stride_nodes)
+```
+
+---
+
+## 【依赖】
+
+```
+multiply_integers(sizes: SymIntArrayRef) -> SymInt
+    # 计算所有维度大小的乘积
+
+_compute_contiguous(sizes, strides, numel) -> SymBool
+    # 通用连续性计算
+
+_compute_channels_last_contiguous_2d(sizes, strides) -> SymBool
+    # 2D channels_last 连续性计算
+
+_compute_channels_last_contiguous_3d(sizes, strides) -> SymBool
+    # 3D channels_last 连续性计算
+
+is_channels_last_strides_2d(sizes, strides) -> SymBool
+    # 检查步长是否符合 2D channels_last 模式
+
+is_channels_last_strides_3d(sizes, strides) -> SymBool
+    # 检查步长是否符合 3D channels_last 模式
+
+_compute_non_overlapping_and_dense(sizes, strides) -> SymBool
+    # 通用非重叠且稠密计算
+
+definitely_true(val: SymBool, file: str, line: int) -> bool
+    # 判断 SymBool 是否确定为 true
+
+SymNode->is_non_overlapping_and_dense(size_nodes, stride_nodes) -> SymNodeImpl*
+    # 符号节点的优化非重叠且稠密计算
+```
+
+---
+
+## 【备注】
+
+1. **线程安全设计**:
+   - 非可变字段（sizes_, strides_, storage_offset_, strides_valid_）可在构造后无锁访问
+   - 可变字段（numel_, is_contiguous_ 等）通过 mutables_ 互斥锁保护
+   - available_ 使用原子操作，避免锁竞争
+
+2. **懒初始化策略**:
+   - 所有派生属性（numel, is_contiguous 等）首次访问时才计算
+   - 使用位掩码 available_ 标记哪些属性已计算
+   - setter 函数检查 has_xxx() 避免重复计算
+
+3. **短路优化**:
+   - 维度特定的计算函数（如 compute_is_non_overlapping_and_dense_dim4）先检查简单条件
+   - 使用 definitely_true() 在确定为 true 时提前返回，避免复杂的符号计算
+   - 对于 SymBool，短路可能不生效，但表达式更简单有利于符号分析
+
+4. **符号计算优化**:
+   - normalize_sym_sizes_strides 尝试找到堆分配的 SymNode
+   - 如果找到，调用 SymNode 的优化方法（如 is_non_overlapping_and_dense）
+   - 如果全部是 hint 值或找不到 SymNode，走普通计算路径
+
+5. **Bug 提示**:
+   - assume_channels_last_contiguous() 中设置了错误的字段（is_contiguous_ 而非 is_channels_last_contiguous_）

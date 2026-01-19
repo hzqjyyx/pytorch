@@ -1,0 +1,26 @@
+--------------------------------
+DeviceArray (设备端数组容器)
+来源: c10/core/DeviceArray.h
+--------------------------------
+
+【状态】
+    data_ptr_: DataPtr    # 持有分配的内存，自动管理生命周期
+
+【接口】
+    DeviceArray(allocator: Allocator&, size: size_t)
+        参数: allocator=内存分配器, size=元素数量
+        用途: 分配 size * sizeof(T) 字节的设备内存
+        约束: T 必须是 trivial 类型
+        调用: allocator.allocate()
+        
+    get() -> T*
+        用途: 返回类型化的原始指针
+
+【依赖】
+    c10::Allocator::allocate    # 内存分配
+    TORCH_INTERNAL_ASSERT        # 对齐检查
+
+【备注】
+    - 编译期检查: T 必须满足 std::is_trivial_v
+    - 运行时检查: 分配的内存必须满足 alignof(T) 对齐要求
+    - 内存由 DataPtr 自动释放，无需手动管理

@@ -1,0 +1,52 @@
+--------------------------------
+Backend (设备后端枚举)
+来源: c10/core/Backend.h
+--------------------------------
+
+【概述】
+    遗留的后端枚举系统，定义设备类型与布局的组合。
+    正在被 DispatchKey 替代以支持开放注册。
+
+【枚举值】
+    Backend::CPU, CUDA, HIP, VE, FPGA, IPU, XPU, MAIA, XLA, Vulkan, Metal, Meta, MPS, HPU, Lazy, MTIA, PrivateUse1
+    Backend::SparseCPU, SparseCUDA, SparseHIP, SparseVE, SparseXPU, SparsePrivateUse1
+    Backend::SparseCsrCPU, SparseCsrCUDA, SparseCsrHIP, SparseCsrVE, SparseCsrXPU, SparseCsrPrivateUse1
+    Backend::QuantizedCPU, QuantizedCUDA, QuantizedXPU, QuantizedPrivateUse1
+    Backend::MkldnnCPU
+    Backend::Undefined, NumOptions
+
+【接口】
+    dispatchKeyToBackend(t: DispatchKey) -> Backend
+        用途: 将 DispatchKey 转换为对应的 Backend
+        逻辑: 
+            - 支持 Autograd 变体 (如 AutogradCPU -> CPU)
+            - 未识别的 key 抛出异常
+
+    backendToDispatchKey(b: Backend) -> DispatchKey
+        用途: 将 Backend 转换为对应的 DispatchKey
+        逻辑:
+            - 不处理 Autograd 变体
+            - 未知 backend 抛出异常
+
+    backendToDeviceType(b: Backend) -> DeviceType
+        用途: 提取 Backend 对应的设备类型
+        逻辑:
+            - Sparse/Quantized 变体映射到基础设备 (如 SparseCUDA -> CUDA)
+            - Undefined 抛出异常
+
+    toString(b: Backend) -> const char*
+        用途: 返回 Backend 的字符串表示
+        特例: PrivateUse1 返回 "PrivateUseOne"
+
+    isSparse(b: Backend) -> bool
+        用途: 判断是否为 COO 稀疏格式
+        范围: SparseCPU, SparseCUDA, SparseHIP, SparseVE, SparseXPU, SparsePrivateUse1
+
+    isSparseCsr(b: Backend) -> bool
+        用途: 判断是否为 CSR 稀疏格式
+        范围: SparseCsrCPU, SparseCsrCUDA, SparseCsrHIP, SparseCsrVE, SparseCsrXPU, SparseCsrPrivateUse1
+
+【备注】
+    - 该枚举不支持开放注册，新后端需修改源码
+    - DispatchKey 是推荐的替代方案
+    - Backend 不包含 dtype 信息

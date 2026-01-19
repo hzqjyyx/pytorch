@@ -1,0 +1,76 @@
+--------------------------------
+Stream (流同步抽象)
+来源: c10/core/Stream.h, c10/core/Stream.cpp
+--------------------------------
+
+【概念】
+    Stream 是跨后端的流抽象，用于异步kernel调度与同步。
+    每个 Stream 关联一个 Device，保证同一流上的kernel按序执行。
+    不同流上的kernel可并发执行。
+
+【类型定义】
+    StreamId = int64                    # 流ID，0为默认流
+    StreamData3 = {stream_id, device_index, device_type}
+
+【状态】
+    device_: Device                     # 关联设备
+    id_: StreamId                       # 流ID
+
+【构造】
+    Stream(UNSAFE, device: Device, id: StreamId)
+        用途: 不安全构造，仅后端实现使用
+
+    Stream(DEFAULT, device: Device)
+        用途: 构造设备的默认流 (id=0)
+
+【接口】
+    device() -> Device
+        用途: 获取关联设备
+
+    device_type() -> DeviceType
+        用途: 获取设备类型
+
+    device_index() -> DeviceIndex
+        用途: 获取设备索引
+
+    id() -> StreamId
+        用途: 获取流ID
+
+    wait<T>(event: T)
+        用途: 在流中插入等待指令，直到event被记录
+        调用: event.block(*this)
+
+    query() -> bool
+        用途: 查询流上所有异步工作是否完成
+        调用: impl::VirtualGuardImpl(device_type).queryStream(*this)
+
+    synchronize()
+        用途: 阻塞调用线程，直到流上所有异步工作完成
+        调用: impl::VirtualGuardImpl(device_type).synchronizeStream(*this)
+
+    hash() -> uint64
+        用途: 打包为64位整数，用于Python绑定
+        算法:
+            bits = (device_type << 56) | (device_index << 48) | (id & 0xFFFFFFFFFFFF)
+            return bits
+
+    pack3() -> StreamData3
+        用途: 打包为结构体
+
+    unpack3(stream_id, device_index, device_type) -> Stream [静态]
+        用途: 从结构体解包
+
+    operator==(other: Stream) -> bool
+        用途: 比较两个流是否相同 (device和id都相同)
+
+    operator<<(ostream, s: Stream) -> ostream
+        用途: 格式化输出 "stream {id} on device {device}"
+
+【依赖】
+    impl::VirtualGuardImpl              # 后端虚拟接口，实现query/synchronize
+    TORCH_CHECK                         # 设备类型验证
+
+【备注】
+    - 线程安全: 可跨线程传递Stream，kernel排队仍保证串行化
+    - 无默认构造: 必须显式指定设备
+    - 后端实例: cudaStream_t (CUDA), hipStream_t (HIP), cl_command_queue (OpenCL)

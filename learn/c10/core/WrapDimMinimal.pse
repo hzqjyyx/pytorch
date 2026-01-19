@@ -1,0 +1,45 @@
+--------------------------------
+维度包装工具
+来源: c10/core/WrapDimMinimal.h, c10/core/WrapDimMinimal.cpp
+--------------------------------
+
+【函数】
+    maybe_wrap_dim(dim: int64 | SymInt, dim_post_expr: int64 | SymInt, wrap_scalar: bool = true) -> int64 | SymInt
+        参数: dim=输入维度索引（可为负）, dim_post_expr=张量维度数, wrap_scalar=是否允许包装标量张量
+        用途: 将负数维度索引转换为正数索引，并进行边界检查
+        
+        算法:
+            # 快速路径：维度在有效范围内
+            if -dim_post_expr <= dim < dim_post_expr:
+                if dim < 0:
+                    return dim + dim_post_expr
+                return dim
+            
+            # 慢速路径：处理边界情况
+            return maybe_wrap_dim_slow(dim, dim_post_expr, wrap_scalar)
+
+    maybe_wrap_dim_slow(dim: int64 | SymInt, dim_post_expr: int64 | SymInt, wrap_scalar: bool) -> int64 | SymInt
+        用途: 处理维度包装的边界情况和错误检查
+        
+        算法:
+            assert dim_post_expr >= 0, "Rank cannot be negative"
+            
+            # 特殊处理：标量张量（0维）
+            if dim_post_expr == 0:
+                assert wrap_scalar, f"Dimension specified as {dim} but tensor has no dimensions"
+                return maybe_wrap_dim(dim, dim_post_expr=1, wrap_scalar=false)
+            
+            # 正常情况：计算有效范围
+            min = -dim_post_expr
+            max = dim_post_expr - 1
+            assert min <= dim <= max, f"Dimension out of range (expected [{min}, {max}], got {dim})"
+            
+            # 不应到达此处（前面的快速路径应已处理所有有效情况）
+            unreachable()
+
+【备注】
+    - 支持两种类型：int64_t（静态）和 SymInt（符号整数，用于动态形状）
+    - 快速路径内联在 maybe_wrap_dim 中，慢速路径单独编译以减少代码膨胀
+    - 对于 SymInt，条件分支会触发 guard 以支持符号执行
+    - 有效维度范围：[-dim_post_expr, dim_post_expr-1]
+    - 标量张量特殊处理：当 wrap_scalar=true 时，将其视为 1 维张量

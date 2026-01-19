@@ -1,0 +1,52 @@
+--------------------------------
+PythonDispatcherTLS (Python调度器线程局部状态)
+来源: c10/core/impl/PythonDispatcherTLS.cpp, c10/core/impl/PythonDispatcherTLS.h
+--------------------------------
+
+【状态】
+    pythonDispatcherState: thread_local PyInterpreter*    # 线程局部的Python解释器指针
+
+【接口】
+    set_state(state: PyInterpreter*)用途: 设置当前线程的Python解释器状态
+        逻辑:
+            if state != nullptr:
+                tls_set_dispatch_key_included(DispatchKey::PythonDispatcher, true)
+            else:
+                reset_state()
+            pythonDispatcherState = state
+
+    get_state() -> PyInterpreter*
+        用途: 获取当前线程的Python解释器状态
+
+    reset_state()
+        用途: 清空当前线程的Python解释器状态
+        逻辑:
+            pythonDispatcherState = nullptr
+            tls_set_dispatch_key_included(DispatchKey::PythonDispatcher, false)
+
+【依赖】
+    c10::impl::tls_set_dispatch_key_included    # 设置调度键的TLS包含状态
+
+--------------------------------
+DisablePythonDispatcher (RAII禁用Python调度器)
+来源: c10/core/impl/PythonDispatcherTLS.h
+--------------------------------
+
+【状态】
+    old_: PyInterpreter*    # 保存的旧状态
+
+【接口】
+    DisablePythonDispatcher()
+        用途: 构造时保存当前状态并禁用Python调度器
+        逻辑:
+            old_ = PythonDispatcherTLS::get_state()
+            PythonDispatcherTLS::set_state(nullptr)
+
+    ~DisablePythonDispatcher()
+        用途: 析构时恢复之前的状态
+        逻辑:
+            PythonDispatcherTLS::set_state(old_)
+
+【备注】
+    - 不可复制、不可移动的RAII类
+    - 用于临时禁用Python调度器，作用域结束后自动恢复

@@ -1,0 +1,136 @@
+--------------------------------
+alloc_cpu / free_cpu (CPU内存分配与释放)
+来源: c10/core/impl/alloc_cpu.cpp, c10/core/impl/alloc_cpu.h
+--------------------------------
+
+【函数】
+    alloc_cpu(nbytes: size_t) -> void*
+        用途: 分配对齐的CPU内存
+        
+        算法:
+            if nbytes == 0:
+                return nullptr
+            
+            assert nbytes >= 0
+            
+            # 平台特定的内存分配
+            if platform == "Android":
+                data = memalign(gAlignment, nbytes)
+            elif platform == "Windows":
+                if USE_MIMALLOC:
+                    data = mi_malloc_aligned(nbytes, gAlignment)
+                else:
+                    data = _aligned_malloc(nbytes, gAlignment)
+            else:  # POSIX系统
+                alignment = c10_compute_alignment(nbytes)
+                data = posix_memalign(alignment, nbytes)
+                
+                # Linux透明大页优化
+                if is_thp_alloc(nbytes):
+                    madvise(data, nbytes, MADV_HUGEPAGE)
+            
+            assert data != nullptr
+            
+            # NUMA优化
+            NUMAMove(data, nbytes, GetCurrentNUMANode())
+            
+            # 可选的内存初始化
+            if FLAGS_caffe2_cpu_allocator_do_zero_fill:
+                memset(data, 0, nbytes)
+            elif FLAGS_caffe2_cpu_allocator_do_junk_fill:
+                memset_junk(data, nbytes)
+            
+            return data
+
+    free_cpu(data: void*)
+        用途: 释放CPU内存
+        
+        算法:
+            if platform == "Windows":
+                if USE_MIMALLOC:
+                    mi_free(data)
+                else:
+                    _aligned_free(data)
+            else:
+                free(data)
+
+    memset_junk(data: void*, num: size_t)
+        用途: 用特定垃圾模式填充内存（用于调试）
+        
+        算法:
+            pattern64 = 0x7fedbeef7fedbeef  # NaN模式
+            
+            # 按8字节填充
+            for i in range(num / 8):
+                data[i] = pattern64
+            
+            # 填充剩余字节
+            if num % 8 > 0:
+                memcpy(data + (num/8)*8, &pattern64, num % 8)
+
+    c10_compute_alignment(nbytes: size_t) -> size_t
+        用途: 计算内存对齐大小
+        
+        算法:
+            if platform == "Linux" and is_thp_alloc_enabled():
+                pagesize = sysconf(_SC_PAGESIZE)
+                return pagesize if pagesize > 0 else gPagesize
+            else:
+                return gAlignment
+
+    is_thp_alloc(nbytes: size_t) -> bool
+        用途: 判断是否启用透明大页
+        
+        算法:
+            if platform == "Linux":
+                return is_thp_alloc_enabled() and nbytes >= gAlloc_threshold_thp
+            else:
+                return false
+
+    is_thp_alloc_enabled() -> bool
+        用途: 检查环境变量是否启用THP
+        
+        算法:
+            static value = check_env("THP_MEM_ALLOC_ENABLE")
+            return value
+
+【USE_MIMALLOC_ON_MKL 包装函数】
+    c10_mi_malloc(size: size_t) -> void*
+        用途: mimalloc分配包装
+        调用: mi_malloc(size)
+
+    c10_mi_calloc(count: size_t, size: size_t) -> void*
+        用途: mimalloc清零分配包装
+        调用: mi_calloc(count, size)
+
+    c10_mi_realloc(p: void*, newsize: size_t) -> void*
+        用途: mimalloc重分配包装
+        调用: mi_realloc(p, newsize)
+
+    c10_mi_malloc_aligned(size: size_t, alignment: size_t) -> void*
+        用途: mimalloc对齐分配包装
+        调用: mi_malloc_aligned(size, alignment)
+
+    c10_mi_free(p: void*)
+        用途: mimalloc释放包装
+        调用: mi_free(p)
+
+【依赖】
+    gAlignment                              # 默认对齐大小
+    gPagesize                               # 默认页大小
+    gAlloc_threshold_thp                    # THP阈值
+    NUMAMove                                # NUMA节点迁移
+    GetCurrentNUMANode                      # 获取当前NUMA节点
+    c10::utils::check_env                   # 环境变量检查
+    CAFFE_ENFORCE                           # 错误检查
+
+【平台特定】
+    Android: 使用 memalign
+    Windows: 使用 _aligned_malloc 或 mi_malloc_aligned
+    Linux: 使用 posix_memalign + MADV_HUGEPAGE优化
+    其他POSIX: 使用 posix_memalign
+
+【配置标志】
+    FLAGS_caffe2_cpu_allocator_do_zero_fill  # 分配时清零
+    FLAGS_caffe2_cpu_allocator_do_junk_fill  # 分配时填充垃圾值（调试用）
+    THP_MEM_ALLOC_ENABLE                     # 环境变量：启用透明大页

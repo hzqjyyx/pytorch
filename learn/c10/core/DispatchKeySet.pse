@@ -1,0 +1,487 @@
+# DispatchKeySet 伪代码
+
+## 文件概述
+来源: c10/core/DispatchKeySet.h, c10/core/DispatchKeySet.cpp
+
+DispatchKeySet 是 PyTorch 调度系统的核心数据结构，用 64 位整数表示一组 DispatchKey。它同时包含"功能位"（functionality bits，如 Dense、Sparse、Autograd）和"后端位"（backend bits，如 CPU、CUDA）。
+
+---
+
+## 1. 核心数据结构
+
+--------------------------------
+DispatchKeySet
+来源: DispatchKeySet.h
+--------------------------------
+
+【状态】
+    repr_: uint64                    # 64位位集，编码所有 DispatchKey
+
+【位布局】
+    位 [0, num_backends):            后端位 (CPUBit, CUDABit, ...)
+    位 [num_backends, 64):           功能位 (Dense, Sparse, Autograd, ...)
+
+【构造】
+    DispatchKeySet()用途: 默认构造，repr_ = 0
+
+    DispatchKeySet(DispatchKey k)
+        用途: 从单个 DispatchKey 构造
+        算法:
+            if k == Undefined:
+                repr_ = 0
+            else if k <= EndOfFunctionalityKeys:
+                # 纯功能键（如 AutogradOther, FuncTorchBatched）
+                functionality_val = 1ULL << (num_backends + k - 1)
+                repr_ = functionality_val
+            else if k <= EndOfRuntimeBackendKeys:
+                # 运行时键（如 CPU, AutogradCPU）
+                functionality_k = toFunctionalityKey(k)
+                functionality_val = 1ULL << (num_backends + functionality_k - 1)
+                backend_k = toBackendComponent(k)
+                backend_val = (backend_k == InvalidBit) ? 0 : 1ULL << (backend_k - 1)
+                repr_ = functionality_val + backend_val
+            else:
+                # 别名键不支持
+                repr_ = 0
+
+    DispatchKeySet(BackendComponent b)
+        用途: 从后端组件构造
+        算法:
+            repr_ = (b == InvalidBit) ? 0 : 1ULL << (b - 1)
+
+    DispatchKeySet(initializer_list<DispatchKey> ks)
+        用途: 从多个 DispatchKey 构造
+        算法:
+            repr_ = 0
+            for k in ks:
+                repr_ |= DispatchKeySet(k).repr_
+
+    DispatchKeySet(FULL)
+        用途: 构造包含所有键的集合
+        算法:
+            repr_ = (1ULL << (num_backends + num_functionality_keys - 1)) - 1
+
+    DispatchKeySet(FULL_AFTER, DispatchKey t)
+        用途: 构造包含 t 之后所有功能键的集合
+        算法:
+            repr_ = (1ULL << (num_backends + toFunctionalityKey(t) - 1)) - 1
+            *this = add(DispatchKey::PythonDispatcher)
+
+【查询】
+    has(DispatchKey t) -> bool
+        用途: 检查是否包含 t
+        算法:
+            return has_all(DispatchKeySet(t))
+
+    has_backend(BackendComponent t) -> bool
+        用途: 检查是否包含后端位 t
+        算法:
+            return has_all(DispatchKeySet(t))
+
+    has_all(DispatchKeySet ks) -> bool
+        用途: 检查是否包含 ks 的所有位
+        算法:
+            return (repr_ & ks.repr_) == ks.repr_
+
+    has_any(DispatchKeySet ks) -> bool
+        用途: 检查是否包含 ks 的任意位
+        约束: ks 不应同时包含后端位和 per-backend 功能位
+        算法:
+            return (repr_ & ks.repr_) != 0
+
+    empty() -> bool
+        用途: 检查集合是否为空
+        算法:
+            return repr_ == 0
+
+【集合操作】
+    operator|(DispatchKeySet other) -> DispatchKeySet
+        用途: 集合并集
+        算法:
+            return DispatchKeySet(repr_ | other.repr_)
+
+    operator&(DispatchKeySet other) -> DispatchKeySet
+        用途: 集合交集
+        算法:
+            return DispatchKeySet(repr_ & other.repr_)
+
+    operator-(DispatchKeySet other) -> DispatchKeySet
+        用途: 集合差集（仅移除功能位，保留后端位）
+        算法:
+            return DispatchKeySet(repr_ & (full_backend_mask | ~other.repr_))
+
+    operator^(DispatchKeySet other) -> DispatchKeySet
+        用途: 集合异或
+        算法:
+            return DispatchKeySet(repr_ ^ other.repr_)
+
+    add(DispatchKey t) -> DispatchKeySet
+        用途: 添加 DispatchKey（不可变）
+        算法:
+            return *this | DispatchKeySet(t)
+
+    remove(DispatchKey t) -> DispatchKeySet
+        用途: 移除 DispatchKey 的功能位（不可变）
+        算法:
+            return DispatchKeySet(repr_ & ~(DispatchKeySet(t).repr_ & ~full_backend_mask))
+
+    remove_backend(BackendComponent b) -> DispatchKeySet
+        用途: 移除后端位（不可变）
+        算法:
+            return DispatchKeySet(repr_ & ~DispatchKeySet(b).repr_)
+
+【优先级查询】
+    highestFunctionalityKey() -> DispatchKey
+        用途: 返回最高优先级的功能键
+        算法:
+            functionality_idx = indexOfHighestBit()
+            if functionality_idx < num_backends:
+                return Undefined
+            return DispatchKey(functionality_idx - num_backends)
+
+    highestBackendKey() -> BackendComponent
+        用途: 返回最高优先级的后端键
+        算法:
+            backend_idx = DispatchKeySet(repr_ & full_backend_mask).indexOfHighestBit()
+            if backend_idx == 0:
+                return InvalidBit
+            return BackendComponent(backend_idx)
+
+    highestPriorityTypeId() -> DispatchKey
+        用途: 返回最高优先级的运行时 DispatchKey
+        算法:
+            functionality_k = highestFunctionalityKey()
+            if isPerBackendFunctionalityKey(functionality_k):
+                return toRuntimePerBackendFunctionalityKey(functionality_k, highestBackendKey())
+            return functionality_k
+
+    indexOfHighestBit() -> uint8
+        用途: 返回最高位的索引
+        算法:
+            return 64 - llvm::countLeadingZeros(repr_)
+
+【调度表索引】
+    getDispatchTableIndexForDispatchKeySet() -> int
+        用途: 计算运行时调度表索引
+        算法:
+            # 提取功能位索引
+            functionality_idx = DispatchKeySet(repr_ >> num_backends).indexOfHighestBit()
+            offset_and_mask = offsetsAndMasks()[functionality_idx]
+
+            # 提取后端位索引
+            backend_idx = DispatchKeySet((repr_ & offset_and_mask.mask) >> 1).indexOfHighestBit()
+
+            return offset_and_mask.offset + backend_idx
+
+    getBackendIndex() -> uint64
+        用途: 返回最高优先级后端的索引
+        算法:
+            return DispatchKeySet((repr_ & full_backend_mask) >> 1).indexOfHighestBit()
+
+【迭代器】
+    begin() -> iterator
+        用途: 返回指向第一个 DispatchKey 的迭代器
+
+    end() -> iterator
+        用途: 返回结束迭代器
+
+【备注】
+    - 后端位和功能位的组合形成运行时键（如 CPUBit + Dense = CPU）
+    - 移除操作只影响功能位，后端位保持不变
+    - 迭代器遍历所有运行时 DispatchKey，对 per-backend 功能会展开所有后端
+
+---
+
+## 2. 迭代器实现
+
+--------------------------------
+DispatchKeySet::iterator
+来源: DispatchKeySet.h, DispatchKeySet.cpp
+--------------------------------
+
+【状态】
+    data_ptr_: const uint64*                    # 指向 DispatchKeySet.repr_
+    next_functionality_: uint8                  # 下一个功能位索引
+    next_backend_: uint8                        # 下一个后端位索引
+    current_dispatchkey_idx_: uint8             # 当前功能键索引
+    current_backendcomponent_idx_: uint8        # 当前后端组件索引
+
+【算法】
+    operator++() -> iterator&
+        用途: 前进到下一个 DispatchKey
+        算法:
+            # Step 1: 屏蔽已遍历的位
+            masked_functionality_bits = llvm::maskTrailingZeros(next_functionality_) & *data_ptr_
+            masked_backend_bits = llvm::maskTrailingZeros(next_backend_) & full_backend_mask & *data_ptr_
+
+            # Step 2: 找到下一个设置的位
+            first_functionality_idx = llvm::findFirstSet(masked_functionality_bits)
+            first_backendcomponent_idx = llvm::findFirstSet(masked_backend_bits)
+
+            # Step 3: 检查是否到达末尾
+            if first_functionality_idx == max_uint64 or next_functionality_ == end_iter_mask_val:
+                # 设置为 end() 状态
+                next_functionality_ = end_iter_mask_val
+                current_dispatchkey_idx_ = end_iter_key_val
+                next_backend_ = 0
+                current_backendcomponent_idx_ = end_iter_key_val
+                return *this
+
+            # Step 4: 计算新索引
+            new_next_functionality = first_functionality_idx + 1
+            new_backendcomponent_idx = first_backendcomponent_idx + 1
+            next_dispatchkey_idx = new_next_functionality - num_backends
+
+            # Step 5: 处理 per-backend 功能键
+            if isPerBackendFunctionalityKey(DispatchKey(next_dispatchkey_idx)):
+                if first_backendcomponent_idx == max_uint64:
+                    # 没有后端位，跳过此功能键
+                    next_functionality_ = new_next_functionality
+                    ++(*this)
+                    return *this
+
+                # 设置当前键
+                current_dispatchkey_idx_ = next_dispatchkey_idx
+                current_backendcomponent_idx_ = new_backendcomponent_idx
+
+                # 查找下一个后端位
+                next_backendcomponent_bits = llvm::maskTrailingZeros(first_backendcomponent_idx + 1) & full_backend_mask & *data_ptr_
+                next_backendcomponent_idx = llvm::findFirstSet(next_backendcomponent_bits)
+
+                if next_backendcomponent_idx == max_uint64:
+                    # 没有更多后端，前进功能位
+                    next_functionality_ = new_next_functionality
+                    next_backend_ = 0
+                else:
+                    # 保持功能位，前进后端位
+                    next_backend_ = first_backendcomponent_idx + 1
+            else:
+                # 非 per-backend 功能键
+                current_dispatchkey_idx_ = next_dispatchkey_idx
+                next_functionality_ = new_next_functionalityreturn *this
+
+    operator*() -> DispatchKey
+        用途: 解引用，返回当前 DispatchKey
+        算法:
+            functionality_key = DispatchKey(current_dispatchkey_idx_)
+            if isPerBackendFunctionalityKey(functionality_key):
+                return toRuntimePerBackendFunctionalityKey(
+                    functionality_key,
+                    BackendComponent(current_backendcomponent_idx_)
+                )
+            else:
+                return functionality_key
+
+【备注】
+    - 迭代顺序：先遍历功能位（从低到高），对每个 per-backend 功能位遍历所有后端位
+    - 例如：如果 keyset 包含 AutogradFunctionality + CPUBit + CUDABit，会依次返回 AutogradCPU, AutogradCUDA
+
+---
+
+## 3. 全局常量与辅助函数
+
+--------------------------------
+预定义 DispatchKeySet 常量
+来源: DispatchKeySet.h, DispatchKeySet.cpp
+--------------------------------
+
+【常量】
+    autograd_dispatch_keyset = {AutogradFunctionality, AutogradOther, AutogradNestedTensor}用途: 所有 autograd 功能键（不含后端位）
+
+    autocast_dispatch_keyset = {AutocastCPU, AutocastMPS, AutocastCUDA, ...}
+        用途: 所有 autocast 键
+
+    backend_dispatch_keyset = autogradother_backends | {Dense}
+        用途: 所有后端调度键（CompositeExplicitAutograd 映射到此）
+
+    non_functional_backend_dispatch_keyset = backend_dispatch_keyset - {Sparse, XLABit, LazyBit}
+        用途: 非函数式后端键（CompositeExplicitAutogradNonFunctional 映射到此）
+
+    math_dispatch_keyset = backend_dispatch_keyset | autograd_dispatch_keyset | {NestedTensor, Functionalize}
+        用途: 数学调度键（CompositeImplicitAutograd 映射到此）
+
+    nested_dispatch_keyset = {AutogradNestedTensor, NestedTensor} | full_backend_mask
+        用途: NestedTensor 相关键
+
+    autogradother_backends = {FPGA, MAIA, Vulkan, Metal, CustomRNGKeyId, MkldnnCPU, Sparse, SparseCsr, Quantized} | full_backend_mask
+        用途: 映射到 AutogradOther 的后端
+
+    after_autograd_keyset = FULL_AFTER(AutogradOther)
+        用途: autograd 之后的所有键
+
+    after_ADInplaceOrView_keyset = FULL_AFTER(ADInplaceOrView)
+        用途: ADInplaceOrView 之后的所有键
+
+    after_func_keyset = FULL_AFTER(Functionalize) - {ADInplaceOrView}
+        用途: Functionalize 之后的所有键（移除 ADInplaceOrView）
+
+    backend_functionality_keys = {Dense, Quantized, Sparse, SparseCsr} | full_backend_mask
+        用途: 所有后端功能键
+
+    functorch_transforms_ks = {FuncTorchBatched, FuncTorchVmapMode, Batched, VmapMode, FuncTorchGradWrapper}
+        用途: functorch 变换键
+
+【函数】
+    isBackendDispatchKey(DispatchKey t) -> bool
+        用途: 判断是否为后端调度键
+        算法:
+            return t != Undefined
+                and not isAliasDispatchKey(t)
+                and t != NestedTensor
+                and backend_dispatch_keyset.has(t)
+
+    getRuntimeDispatchKeySet(DispatchKey t) -> DispatchKeySet
+        用途: 将别名键解析为运行时键集
+        算法:
+            match t:
+                Autograd:
+                    return autograd_dispatch_keyset | full_backend_mask
+                CompositeImplicitAutograd:
+                    return math_dispatch_keyset
+                CompositeImplicitAutogradNestedTensor:
+                    return nested_dispatch_keyset
+                CompositeExplicitAutograd:
+                    return backend_dispatch_keyset
+                CompositeExplicitAutogradNonFunctional:
+                    return non_functional_backend_dispatch_keyset
+                default:
+                    return DispatchKeySet(t)
+
+    runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) -> bool
+        用途: 检查别名键 t 是否包含 k
+        算法:
+            match t:
+                Autograd:
+                    return autograd_dispatch_keyset.has(toFunctionalityKey(k))
+                CompositeImplicitAutograd:
+                    return math_dispatch_keyset.has(k)
+                CompositeImplicitAutogradNestedTensor:
+                    return nested_dispatch_keyset.has(k)
+                CompositeExplicitAutograd:
+                    return k != NestedTensor and backend_dispatch_keyset.has(k)
+                CompositeExplicitAutogradNonFunctional:
+                    return k != NestedTensor and non_functional_backend_dispatch_keyset.has(k)
+                FuncTorchBatchedDecomposition:
+                    return functorch_batched_ks.has(k)
+                default:
+                    return t == k
+
+    getBackendKeySetFromAutograd(DispatchKey t) -> DispatchKeySet
+        用途: 从 autograd 键获取关联的后端键
+        算法:
+            match t:
+                AutogradCPU: return {CPU}
+                AutogradCUDA: return {CUDA}
+                AutogradXLA: return {XLA}
+                AutogradLazy: return {Lazy}
+                AutogradMeta: return {Meta}
+                AutogradMPS: return {MPS}
+                AutogradHPU: return {HPU}
+                AutogradIPU: return {IPU}
+                AutogradXPU: return {XPU}
+                AutogradPrivateUse1: return {PrivateUse1}
+                AutogradPrivateUse2: return {PrivateUse2}
+                AutogradPrivateUse3: return {PrivateUse3}
+                AutogradNestedTensor: return {NestedTensor} | full_backend_mask
+                AutogradOther: return autogradother_backends
+                default: return {}
+
+    isIncludedInAlias(DispatchKey k, DispatchKey alias) -> bool
+        用途: 检查 k 是否包含在别名 alias 中
+        算法:
+            return k != Undefined and runtimeDispatchKeySetHas(alias, k)
+
+    getAutogradRelatedKeySetFromBackend(BackendComponent t) -> DispatchKeySet
+        用途: 从后端获取关联的 autograd 键
+        算法:
+            match t:
+                CPUBit: return {ADInplaceOrView, AutogradCPU}
+                CUDABit: return {ADInplaceOrView, AutogradCUDA}
+                XLABit: return {ADInplaceOrView, AutogradXLA}
+                ...
+                default: return {ADInplaceOrView, AutogradOther}
+
+    getAutocastRelatedKeySetFromBackend(BackendComponent t) -> DispatchKeySet
+        用途: 从后端获取关联的 autocast 键
+        算法:
+            match t:
+                CPUBit: return {AutocastCPU}
+                CUDABit: return {AutocastCUDA}
+                XLABit: return {AutocastXLA}
+                ...
+                default: return {}
+
+    highestPriorityBackendTypeId(DispatchKeySet ks) -> DispatchKey
+        用途: 返回最高优先级的后端类型 ID
+        算法:
+            return (ks & backend_functionality_keys).highestPriorityTypeId()
+
+    legacyExtractDispatchKey(DispatchKeySet s) -> DispatchKey
+        用途: 从 keyset 提取传统的单个 DispatchKey（移除 autograd/autocast/functorch 等）
+        算法:
+            return (s - autograd_dispatch_keyset_with_ADInplaceOrView- autocast_dispatch_keyset
+                      - {Functionalize, PythonTLSSnapshot, FuncTorchGradWrapper, FuncTorchVmapMode, FuncTorchBatched, Python}
+                   ).highestPriorityTypeId()
+
+    toString(DispatchKeySet ts) -> string
+        用途: 转换为字符串表示
+        算法:
+            if ts.empty():
+                return "DispatchKeySet()"
+            result = "DispatchKeySet("
+            for k in ts:
+                result += toString(k) + ", "
+            return result + ")"
+
+【备注】
+    - 别名键（如 Autograd, CompositeImplicitAutograd）在运行时会展开为多个实际键
+    - full_backend_mask 是所有后端位的掩码
+
+---
+
+## 4. 功能偏移量计算
+
+--------------------------------
+initializeFunctionalityOffsetsAndMasks
+来源: DispatchKeySet.cpp
+--------------------------------
+
+【签名】
+    initializeFunctionalityOffsetsAndMasks() -> array<FunctionalityOffsetAndMask, num_functionality_keys>
+
+【算法】
+    # 初始化偏移量和掩码数组
+    offsets_and_masks[0] = FunctionalityOffsetAndMask(0, 0)  # Undefined
+
+    for functionality_idx in range(1, num_functionality_keys):
+        prev_offset_and_mask = offsets_and_masks[functionality_idx - 1]
+        k = DispatchKey(functionality_idx)
+
+        # 计算下一个偏移量
+        if prev_offset_and_mask.mask == 0:
+            # 前一个不是 per-backend，偏移量 +1
+            next_offset = prev_offset_and_mask.offset + 1
+        else:
+            # 前一个是 per-backend，偏移量 +num_backends
+            next_offset = prev_offset_and_mask.offset + num_backends
+
+        # 计算掩码
+        if isPerBackendFunctionalityKey(k):
+            next_mask = full_backend_mask
+        else:
+            next_mask = 0
+
+        offsets_and_masks[functionality_idx] = FunctionalityOffsetAndMask(next_offset, next_mask)
+
+    # 验证最后一个偏移量
+    assert offsets_and_masks[num_functionality_keys - 1].offset == num_runtime_entries - 1
+
+    return offsets_and_masks
+
+【用途】
+    为每个功能键计算其在运行时调度表中的偏移量和后端掩码
+
+【备注】
+    - per-backend 功能键（如 Dense, Autograd）占用 num_backends 个槽位
+    - 非 per-backend 功能键（如 FuncTorchBatched）占用 1 个槽位
+    - 偏移量用于 getDispatchTableIndexForDispatchKeySet() 计算

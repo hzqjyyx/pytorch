@@ -1,0 +1,107 @@
+--------------------------------
+SafePyObject / SafePyHandle (多解释器安全的 PyObject 持有者)
+来源: c10/core/SafePyObject.h, c10/core/SafePyObject.cpp
+--------------------------------
+
+【类型】SafePyObject
+
+【状态】
+    data_: PyObject*                      # 持有的 Python 对象指针
+    pyinterpreter_: PyInterpreter*        # 关联的解释器实例
+
+【接口】
+    SafePyObject(data: PyObject*, pyinterpreter: PyInterpreter*)
+        用途: 构造函数，窃取 data 的引用（不增加引用计数）
+
+    SafePyObject(other: SafePyObject&&)
+        用途: 移动构造，转移所有权，other.data_ 置为 nullptr
+
+    SafePyObject(other: SafePyObject const&)
+        用途: 拷贝构造，增加引用计数
+        调用: pyinterpreter->incref(data_)
+
+    operator=(other: SafePyObject const&) -> SafePyObject&
+        用途: 拷贝赋值，处理引用计数转移
+        调用: other.pyinterpreter->incref(other.data_)
+              pyinterpreter->decref(data_, has_pyobj_slot=false)
+
+    ~SafePyObject()
+        用途: 析构函数，释放持有的引用
+        调用: pyinterpreter->decref(data_, has_pyobj_slot=false)
+
+    ptr(interpreter: PyInterpreter*) -> PyObject*
+        用途: 获取原始指针，验证解释器匹配
+        调用: TORCH_INTERNAL_ASSERT(interpreter == pyinterpreter_)
+
+    release() -> PyObject*
+        用途: 释放所有权，返回指针但不减少引用计数
+        算法: rv = data_; data_ = nullptr; return rv
+
+    pyinterpreter() -> PyInterpreter&
+        用途: 获取关联的解释器引用
+
+【依赖】
+    PyInterpreter->incref / decref    # Python 引用计数管理
+    TORCH_INTERNAL_ASSERT             # 解释器匹配检查
+
+【备注】
+    - 设计目标: 在 c10/core 中安全持有 PyObject，无需 libpython 依赖
+    - 多解释器安全: 通过 pyinterpreter_ 追踪对象归属，防止跨解释器误用
+    - 引用计数: 构造时窃取引用，拷贝时增加，析构时减少
+    - 禁止操作: 移动赋值被删除（operator=(SafePyObject&&) = delete）
+
+--------------------------------
+
+【类型】SafePyObjectT<T>
+
+【继承】private SafePyObject
+
+【接口】
+    SafePyObjectT(data: PyObject*, pyinterpreter: PyInterpreter*)
+        用途: 构造函数，委托给 SafePyObject
+
+    SafePyObjectT(other: SafePyObjectT&&)
+        用途: 移动构造
+
+    using SafePyObject::ptrusing SafePyObject::pyinterpreter
+    using SafePyObject::release
+
+【备注】
+    - 类型标签: T 仅用于类型安全，不参与实际逻辑
+    - 禁止操作: 拷贝构造、拷贝赋值、移动赋值均被删除
+
+--------------------------------
+
+【类型】SafePyHandle
+
+【状态】
+    data_: PyObject*                      # 非持有的 Python 对象指针
+    pyinterpreter_: PyInterpreter*        # 关联的解释器实例
+
+【接口】
+    SafePyHandle()
+        用途: 默认构造，初始化为 nullptr
+
+    SafePyHandle(data: PyObject*, pyinterpreter: PyInterpreter*)
+        用途: 构造函数，不增加引用计数
+
+    ptr(interpreter: PyInterpreter*) -> PyObject*
+        用途: 获取原始指针，验证解释器匹配
+        调用: TORCH_INTERNAL_ASSERT(interpreter == pyinterpreter_)
+
+    reset()
+        用途: 清空指针和解释器引用
+        算法: data_ = nullptr; pyinterpreter_ = nullptr
+
+    operator bool()
+        用途: 检查是否持有有效指针
+        算法: return data_ != nullptr
+
+    pyinterpreter() -> PyInterpreter&
+        用途: 获取关联的解释器引用
+
+【依赖】TORCH_INTERNAL_ASSERT             # 解释器匹配检查
+
+【备注】
+    - 非持有语义: 不管理引用计数，适用于全局 PyObject（如解释器退出时泄漏的对象）
+    - 默认可拷贝: 编译器生成的拷贝构造/赋值可用

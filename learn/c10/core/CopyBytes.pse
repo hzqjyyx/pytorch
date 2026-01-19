@@ -1,0 +1,59 @@
+--------------------------------
+CopyBytes (设备间内存拷贝注册与调度)
+来源: c10/core/CopyBytes.cpp, c10/core/CopyBytes.h
+--------------------------------
+
+【状态】
+    g_copy_bytes: CopyBytesFunction[2][COMPILE_TIME_MAX_DEVICE_TYPES][COMPILE_TIME_MAX_DEVICE_TYPES]
+        # [0][from][to]: 同步拷贝函数
+        # [1][from][to]: 异步拷贝函数
+        # 索引: [async维度][源设备类型][目标设备类型]
+
+【类型定义】
+    CopyBytesFunction = (nbytes: size_t, src: void*, src_device: Device, dst: void*, dst_device: Device) -> void
+
+【接口】
+    _CopyBytesFunctionRegisterer(
+        fromType: DeviceType,
+        toType: DeviceType,
+        func_sync: CopyBytesFunction,
+        func_async: CopyBytesFunction = nullptr
+    )
+        用途: 注册设备对 (fromType, toType) 的拷贝函数
+        逻辑:
+            from = int(fromType)
+            to = int(toType)
+            
+            if func_async is None:
+                func_async = func_sync
+            
+            assert g_copy_bytes[0][from][to] is None and g_copy_bytes[1][from][to] is None,f"Duplicate registration for device type pair {fromType}, {toType}"
+            
+            g_copy_bytes[0][from][to] = func_sync
+            g_copy_bytes[1][from][to] = func_async
+
+    CopyBytes(
+        nbytes: size_t,
+        src: void*,
+        src_device: Device,
+        dst: void*,
+        dst_device: Device,
+        async: bool
+    )
+        用途: 执行设备间内存拷贝
+        逻辑:
+            ptr = g_copy_bytes[async ? 1 : 0][int(src_device.type())][int(dst_device.type())]
+            
+            assert ptr is not None,
+                   f"No function found for copying from {src_device.type()} to {dst_device.type()}"
+            
+            ptr(nbytes, src, src_device, dst, dst_device)
+
+【宏】
+    REGISTER_COPY_BYTES_FUNCTION(from, to, ...)
+        用途: 便捷注册宏，创建匿名全局 _CopyBytesFunctionRegisterer 实例
+
+【备注】
+    - 实现采用静态注册模式，各后端通过宏在编译时注册拷贝函数
+    - 当前实现位于 ATen 和 caffe2，未来计划迁移至 c10/backend/
+    - 异步拷贝函数可选，默认回退到同步函数

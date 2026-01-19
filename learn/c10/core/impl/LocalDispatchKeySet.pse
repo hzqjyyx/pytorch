@@ -1,0 +1,154 @@
+--------------------------------
+LocalDispatchKeySet (线程局部调度键集管理)
+来源: c10/core/impl/LocalDispatchKeySet.h, c10/core/impl/LocalDispatchKeySet.cpp
+--------------------------------
+
+【状态】
+    raw_local_dispatch_key_set: thread_local PODLocalDispatchKeySet
+        # 线程局部存储，零初始化的POD类型
+        # 通过XOR default_included_set/default_excluded_set实现非零默认值
+
+【核心类型】
+    PODLocalDispatchKeySet:
+        included_: uint64                    # 原始included位集
+        excluded_: uint64                    # 原始excluded位集
+        
+        included() -> DispatchKeySet:
+            # 通过XOR恢复真实included集合
+            return DispatchKeySet(RAW, included_) ^ c10::default_included_set
+        
+        excluded() -> DispatchKeySet:
+            # 通过XOR恢复真实excluded集合
+            return DispatchKeySet(RAW, excluded_) ^ c10::default_excluded_set
+        
+        set_included(x: DispatchKeySet):
+            included_ = (x ^ c10::default_included_set).raw_repr()
+        
+        set_excluded(x: DispatchKeySet):
+            excluded_ = (x ^ c10::default_excluded_set).raw_repr()
+
+    LocalDispatchKeySet:
+        included_: DispatchKeySet            # 包含的调度键集
+        excluded_: DispatchKeySet            # 排除的调度键集
+
+【接口 - 查询】
+    tls_local_dispatch_key_set() -> LocalDispatchKeySet
+        用途: 获取当前线程的调度键集状态
+        平台: Windows/Android/iPhone通过函数调用，其他平台内联访问
+
+    tls_is_dispatch_key_included(x: DispatchKey) -> bool
+        用途: 检查指定键是否在included集合中
+
+    tls_is_dispatch_key_excluded(x: DispatchKey) -> bool
+        用途: 检查指定键是否在excluded集合中
+
+    tls_is_dispatch_keyset_included(ks: DispatchKeySet) -> bool
+        用途: 检查included集合是否为ks的超集
+
+    tls_is_dispatch_keyset_excluded(ks: DispatchKeySet) -> bool
+        用途: 检查excluded集合是否为ks的超集
+
+【接口 - 修改 (Non-RAII)】
+    tls_set_dispatch_key_included(x: DispatchKey, desired_state: bool)
+        用途: 设置指定键的included状态
+        算法:
+            current_state = tls->included().has(x)
+            if desired_state != current_state:
+                if desired_state:
+                    tls->set_included(tls->included().add(x))
+                else:
+                    tls->set_included(tls->included().remove(x))
+
+    tls_set_dispatch_key_excluded(x: DispatchKey, desired_state: bool)
+        用途: 设置指定键的excluded状态
+        算法:
+            current_state = tls->excluded().has(x)
+            if desired_state != current_state:
+                if desired_state:
+                    tls->set_excluded(tls->excluded().add(x))
+                else:
+                    tls->set_excluded(tls->excluded().remove(x))
+
+    _force_tls_local_dispatch_key_set(key_set: LocalDispatchKeySet)
+        用途: 强制设置整个调度键集状态（内部API）
+        算法:
+            raw_local_dispatch_key_set.set_included(key_set.included_)
+            raw_local_dispatch_key_set.set_excluded(key_set.excluded_)
+
+【接口 - RAII Guards】
+    IncludeDispatchKeyGuard:
+        构造:
+            IncludeDispatchKeyGuard(include: DispatchKeySet)
+                参数: include=要添加到included集合的键
+                算法:
+                    tls_ = &raw_local_dispatch_key_set
+                    include_ = include - tls_->included()  # 只记录新增的键
+                    if not include_.empty():
+                        tls_->set_included(tls_->included() | include_)
+        
+        析构:
+            ~IncludeDispatchKeyGuard()
+                算法:
+                    if not include_.empty():
+                        tls_->set_included(tls_->included() - include_)
+        
+        用途: RAII方式临时添加included键，析构时自动恢复
+
+    ExcludeDispatchKeyGuard:
+        构造:
+            ExcludeDispatchKeyGuard(exclude: DispatchKeySet)
+                参数: exclude=要添加到excluded集合的键
+                算法:
+                    tls_ = &raw_local_dispatch_key_set
+                    exclude_ = exclude - tls_->excluded()  # 只记录新增的键
+                    if not exclude_.empty():
+                        tls_->set_excluded(tls_->excluded() | exclude_)
+        
+        析构:
+            ~ExcludeDispatchKeyGuard()
+                算法:
+                    if not exclude_.empty():
+                        tls_->set_excluded(tls_->excluded() - exclude_)
+        
+        用途: RAII方式临时添加excluded键，析构时自动恢复
+
+    ForceDispatchKeyGuard:
+        构造:
+            ForceDispatchKeyGuard()
+                算法:
+                    saved_keyset_ = c10::impl::tls_local_dispatch_key_set()
+            
+            ForceDispatchKeyGuard(key_set: LocalDispatchKeySet)
+                算法:
+                    saved_keyset_ = c10::impl::tls_local_dispatch_key_set()
+                    c10::impl::_force_tls_local_dispatch_key_set(key_set)
+            
+            ForceDispatchKeyGuard(include: DispatchKeySet, exclude: DispatchKeySet)
+                算法:
+                    saved_keyset_ = c10::impl::tls_local_dispatch_key_set()
+                    updated_set = saved_keyset_
+                    updated_set.included_ = include
+                    updated_set.excluded_ = exclude
+                    c10::impl::_force_tls_local_dispatch_key_set(updated_set)
+        
+        析构:
+            ~ForceDispatchKeyGuard()
+                算法:
+                    c10::impl::_force_tls_local_dispatch_key_set(saved_keyset_)
+        
+        用途: RAII方式完全替换调度键集状态，析构时恢复快照
+
+【依赖】
+    c10::default_included_set    # 默认included集合
+    c10::default_excluded_set    # 默认excluded集合
+    DispatchKeySet               # 调度键集合类型
+
+【平台特定】
+    Windows/Android/iPhone: thread_local变量不能标记C10_API，通过函数访问
+    其他平台: 直接内联访问thread_local变量
+
+【备注】
+    - TLS初始化约束: Windows某些编译器只允许零初始化TLS，通过XOR default_set实现非零默认值
+    - RAII vs Non-RAII: RAII Guard只需一次tls_getaddr，Non-RAII每次getter/setter都需要
+    - Guard设计: 只快照和恢复自己管理的键，不影响其他键的状态
+    - 微优化: Guard保存tls指针避免析构时重复tls_getaddr查找

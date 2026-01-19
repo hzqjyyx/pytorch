@@ -1,0 +1,81 @@
+--------------------------------
+C10 Core 构建配置
+来源: c10/core/build.bzl
+--------------------------------
+
+【目标定义】
+    define_targets(rules: BuildRules)
+        用途: 定义 c10/core 模块的所有构建目标
+
+【库目标】
+
+    CPUAllocator
+        类型: cc_library
+        源文件: CPUAllocator.cpp
+        头文件: CPUAllocator.h
+        依赖:
+            - :alignment
+            - :base
+            - //c10/mobile:CPUCachingAllocator
+            - //c10/mobile:CPUProfilingAllocator
+            - //c10/util:base
+        特性: alwayslink=True (防止链接器剥离flag定义)
+
+    ScalarType
+        类型: cc_library (仅头文件)
+        头文件: ScalarType.h
+        依赖: //c10/util:base
+
+    alignment
+        类型: cc_library (仅头文件)
+        头文件: alignment.h
+        依赖: 无
+
+    alloc_cpu
+        类型: cc_library
+        源文件: impl/alloc_cpu.cpp
+        头文件: impl/alloc_cpu.h
+        依赖:
+            - :alignment
+            - //c10/macros
+            - //c10/util:base
+        特性: alwayslink=True (防止链接器剥离flags定义)
+
+    base
+        类型: cc_library
+        源文件: glob(["*.cpp", "impl/*.cpp"], 排除=[CPUAllocator.cpp, impl/alloc_cpu.cpp])
+        头文件: glob(["*.h", "impl/*.h"], 排除=[CPUAllocator.h, impl/alloc_cpu.h])
+        依赖:
+            - :ScalarType
+            - //third_party/cpuinfo
+            - //c10/macros
+            - //c10/util:TypeCast
+            - //c10/util:base
+            - //c10/util:typeid
+        特性: alwayslink=True (防止链接器移除flags和注册代码)
+
+    base_headers
+        类型: cc_library (仅头文件)
+        源文件: 无
+        头文件: glob(["*.h", "impl/*.h"], 排除=[CPUAllocator.h, impl/alloc_cpu.h])
+
+    headers
+        类型: filegroup
+        文件: glob(["*.h", "impl/*.h"], 排除=[alignment.h])
+
+【构建配置】
+    所有库共享:
+        - linkstatic = True
+        - local_defines = ["C10_BUILD_MAIN_LIB"]
+        - visibility = ["//visibility:public"]
+
+【依赖关系图】
+    CPUAllocator → alignment, base, c10/mobile, c10/util
+    alloc_cpu → alignment, c10/macros, c10/util
+    base → ScalarType, cpuinfo, c10/macros, c10/util
+    ScalarType → c10/util
+
+【备注】
+    - alwayslink 用于保留全局flag定义和注册代码
+    - base 是核心库，包含除 CPUAllocator 和 alloc_cpu 外的所有实现
+    - base_headers 和 headers 提供头文件访问，用于依赖管理

@@ -1,0 +1,35 @@
+--------------------------------
+QEngine (量化引擎枚举)
+来源: c10/core/QEngine.h
+--------------------------------
+
+【类型定义】
+    enum QEngine:
+        NoQEngine = 0    # 无量化引擎
+        FBGEMM = 1       # Facebook GEMM 库
+        QNNPACK = 2      # 量化神经网络包
+        ONEDNN = 3       # Intel oneDNN
+        X86 = 4          # x86 优化实现
+
+【常量】
+    kNoQEngine = QEngine::NoQEngine
+    kFBGEMM = QEngine::FBGEMM
+    kQNNPACK = QEngine::QNNPACK
+    kONEDNN = QEngine::ONEDNN
+    kX86 = QEngine::X86
+
+【函数】
+    toString(qengine: QEngine) -> string
+        用途: 将量化引擎枚举转换为字符串表示
+        
+        算法:
+            match qengine:
+                NoQEngine: return "NoQEngine"
+                FBGEMM: return "FBGEMM"
+                QNNPACK: return "QNNPACK"
+                ONEDNN: return "ONEDNN"
+                X86: return "X86"
+                default: TORCH_CHECK(false, "Unrecognized Quantized Engine")
+
+【备注】
+    - 需与 torch/backends/quantized/__init__.py 中的 get_qengine_id() 保持同步

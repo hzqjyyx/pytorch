@@ -1,0 +1,86 @@
+# Copy-on-Write Storage (写时复制存储)
+
+## 设计概述
+
+本库为 Tensor 添加写时复制（lazy copy）支持。设计维持 PyTorch 不变式：**Tensor 共享别名当且仅当它们共享 Storage**。因此，互为惰性拷贝的 Tensor 将拥有不同的 Storage，但这些 Storage 共享同一数据分配。
+
+---
+
+## 线程安全设计
+
+### 前提假设
+
+用户负责保证：**写操作不与读操作或其他写操作并发**（PyTorch 默认编程模型）。
+
+### 挑战
+
+惰性拷贝的 Tensor 可能：
+- 拥有不同 Storage（用户不知道它们是惰性拷贝关系）
+- 被分配到不同线程独立操作
+- 运行时必须保证安全性
+
+### 解决方案
+
+**核心洞察**：
+- `lazy_clone` 是逻辑上的**读操作**
+- `materialize`（写入时触发）是逻辑上的**写操作**
+
+根据用户保证，对于共享 Storage 的 Tensor 集合：
+- 若发生 materialize，则不会有并发的 lazy_clone 或其他读操作
+
+---
+
+## 并发场景分析
+
+### 场景1: 跨 Storage 的并发
+
+**情况**：不同 Storage 的 Tensor 共享 COW context，可能并发 materialize 或 lazy_clone
+
+**保证**：
+- 若发生并发，则 context 至少有 2 个引用
+- context 不会在操作进行时消失
+- lazy_clone 只需原子递增 refcount
+
+### 场景2: 全部并发 materialize
+
+**最复杂情况**：所有惰性拷贝同时写入
+
+**约束**：
+- 因为是写操作，不会有并发的 lazy_clone
+- 必须保证所有拷贝都能并发读取数据
+
+**优化**：最后一个引用可以"窃取"数据而非拷贝
+
+**实现**：
+```
+拷贝数据时:
+    acquire_shared_lock()
+    copy_data()
+    release_shared_lock()
+    decrement_refcount()
+
+窃取数据时（最后一个引用）:
+    acquire_exclusive_lock()  # 等待所有 shared_lock 完成
+    steal_data()
+    release_exclusive_lock()
+```
+
+---
+
+## 操作定义
+
+| 操作 | 类型 | 并发约束 |
+|------|------|----------|
+| `lazy_clone` | 读操作 | 原子 refcount 递增 |
+| `materialize` | 写操作 | 与同 Storage 的操作互斥 |
+| `copy_data` | 共享锁 | 可并发 |
+| `steal_data` | 排他锁 | 等待所有拷贝完成 |
+
+---
+
+## 关键不变式
+
+1. **Storage 别名不变式**：Tensor 共享别名 ⟺ 共享 Storage
+2. **COW context 生命周期**：至少有 1 个引用时 context 存活
+3. **写互斥**：同 Storage 的 Tensor 写入时，无并发读/写
+4. **最后引用优化**：最后一个 materialize 可窃取数据，需排他锁

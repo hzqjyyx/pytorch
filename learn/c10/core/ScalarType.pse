@@ -1,0 +1,377 @@
+# c10/core/ScalarType 伪代码
+
+## 文件概述
+来源: c10/core/ScalarType.cpp, c10/core/ScalarType.h
+
+本文件定义了 PyTorch 的标量类型系统，包括类型枚举、类型转换、类型提升规则等。
+
+---
+
+## 1. 类型系统定义
+
+--------------------------------
+ScalarType 枚举
+来源: ScalarType.h:154-160
+--------------------------------
+
+【定义】
+    enum ScalarType : int8_t {
+        // 基础类型 (0-11)
+        Byte, Char, Short, Int, Long,// 整数类型
+        Half, Float, Double,// 浮点类型
+        ComplexHalf, ComplexFloat, ComplexDouble, // 复数类型
+        Bool,                                    // 布尔类型
+        // 量化类型 (12-17)
+        QInt8, QUInt8, QInt32, QUInt4x2, QUInt2x4,
+        // 位打包类型 (18-22)
+        Bits1x8, Bits2x4, Bits4x2, Bits8, Bits16,
+        
+        // Float8 类型 (23-26)
+        Float8_e5m2, Float8_e4m3fn, Float8_e5m2fnuz, Float8_e4m3fnuz,
+        
+        // 扩展无符号整数 (27-29)
+        UInt16, UInt32, UInt64,
+        
+        // 子字节无符号整数 (30-36)
+        UInt1, UInt2, UInt3, UInt4, UInt5, UInt6, UInt7,
+        
+        // 子字节有符号整数 (37-43)
+        Int1, Int2, Int3, Int4, Int5, Int6, Int7,
+        
+        // Float8 扩展 (44)
+        Float8_e8m0fnu,
+        
+        Undefined,
+        NumOptions
+    }
+
+【备注】
+    - 枚举顺序影响序列化格式和类型提升查找表
+    - UInt1-7 和 Int1-7 使用 dummy_uint1_7_t<N> 和 dummy_int1_7_t<N> 占位，实际功能在 Python 层实现
+
+---
+
+## 2. 类型映射
+
+--------------------------------
+类型到 C++ 类型映射
+来源: ScalarType.h:169-193
+--------------------------------
+
+【模板】
+    template<ScalarType N>
+    struct ScalarTypeToCPPType {
+        using type = /* 对应的 C++ 类型 */;
+    }
+
+【映射表】
+    Byte        -> uint8_t
+    Char        -> int8_t
+    Short       -> int16_t
+    Int         -> int
+    Long        -> int64_t
+    Half        -> at::Half
+    Float       -> float
+    Double      -> double
+    ComplexHalf -> c10::complex<c10::Half>
+    ComplexFloat -> c10::complex<float>
+    ComplexDouble -> c10::complex<double>
+    Bool        -> bool
+    BFloat16    -> at::BFloat16
+    QInt8       -> c10::qint8
+    QUInt8      -> c10::quint8
+    QInt32      -> c10::qint32
+    QUInt4x2    -> c10::quint4x2
+    QUInt2x4    -> c10::quint2x4
+    Bits1x8     -> c10::bits1x8
+    Bits2x4     -> c10::bits2x4
+    Bits4x2     -> c10::bits4x2
+    Bits8       -> c10::bits8
+    Bits16      -> c10::bits16
+    Float8_e5m2 -> c10::Float8_e5m2
+    Float8_e4m3fn -> c10::Float8_e4m3fn
+    Float8_e5m2fnuz -> c10::Float8_e5m2fnuz
+    Float8_e4m3fnuz -> c10::Float8_e4m3fnuz
+    Float8_e8m0fnu -> c10::Float8_e8m0fnu
+    UInt16      -> uint16_t
+    UInt32      -> uint32_t
+    UInt64      -> uint64_t
+    UInt1-7     -> c10::dummy_uint1_7_t<N>
+    Int1-7      -> c10::dummy_int1_7_t<N>
+
+--------------------------------
+C++ 类型到 ScalarType 映射
+来源: ScalarType.h:196-208
+--------------------------------
+
+【模板】
+    template<typename T>
+    struct CppTypeToScalarType : std::integral_constant<ScalarType, /* 对应的 ScalarType */> {}
+
+【用途】
+    反向映射，从 C++ 类型获取 ScalarType 枚举值
+
+---
+
+## 3. 类型查询函数
+
+--------------------------------
+类型属性查询
+来源: ScalarType.h
+--------------------------------
+
+【函数】
+    toString(t: ScalarType) -> const char*
+        用途: 返回类型名称字符串 (如 "Float", "Int")
+
+    elementSize(t: ScalarType) -> size_t
+        用途: 返回类型的字节大小
+        算法: sizeof(对应的 C++ 类型)
+
+    isIntegralType(t: ScalarType, includeBool: bool = false) -> bool
+        用途: 判断是否为整数类型
+        算法: t in {Byte, Char, Int, Long, Short, UInt16, UInt32, UInt64} 
+              or (includeBool and t == Bool)
+
+    isFloat8Type(t: ScalarType) -> bool
+        用途: 判断是否为 Float8 类型
+        算法: t in {Float8_e5m2, Float8_e5m2fnuz, Float8_e4m3fn, Float8_e4m3fnuz, Float8_e8m0fnu}
+
+    isReducedFloatingType(t: ScalarType) -> bool
+        用途: 判断是否为低精度浮点类型
+        算法: t in {Half, BFloat16} or isFloat8Type(t)
+
+    isFloatingType(t: ScalarType) -> bool
+        用途: 判断是否为浮点类型
+        算法: t in {Double, Float} or isReducedFloatingType(t)
+
+    isComplexType(t: ScalarType) -> bool
+        用途: 判断是否为复数类型
+        算法: t in {ComplexHalf, ComplexFloat, ComplexDouble}
+
+    isQIntType(t: ScalarType) -> bool
+        用途: 判断是否为量化整数类型
+        算法: t in {QInt8, QUInt8, QInt32, QUInt4x2, QUInt2x4}
+
+    isBitsType(t: ScalarType) -> bool
+        用途: 判断是否为位打包类型
+        算法: t in {Bits1x8, Bits2x4, Bits4x2, Bits8, Bits16}
+
+    isBarebonesUnsignedType(t: ScalarType) -> bool
+        用途: 判断是否为扩展无符号整数类型
+        算法: t in {UInt1-7, UInt16, UInt32, UInt64}
+
+    isSignedType(t: ScalarType) -> bool
+        用途: 判断是否为有符号类型
+        算法: 
+            if t in {QInt*, Bits*}: raise error
+            if t in {Int1-7}: return true
+            if t in {UInt1-7}: return false
+            else: return std::numeric_limits<对应C++类型>::is_signed
+
+---
+
+## 4. 类型转换函数
+
+--------------------------------
+类型转换工具
+来源: ScalarType.h
+--------------------------------
+
+【函数】
+    toQIntType(t: ScalarType) -> ScalarType
+        用途: 转换为对应的量化类型
+        算法:Byte -> QUInt8
+            Char -> QInt8
+            Int  -> QInt32
+            其他 -> t
+
+    toUnderlying(t: ScalarType) -> ScalarType
+        用途: 获取量化类型的底层类型
+        算法:
+            QUInt8, QUInt4x2, QUInt2x4 -> Byte
+            QInt8 -> Char
+            QInt32 -> Int
+            其他 -> t
+
+    isUnderlying(type: ScalarType, qtype: ScalarType) -> bool
+        用途: 判断 type 是否为 qtype 的底层类型
+        算法: type == toUnderlying(qtype)
+
+    toRealValueType(t: ScalarType) -> ScalarType
+        用途: 获取复数类型的实部类型
+        算法:
+            ComplexHalf -> Half
+            ComplexFloat -> Float
+            ComplexDouble -> Double
+            其他 -> t
+
+    toComplexType(t: ScalarType) -> ScalarType
+        用途: 转换为对应的复数类型
+        算法:
+            BFloat16 -> ComplexFloat  # BFloat16 范围等价于 Float
+            Half -> ComplexHalf
+            Float -> ComplexFloat
+            Double -> ComplexDouble
+            Complex* -> 自身
+            其他 -> error
+
+---
+
+## 5. 类型提升
+
+--------------------------------
+promoteTypes
+来源: ScalarType.cpp:43-129
+--------------------------------
+
+【签名】
+    promoteTypes(a: ScalarType, b: ScalarType) -> ScalarType
+
+【算法】
+    # Step 1: 特殊情况处理
+    if a == Undefined or b == Undefined:
+        return Undefined
+    
+    if a == b:
+        return a
+    
+    if isQIntType(a) or isQIntType(b):
+        raise error  # 量化类型提升未定义
+    
+    if isBitsType(a) or isBitsType(b):
+        return Undefined
+    
+    if isFloat8Type(a) or isFloat8Type(b):
+        raise error  # Float8 类型不支持提升
+    
+    if isBarebonesUnsignedType(a) or isBarebonesUnsignedType(b):
+        # 无符号整数提升规则不完整，只处理浮点提升
+        if isFloatingType(a): return a
+        if isFloatingType(b): return b
+        raise error
+    
+    # Step 2: 查表提升
+    # 将类型映射到索引
+    index2dtype = [Byte, Char, Short, Int, Long, Half, Float, Double,
+                   ComplexHalf, ComplexFloat, ComplexDouble, Bool, BFloat16]
+    
+    dtype2index = 反向映射表
+    
+    ix_a = dtype2index[a]
+    ix_b = dtype2index[b]
+    
+    # 提升查找表 (13x13)
+    # 行列分别对应 index2dtype 中的类型
+    _promoteTypesLookup = [
+        # u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  bf
+        [u1, i2, i2, i4, i8, f2, f4, f8, c2, c4, c8, u1, bf],  # u1
+        [i2, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, i1, bf],  # i1
+        [i2, i2, i2, i4, i8, f2, f4, f8, c2, c4, c8, i2, bf],  # i2
+        [i4, i4, i4, i4, i8, f2, f4, f8, c2, c4, c8, i4, bf],  # i4
+        [i8, i8, i8, i8, i8, f2, f4, f8, c2, c4, c8, i8, bf],  # i8
+        [f2, f2, f2, f2, f2, f2, f4, f8, c2, c4, c8, f2, f4],  # f2
+        [f4, f4, f4, f4, f4, f4, f4, f8, c4, c4, c8, f4, f4],  # f4
+        [f8, f8, f8, f8, f8, f8, f8, f8, c8, c8, c8, f8, f8],  # f8
+        [c2, c2, c2, c2, c2, c2, c4, c8, c2, c4, c8, c2, c4],  # c2
+        [c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, c4, c4],  # c4
+        [c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8],  # c8
+        [u1, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, b1, bf],  # b1
+        [bf, bf, bf, bf, bf, f4, f4, f8, c4, c4, c8, bf, bf],  # bf
+    ]
+    
+    return _promoteTypesLookup[ix_a][ix_b]
+
+【备注】
+    - 提升规则基于 NumPy 的 promote_types
+    - 查找表顺序必须与 index2dtype 一致
+    - 整数 + 浮点 -> 浮点
+    - 实数 + 复数 -> 复数
+    - Bool 作为独立类别，不与其他类型提升
+
+---
+
+## 6. 类型转换规则
+
+--------------------------------
+canCast
+来源: ScalarType.h:566-591
+--------------------------------
+
+【签名】
+    canCast(from: ScalarType, to: ScalarType) -> bool
+
+【算法】
+    # 禁止复数 -> 非复数
+    if isComplexType(from) and not isComplexType(to):
+        return false
+    
+    # 禁止浮点 -> 整数
+    if isFloatingType(from) and isIntegralType(to, includeBool=false):
+        return false
+    
+    # 禁止非 Bool -> Bool
+    if from != Bool and to == Bool:
+        return false
+    
+    return true
+
+【备注】
+    - 用于判断 in-place 操作是否允许类型转换
+    - 例如: int_tensor *= float 被禁止
+
+---
+
+## 7. 类型名称映射
+
+--------------------------------
+getDtypeNames
+来源: ScalarType.cpp:131-231
+--------------------------------
+
+【签名】
+    getDtypeNames(scalarType: ScalarType) -> (name: string, legacy_name: string)
+
+【算法】
+    返回类型的标准名称和遗留名称（如果有）
+    
+    示例:
+        Byte -> ("uint8", "")
+        Char -> ("int8", "")
+        Float -> ("float32", "float")
+        Double -> ("float64", "double")
+        Int -> ("int32", "int")
+        Long -> ("int64", "long")
+        Half -> ("float16", "half")
+        Bool -> ("bool", "")
+        BFloat16 -> ("bfloat16", "")
+        ComplexFloat -> ("complex64", "cfloat")
+        ComplexDouble -> ("complex128", "cdouble")
+        QInt8 -> ("qint8", "")
+        Float8_e5m2 -> ("float8_e5m2", "")
+        UInt1 -> ("uint1", "bit")
+        ...
+
+--------------------------------
+getStringToDtypeMap
+来源: ScalarType.cpp:233-254
+--------------------------------
+
+【签名】
+    getStringToDtypeMap() -> const unordered_map<string, ScalarType>&
+
+【算法】
+    # 懒初始化全局映射表
+    static result: unordered_map<string, ScalarType>
+    
+    if result.empty():
+        for scalar_type in all_scalar_types:
+            (name, legacy_name) = getDtypeNames(scalar_type)
+            result[name] = scalar_type
+            if legacy_name != "":
+                result[legacy_name] = scalar_type
+    
+    return result
+
+【用途】
+    从字符串名称解析 ScalarType，支持标准名称和遗留名称

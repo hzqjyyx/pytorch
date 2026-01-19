@@ -1,0 +1,92 @@
+--------------------------------
+RefcountedDeleter (共享 DataPtr 引用计数管理)
+来源: c10/core/RefcountedDeleter.cpp, c10/core/RefcountedDeleter.h
+--------------------------------
+
+【概述】
+    实现共享 DataPtr 的引用计数机制，用于 MultiPy 场景下多个 Python 解释器共享同一块数据。
+    通过自定义 deleter 和 context，使原本唯一的 DataPtr 表现为共享指针。
+
+【数据结构】
+    RefcountedDeleterContext:
+        other_ctx: unique_ptr<void, DeleterFnPtr>    # 原始 context 和 deleter
+        refcount: atomic_int                          # 引用计数
+
+【函数】
+    refcounted_deleter(ctx_: void*)
+        用途: 作为 DataPtr 的 ctx_deleter，递减引用计数，计数归零时删除 context
+        算法:
+            ctx = reinterpret_cast<RefcountedDeleterContext*>(ctx_)
+            ctx.refcount--
+            if ctx.refcount == 0:
+                ctx.other_ctx = nullptr    # 触发原始 deleter
+                delete ctx
+
+    maybeApplyRefcountedDeleter(storage: Storage)
+        用途: 如果 storage 的 DataPtr 未使用 refcounted_deleter，则替换为使用它
+        算法:
+            lock(replace_data_ptr_mutex)
+            
+            data_ptr = storage.mutable_data_ptr()
+            
+            if data_ptr.get_deleter() == refcounted_deleter:
+                return    # 已经是共享的
+            
+            # 提取原始信息
+            data = data_ptr.get()
+            other_ctx = data_ptr.get_context()
+            other_deleter = data_ptr.get_deleter()
+            device = data_ptr.device()
+            
+            # 释放原 context 避免被删除
+            data_ptr.release_context()
+            
+            # 创建引用计数 context
+            refcount_ctx = new RefcountedDeleterContext(other_ctx, other_deleter)
+            
+            # 替换为新 DataPtr
+            new_data_ptr = DataPtr(data, refcount_ctx, refcounted_deleter, device)
+            storage.set_data_ptr(new_data_ptr)
+
+    newStorageImplFromRefcountedDataPtr(storage: Storage) -> Storage
+        用途: 创建新的 StorageImpl，与原 storage 共享同一块数据
+        算法:
+            # 确保原 storage 使用 refcounted_deleter
+            maybeApplyRefcountedDeleter(storage)
+            
+            storage_impl = storage.unsafeGetStorageImpl()
+            data_ptr = storage.mutable_data_ptr()
+            
+            # 创建新 DataPtr（浅拷贝）
+            new_data_ptr = DataPtr(
+                data_ptr.get(),
+                data_ptr.get_context(),
+                data_ptr.get_deleter(),
+                data_ptr.device()
+            )
+            
+            # 立即递增引用计数（必须紧跟 new_data_ptr 创建）
+            reinterpret_cast<RefcountedDeleterContext*>(data_ptr.get_context())->refcount++
+            
+            # 创建新 StorageImpl
+            new_storage = make_intrusive<StorageImpl>(
+                use_byte_size_t(),
+                storage_impl->nbytes(),
+                new_data_ptr,
+                storage_impl->allocator(),
+                storage_impl->resizable()
+            )
+            
+            return new_storage
+
+【依赖】
+    c10::DataPtr                # 数据指针封装
+    c10::Storage                # 存储抽象
+    c10::StorageImpl            # 存储实现
+    c10::DeleterFnPtr           # deleter 函数指针类型
+    std::mutex                  # 线程安全保护
+
+【备注】
+    - 引用计数递增必须紧跟 DataPtr 创建，避免异常导致计数不一致
+    - 使用全局 mutex 保护 DataPtr 替换操作
+    - 仅用于 MultiPy 多解释器场景，每个解释器持有独立 StorageImpl 但共享底层数据

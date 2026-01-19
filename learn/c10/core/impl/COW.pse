@@ -1,0 +1,129 @@
+--------------------------------
+Copy-on-Write (COW) 存储管理
+来源: c10/core/impl/COW.cpp, c10/core/impl/COW.h
+--------------------------------
+
+【概述】
+    为 StorageImpl 提供写时复制机制，允许多个 Tensor 共享底层数据，
+    直到某个 Tensor 需要修改时才真正复制数据。
+
+【核心数据结构】
+    COWDeleterContext: 引用计数上下文
+        - refcount: atomic<int>           # 共享引用计数
+        - original_ctx: unique_ptr<void>  # 原始 DataPtr 的 context
+        - mutex: 保护并发访问
+
+【接口】
+
+    has_simple_data_ptr(storage: StorageImpl) -> bool
+        用途: 检查 storage 是否有简单的 DataPtr（无特殊 context）
+        算法:
+            data_ptr = storage.data_ptr()
+            ctx = data_ptr.get_context()
+            data = data_ptr.get()
+            allocator = storage.allocator()
+            
+            if allocator != nullptr:
+                return allocator.is_simple_data_ptr(data_ptr)
+            else:
+                return ctx == data  # context 就是 data 指针本身
+
+    is_cow_data_ptr(data_ptr: DataPtr) -> bool
+        用途: 检查 DataPtr 是否已经是 COW 类型
+        算法:
+            return data_ptr.get_deleter() == &cow_deleter
+
+    lazy_clone_storage(storage: StorageImpl) -> intrusive_ptr<StorageImpl>
+        用途: 创建 storage 的 COW 克隆，必要时将原 storage 转换为 COW
+        算法:
+            data_ptr = storage.data_ptr()
+            
+            # Case 1: 简单 DataPtr，首次转换为 COW
+            if has_simple_data_ptr(storage):
+                original_ctx = storage._mutable_data_ptr_no_checks().move_context()
+                cow_ctx = new COWDeleterContext(move(original_ctx))
+                new_data_ptr = make_data_ptr(data_ptr, cow_ctx)
+                
+                # 更新原 storage 为 COW
+                storage.set_data_ptr_noswap(copy_data_ptr(new_data_ptr))
+                
+            # Case 2: 已经是 COW，直接增加引用
+            else if is_cow_data_ptr(data_ptr):
+                new_data_ptr = copy_data_ptr(data_ptr)
+                
+            # Case 3: 有特殊 context 但不是 COW，无法处理
+            else:
+                return nullptr
+            
+            # 创建新的 StorageImpl，共享数据
+            return make_storage_impl(
+                storage.sym_nbytes(),
+                new_data_ptr,
+                storage.allocator(),
+                storage.resizable(),
+                storage.device_type()
+            )
+
+    materialize_cow_storage(storage: StorageImpl)
+        用途: 物化 COW storage，将共享数据转为独占（写时复制的"写"操作）
+        算法:
+            data_ptr = storage.data_ptr()
+            cow_ctx = data_ptr.cast_context<COWDeleterContext>(cow_deleter)
+            
+            result = cow_ctx.decrement_refcount()
+            
+            # Case 1: 这是最后一个引用，直接接管数据
+            if result is LastReference:
+                data = get<LastReference>(result)
+                new_data_ptr = DataPtr(
+                    data.release(),
+                    data_ptr.get(),
+                    data.get_deleter(),
+                    data_ptr.device()
+                )
+                
+            # Case 2: 还有其他引用，需要复制数据
+            else:  # NotLastReference
+                new_data_ptr = storage.allocator().clone(
+                    data_ptr.get(),
+                    storage.nbytes()
+                )
+            
+            # 替换 DataPtr，释放 COW context
+            old_data_ptr = storage.set_data_ptr_no_materialize_cow(new_data_ptr)
+            old_data_ptr.release_context()  # 避免重复递减引用计数
+
+【内部辅助函数】
+
+    make_data_ptr(data_ptr: DataPtr, ctx: COWDeleterContext&) -> DataPtr
+        用途: 包装原始 DataPtr 为 COW DataPtr
+        算法:
+            return DataPtr(
+                data_ptr.get(),
+                &ctx,
+                cow_deleter,
+                data_ptr.device()
+            )
+
+    copy_data_ptr(data_ptr: DataPtr) -> DataPtr
+        用途: 复制 COW DataPtr（增加引用计数）
+        算法:
+            cow_ctx = data_ptr.cast_context<COWDeleterContext>(cow_deleter)
+            cow_ctx.increment_refcount()
+            return make_data_ptr(data_ptr, cow_ctx)
+
+【依赖】
+    COWDeleterContext    # 引用计数管理，见 COWDeleter.h
+    cow_deleter          # COW 专用的 deleter 函数
+    StorageImpl          # 存储实现
+    DataPtr              # 数据指针封装
+
+【并发安全】
+    - lazy_clone_storage: 无锁，依赖输入 storage 的生命周期保证
+    - materialize_cow_storage: COWDeleterContext 内部用 mutex 保护引用计数操作
+    - 禁止在 at::parallel_for 循环内调用 materialize_cow_storage
+
+【备注】
+    - COW 机制仅支持简单 DataPtr 或已有 COW context 的 storage
+    - 对于有特殊 context 的 DataPtr（如自定义 allocator context），无法转换为 COW
+    - materialize 时，如果是最后一个引用，避免不必要的数据复制

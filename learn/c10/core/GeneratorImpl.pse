@@ -1,0 +1,123 @@
+--------------------------------
+GeneratorImpl (PRNG引擎基类)
+来源: c10/core/GeneratorImpl.h, c10/core/GeneratorImpl.cpp
+--------------------------------
+
+【常量】
+    default_rng_seed_val: uint64 = 67280421310721    # 默认种子值，0/1位分布良好
+
+【状态】
+    device_: Device                    # 生成器所属设备
+    key_set_: DispatchKeySet          # 调度键集合
+    pyobj_: PyObject*                 # Python对象引用
+    mutex_: std::mutex                # 线程安全锁
+
+【接口】
+    GeneratorImpl(device_in: Device, key_set: DispatchKeySet)
+        用途: 构造生成器实例
+
+    clone() -> intrusive_ptr<GeneratorImpl>
+        用途: 克隆生成器（ATen中唯一的复制方式）
+        实现: 
+            res = this.clone_impl()
+            incref(res)           # 增加强引用计数
+            incref_weak(res)      # 增加弱引用计数
+            return reclaim(res)
+
+    device() -> Device
+        用途: 获取生成器所属设备
+
+    key_set() -> DispatchKeySet
+        用途: 获取调度键集合
+
+    set_pyobj(pyobj: PyObject*)
+        用途: 设置Python对象引用
+
+    pyobj() -> PyObject*
+        用途: 获取Python对象引用
+
+    # 以下为纯虚函数，由子类实现
+    set_current_seed(seed: uint64) -> void
+        用途: 设置当前种子值
+
+    set_offset(offset: uint64) -> void
+        用途: 设置生成器偏移量
+
+    get_offset() -> uint64
+        用途: 获取当前偏移量
+
+    current_seed() -> uint64
+        用途: 获取当前种子值
+
+    seed() -> uint64
+        用途: 生成新种子并设置
+
+    set_state(new_state: TensorImpl&) -> void
+        用途: 从Tensor恢复生成器状态
+
+    get_state() -> intrusive_ptr<TensorImpl>
+        用途: 将生成器状态导出为Tensor
+
+    graphsafe_set_state(new_state: intrusive_ptr<GeneratorImpl>) -> void
+        用途: 图安全的状态设置（默认未实现）
+        实现: TORCH_CHECK_NOT_IMPLEMENTED
+
+    graphsafe_get_state() -> intrusive_ptr<GeneratorImpl>
+        用途: 图安全的状态获取（默认未实现）
+        实现: TORCH_CHECK_NOT_IMPLEMENTED
+
+    clone_impl() -> GeneratorImpl*
+        用途: 克隆实现（纯虚函数，由子类实现）
+
+【依赖】
+    c10::intrusive_ptr    # 智能指针管理
+    TORCH_CHECK_NOT_IMPLEMENTED    # 未实现错误
+
+【备注】
+    - 生成器及其派生类非线程安全，使用时需通过 mutex_ 加锁
+    - 禁用拷贝构造和赋值，只能通过 clone() 复制
+    - 默认每个设备有一个懒初始化的生成器
+    - torch.Generator() API 当前只能创建 CPUGeneratorImpl
+
+--------------------------------
+getNonDeterministicRandom (非确定性随机数生成)
+来源: c10/core/GeneratorImpl.cpp
+--------------------------------
+
+【函数】
+    getNonDeterministicRandom(is_cuda: bool = false) -> uint64
+        用途: 获取非确定性随机数作为种子
+        实现:
+            if not is_cuda:
+                # CPU路径
+                if Windows:
+                    return high_resolution_clock.now().count()
+                elif SGX:
+                    sgx_read_rand(&s, sizeof(s))
+                    return s
+                else:
+                    return readURandomLong()
+            else:
+                # CUDA路径
+                rd = std::random_device()
+                # 限制为53位以确保double中唯一表示
+                return (((rd() << 32) + rd()) & 0x1FFFFFFFFFFFFF)
+
+    readURandomLong() -> uint64    # 仅Unix/Linux
+        用途: 从 /dev/urandom 读取随机数
+        实现:
+            fd = open("/dev/urandom", O_RDONLY)
+            read(fd, &randValue, 8)
+            close(fd)
+            return randValue
+
+【平台特定】
+    Windows: 使用高精度时钟
+    SGX: 使用 sgx_read_rand 硬件随机数
+    Unix/Linux: 读取 /dev/urandom
+    CUDA: 使用 std::random_device 并限制位数
+
+【备注】
+    - 这是遗留实现（来自THRandom），不同平台行为不一致
+    - CUDA路径限制为53位是为了在double中保持精度
+    - 未来应考虑统一使用 std::random_device

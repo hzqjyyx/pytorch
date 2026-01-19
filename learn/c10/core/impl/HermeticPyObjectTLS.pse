@@ -1,0 +1,54 @@
+--------------------------------
+HermeticPyObjectTLS (PyObject关联控制)
+来源: c10/core/impl/HermeticPyObjectTLS.h, c10/core/impl/HermeticPyObjectTLS.cpp
+--------------------------------
+
+【状态】
+    hermeticPyObjectState: thread_local atomic<bool>    # 线程局部状态，控制当前线程是否启用hermetic模式
+    haveState_: static atomic<bool>                      # 全局标志，标记是否已初始化（torchdeploy/multipy环境）
+
+【接口】
+    set_state(state: bool)
+        用途: 设置当前线程的hermetic状态
+        实现: hermeticPyObjectState = state
+
+    get_state() -> bool
+        用途: 查询当前线程是否启用hermetic模式
+        实现:
+            # 快速路径（当前已禁用）
+            # if !haveState_.load(relaxed):
+            #     return false
+            
+            # 实际路径：总是查询TLS
+            return get_tls_state()
+        
+        备注: 快速路径代码存在但被 `if (false && ...)` 禁用，用于测试hermetic模式在标准PyTorch构建中的正确性
+
+    init_state()
+        用途: 初始化hermetic模式（由torchdeploy/multipy顶层调用）
+        实现: haveState_ = true
+
+    get_tls_state() -> bool
+        用途: 内部函数，读取线程局部状态
+        实现: return hermeticPyObjectState
+
+【语义】
+    hermetic模式启用时（state=true）:
+        - Tensor首次分配时**不**永久关联PyObject
+        - 每次访问都会得到不同的PyObject实例
+    
+    hermetic模式禁用时（state=false）:
+        - Tensor首次分配时永久关联PyObject
+        - 后续访问返回同一个PyObject
+
+【并发安全】
+    haveState_只会从false→true转换一次（初始化时），之后不再改变
+    
+    内存序选择（relaxed）的正确性论证:
+    - 第一个解释器：无论看到haveState_为true/false都能正常工作
+      * false: 使用原有逻辑（调用自身作为handler）
+      * true: 使用hermetic模式（功能等价）
+    
+    - 第二个解释器：必须看到haveState_=true（请求会转发到第一个解释器）
+      * 假设：解释器初始化与实际操作之间存在同步点
+      * 保证：第二个解释器启动时必然看到true

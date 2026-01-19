@@ -1,0 +1,184 @@
+--------------------------------
+DeviceGuardImplInterface (设备守卫接口)
+来源: c10/core/impl/DeviceGuardImplInterface.h
+--------------------------------
+
+【概述】
+    虚接口，为不同设备类型（CUDA、HIP等）提供统一的设备/流切换功能。
+    每个设备类型需实现并注册此接口。所有子类必须声明为 final。
+
+【状态】
+    device_guard_impl_registry: atomic<DeviceGuardImplInterface*>[MAX_DEVICE_TYPES]
+        # 全局注册表，存储各设备类型的实现指针
+        # 使用 atomic 保证线程安全，指针在程序结束时泄漏（intentional leak）
+
+【核心接口】
+    type() -> DeviceType用途: 返回此实现管理的设备类型
+
+    exchangeDevice(d: Device) -> Device
+        用途: 切换当前设备到 d，返回之前的设备
+
+    getDevice() -> Device
+        用途: 获取当前设备
+
+    setDevice(d: Device)
+        用途: 设置当前设备到 d
+
+    uncheckedSetDevice(d: Device) noexcept
+        用途: 无错误检查地设置设备（可在析构函数中调用）
+
+【流管理接口】
+    getStream(d: Device) -> Stream
+        用途: 获取指定设备的当前流
+
+    getDefaultStream(d: Device) -> Stream
+        用途: 获取指定设备的默认流默认: 抛出异常（子类需覆盖）
+
+    getStreamFromGlobalPool(d: Device, isHighPriority: bool = false) -> Stream
+        用途: 从全局池获取流
+        默认: 抛出异常（子类需覆盖）
+
+    getNewStream(d: Device, priority: int = 0) -> Stream
+        用途: 创建新流
+        默认: 抛出异常（子类需覆盖）
+
+    exchangeStream(s: Stream) -> Stream
+        用途: 切换当前流到 s，返回之前的流
+        注意: 不要求设置当前设备
+
+【事件管理接口】
+    record(event: void**, stream: Stream, device_index: DeviceIndex, flag: EventFlag)
+        用途: 在流中记录事件
+        默认: 抛出异常（子类需覆盖）
+
+    block(event: void*, stream: Stream)
+        用途: 让流等待事件完成
+        默认: 抛出异常（子类需覆盖）
+
+    queryEvent(event: void*) -> bool
+        用途: 查询事件是否已完成
+        返回: true 如果事件未被调度或已完成
+        默认: 抛出异常（子类需覆盖）
+
+    destroyEvent(event: void*, device_index: DeviceIndex) noexcept
+        用途: 销毁事件
+        默认: 空操作
+
+    synchronizeEvent(event: void*)
+        用途: 阻塞等待事件完成
+        默认: 抛出异常（子类需覆盖）
+
+    elapsedTime(event1: void*, event2: void*, device_index: DeviceIndex) -> double
+        用途: 计算两个事件之间的时间差
+        默认: 抛出异常（子类需覆盖）
+
+【同步接口】
+    queryStream(stream: Stream) -> bool
+        用途: 查询流中所有工作是否完成
+        默认: 抛出异常（子类需覆盖）
+
+    synchronizeStream(stream: Stream)
+        用途: 阻塞等待流中所有工作完成
+        默认: 抛出异常（子类需覆盖）
+
+    synchronizeDevice(device_index: DeviceIndex)
+        用途: 阻塞等待设备上所有流完成
+        默认: 抛出异常（子类需覆盖）
+
+【其他接口】
+    deviceCount() -> DeviceIndex noexcept
+        用途: 返回设备数量
+        注意: 必须不抛异常，出错时返回 0
+
+    recordDataPtrOnStream(data: DataPtr, stream: Stream)
+        用途: 通知缓存分配器数据指针在流上使用
+        默认: 空操作
+
+【依赖】
+    TORCH_CHECK    # 错误检查
+
+--------------------------------
+NoOpDeviceGuardImpl (无操作设备守卫)
+来源: c10/core/impl/DeviceGuardImplInterface.h
+--------------------------------
+
+【概述】
+    模板类，为无设备索引概念的设备（CPU、Meta）提供空操作实现。
+
+【签名】
+    template<DeviceType D>
+    struct NoOpDeviceGuardImpl final : DeviceGuardImplInterface
+
+【实现】
+    type() -> DeviceType
+        返回: D
+
+    exchangeDevice(d: Device) -> Device
+        返回: Device(D, -1)    # 无操作
+
+    getDevice() -> Device
+        返回: Device(D, -1)
+
+    setDevice(d: Device)
+        # 无操作
+
+    uncheckedSetDevice(d: Device) noexcept
+        # 无操作
+
+    getStream(d: Device) -> Stream
+        返回: Stream(Stream::DEFAULT, Device(D, -1))
+
+    getNewStream(d: Device, priority: int = 0) -> Stream
+        返回: Stream(Stream::DEFAULT, Device(D, -1))
+
+    exchangeStream(s: Stream) -> Stream
+        返回: Stream(Stream::DEFAULT, Device(D, -1))
+
+    deviceCount() -> DeviceIndex
+        返回: 1
+
+    queryStream(stream: Stream) -> bool
+        返回: true    # 总是完成
+
+    synchronizeStream(stream: Stream)
+        # 无操作
+
+    record/block/queryEvent/destroyEvent
+        # 抛出异常: 不支持事件
+
+--------------------------------
+注册机制
+来源: c10/core/impl/DeviceGuardImplInterface.cpp
+--------------------------------
+
+【全局状态】
+    device_guard_impl_registry: atomic<DeviceGuardImplInterface*>[MAX_DEVICE_TYPES]
+        # 定义在 .cpp 中
+
+【注册器】
+    DeviceGuardImplRegistrar(type: DeviceType, impl: DeviceGuardImplInterface*)
+        用途: 将实现注册到全局表
+        实现: device_guard_impl_registry[type].store(impl)
+
+【查询函数】
+    getDeviceGuardImpl(type: DeviceType) -> DeviceGuardImplInterface*
+        用途: 获取指定设备类型的实现
+        实现:
+            # Workaround: NVCC 编译器 bug，对 DeviceType 应用 0xFF 掩码
+            p = device_guard_impl_registry[type & 0xFF].load()
+            assert p != nullptr, "PyTorch is not linked with support for {type} devices"
+            return p
+
+    hasDeviceGuardImpl(type: DeviceType) -> bool
+        用途: 检查设备类型是否已注册
+        返回: device_guard_impl_registry[type].load() != nullptr
+
+【注册宏】
+    C10_REGISTER_GUARD_IMPL(DevType, DeviceGuardImpl)
+        用途: 静态注册设备守卫实现
+        展开: static DeviceGuardImplRegistrar g_##DeviceType(DeviceType::DevType, new DeviceGuardImpl())
+
+【备注】
+    - 注册表指针故意泄漏，确保程序结束时仍可用（用于析构函数中的清理）
+    - 使用 atomic 保证多线程注册/读取安全
+    - DeviceType 使用 0xFF 掩码是 NVCC 编译器 bug 的 workaround

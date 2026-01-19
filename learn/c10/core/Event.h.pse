@@ -1,0 +1,67 @@
+--------------------------------
+Event (后端无关的事件同步)
+来源: c10/core/Event.h
+--------------------------------
+
+【状态】
+    impl_: InlineEvent<VirtualGuardImpl>    # 底层事件实现
+
+【接口】
+    Event(device_type: DeviceType, flag: EventFlag = PYTORCH_DEFAULT)
+        用途: 构造指定设备类型的事件
+        调用: impl::InlineEvent<impl::VirtualGuardImpl>
+
+    device() -> Device
+        用途: 获取事件所属设备
+
+    device_type() -> DeviceType
+        用途: 获取设备类型
+
+    device_index() -> DeviceIndex
+        用途: 获取设备索引
+
+    flag() -> EventFlag
+        用途: 获取事件标志
+
+    was_marked_for_recording() -> bool
+        用途: 查询事件是否曾被标记为待记录
+
+    recordOnce(stream: Stream)
+        用途: 仅在首次调用时记录事件（非线程安全）
+        调用: impl_.recordOnce()
+
+    record(stream: Stream)
+        用途: 递增事件版本，在流的工作队列中插入记录任务
+        调用: impl_.record()
+
+    block(stream: Stream)
+        用途: 在流中插入等待命令，阻塞直到当前版本的事件被记录
+        调用: impl_.block()
+
+    query() -> bool
+        用途: 查询事件状态
+        返回: true 当且仅当 (1) 从未被记录 或 (2) 当前版本已记录完成
+        调用: impl_.query()
+
+    elapsedTime(other: Event) -> double
+        用途: 计算两个事件之间的时间差
+        调用: impl_.elapsedTime()
+
+    eventId() -> void*
+        用途: 获取事件的底层标识符
+        调用: impl_.eventId()
+
+    synchronize()
+        用途: 同步等待事件完成
+        调用: impl_.synchronize()
+
+【依赖】
+    impl::InlineEvent<impl::VirtualGuardImpl>    # 底层虚拟事件实现
+    impl::DeviceGuardImplInterface# 设备后端接口
+
+【备注】
+    - 设计模式: 类似 CUDA/HIP 事件，支持版本化记录
+    - 版本语义: 每次 record() 创建新版本，wait() 仅等待调用时的版本
+    - 线程安全: 不保证线程安全，recordOnce() 可能多次调用
+    - 移动语义: 支持移动构造/赋值，禁止拷贝
+    - 后端选择: 编译时未知后端时使用此类，已知后端优先用 InlineEvent 或后端特定事件

@@ -1,0 +1,259 @@
+--------------------------------
+StorageImpl (存储实现)
+来源: c10/core/StorageImpl.h, c10/core/StorageImpl.cpp
+--------------------------------
+
+【状态】
+    data_ptr_: DataPtr                              # 数据指针
+    size_bytes_: SymInt                             # 字节大小（可能是符号整数）
+    size_bytes_is_heap_allocated_: bool             # size_bytes_ 是否堆分配
+    resizable_: bool                                # 是否可调整大小
+    received_cuda_: bool                            # 是否从其他进程接收的CUDA内存
+    has_mutable_data_ptr_check_: bool               # 是否需要检查可变数据指针访问
+    throw_on_mutable_data_ptr_: bool                # 访问可变数据指针时是否抛出异常
+    throw_on_immutable_data_ptr_: bool              # 访问不可变数据指针时是否抛出异常
+    warn_deprecated_on_mutable_data_ptr_: bool      # 访问可变数据指针时是否警告
+    allocator_: Allocator*                          # 内存分配器
+    pyobj_slot_: impl::PyObjectSlot                 # Python对象槽
+    extra_meta_: unique_ptr<StorageExtraMeta>       # 额外元数据（可选）
+
+【接口】
+    StorageImpl(use_byte_size_t, size_bytes: SymInt, data_ptr: DataPtr, allocator: Allocator*, resizable: bool)
+        用途: 构造函数，使用已有数据指针
+        约束: resizable=true 时 allocator 必须非空
+
+    StorageImpl(use_byte_size_t, size_bytes: SymInt, allocator: Allocator*, resizable: bool)
+        用途: 构造函数，自动分配内存
+        逻辑: 
+            if size_bytes.is_heap_allocated():
+                data_ptr = allocator.allocate(0)
+            else:
+                data_ptr = allocator.allocate(size_bytes.as_int_unchecked())
+
+    reset()
+        用途: 清空存储，释放数据指针并重置大小
+
+    nbytes() -> size_t
+        用途: 获取字节大小（非符号整数版本）
+        约束: size_bytes_ 不能是堆分配的符号整数
+
+    sym_nbytes() -> SymInt
+        用途: 获取字节大小（符号整数版本）
+
+    set_nbytes(size_bytes: size_t | SymInt)
+        用途: 设置字节大小
+
+    resizable() -> bool
+        用途: 查询是否可调整大小
+
+    data_ptr() -> const DataPtr&
+        用途: 获取不可变数据指针
+        逻辑:
+            if throw_on_immutable_data_ptr_:
+                throw_data_ptr_access_error()
+            return data_ptr_
+
+    mutable_data_ptr() -> DataPtr&
+        用途: 获取可变数据指针
+        逻辑:
+            if has_mutable_data_ptr_check_:
+                if throw_on_immutable_data_ptr_:
+                    throw_data_ptr_access_error()
+                if throw_on_mutable_data_ptr_:
+                    throwNullDataPtrError()
+                if warn_deprecated_on_mutable_data_ptr_:
+                    warnDeprecatedDataPtr()
+                maybe_materialize_cow()
+            return data_ptr_
+
+    _mutable_data_ptr_no_checks() -> DataPtr&
+        用途: 绕过所有检查获取可变数据指针
+
+    set_data_ptr(data_ptr: DataPtr) -> DataPtr
+        用途: 设置数据指针，返回旧指针
+        逻辑:
+            maybe_materialize_cow()
+            return set_data_ptr_no_materialize_cow(data_ptr)
+
+    set_data_ptr_noswap(data_ptr: DataPtr)
+        用途: 设置数据指针，不返回旧指针
+
+    data() -> const void*
+        用途: 获取不可变数据地址
+        逻辑:
+            if throw_on_immutable_data_ptr_:
+                throw_data_ptr_access_error()
+            return data_ptr_.get()
+
+    mutable_data() -> void*
+        用途: 获取可变数据地址
+        逻辑: 同 mutable_data_ptr()，但返回原始指针
+
+    device_type() -> DeviceType
+        用途: 获取设备类型
+
+    device() -> Device
+        用途: 获取设备
+
+    allocator() -> Allocator*
+        用途: 获取分配器
+
+    set_allocator(allocator: Allocator*)
+        用途: 设置分配器
+
+    set_resizable(resizable: bool)
+        用途: 设置是否可调整大小
+        约束: resizable=true 时 allocator_ 必须非空
+
+    UniqueStorageShareExternalPointer(src: void*, size_bytes: size_t, d: DeleterFnPtr = nullptr)
+        用途: 共享外部指针（use_count必须为1）
+        逻辑:
+            data_ptr_ = DataPtr(src, src, d, data_ptr_.device())
+            size_bytes_ = size_bytes
+            size_bytes_is_heap_allocated_ = false
+            allocator_ = nullptr
+            resizable_ = false
+
+    UniqueStorageShareExternalPointer(data_ptr: DataPtr, size_bytes: size_t)
+        用途: 共享外部指针（use_count必须为1）
+
+    set_received_cuda(received_cuda: bool)
+        用途: 标记是否从其他进程接收CUDA内存
+
+    received_cuda() -> bool
+        用途: 查询是否从其他进程接收CUDA内存
+
+    pyobj_slot() -> impl::PyObjectSlot*
+        用途: 获取Python对象槽
+
+    get_extra_meta() -> StorageExtraMeta&
+        用途: 获取额外元数据，懒初始化
+
+    throw_data_ptr_access_error() -> [[noreturn]]
+        用途: 抛出数据指针访问错误
+        逻辑:
+            if extra_meta_ and extra_meta_.custom_data_ptr_error_msg_:
+                TORCH_CHECK(false, *extra_meta_.custom_data_ptr_error_msg_)
+            TORCH_CHECK(false, "Cannot access data pointer of Storage that is invalid.")
+
+    release_data_and_set_meta_custom_data_ptr_error_msg_(s: optional<string>)
+        用途: 释放数据并设置自定义错误消息
+        逻辑:
+            throw_on_immutable_data_ptr_ = true
+            get_extra_meta().custom_data_ptr_error_msg_ = s
+            refresh_has_data_ptr_check()
+
+    set_throw_on_mutable_data_ptr()
+        用途: 设置访问可变数据指针时抛出异常
+
+    set_warn_deprecated_on_mutable_data_ptr()
+        用途: 设置访问可变数据指针时发出警告
+
+【内部方法】
+    refresh_has_data_ptr_check()
+        用途: 刷新是否需要检查数据指针访问的标志
+        逻辑:
+            has_mutable_data_ptr_check_ = is_cow() or throw_on_mutable_data_ptr_ or 
+                                          warn_deprecated_on_mutable_data_ptr_ or throw_on_immutable_data_ptr_
+
+    is_cow() -> bool
+        用途: 检查是否为写时复制数据指针
+        调用: c10::impl::cow::is_cow_data_ptr(data_ptr_)
+
+    maybe_materialize_cow()
+        用途: 如果是写时复制，触发实际复制
+        逻辑:
+            if is_cow():
+                impl::cow::materialize_cow_storage(*this)
+
+    set_data_ptr_no_materialize_cow(data_ptr: DataPtr) -> DataPtr
+        用途: 设置数据指针，不触发写时复制物化
+        逻辑:
+            old_data_ptr = data_ptr_
+            data_ptr_ = data_ptr
+            refresh_has_data_ptr_check()
+            return old_data_ptr
+
+【依赖】
+    throwNullDataPtrError()                         # 抛出空数据指针错误
+    warnDeprecatedDataPtr()                         # 发出数据指针废弃警告
+    c10::impl::cow::is_cow_data_ptr()              # 检查是否为COW指针
+    c10::impl::cow::materialize_cow_storage()      # 物化COW存储
+
+【备注】
+    - StorageImpl 是 Tensor 底层数据缓冲区的抽象
+    - 支持写时复制(COW)优化
+    - 支持符号整数大小(SymInt)用于动态形状
+    - 数据指针访问有多层保护机制：
+      * FakeTensor: throw_on_mutable_data_ptr_ = true
+      * 无效Storage: throw_on_immutable_data_ptr_ = true
+      * 废弃访问: warn_deprecated_on_mutable_data_ptr_ = true
+
+--------------------------------
+全局存储创建注册
+来源: c10/core/StorageImpl.cpp
+--------------------------------
+
+【状态】
+    StorageImplCreate: array<StorageImplCreateHelper, COMPILE_TIME_MAX_DEVICE_TYPES>
+        # 自定义StorageImpl创建函数指针数组
+
+    DeviceTypeAllowList: flat_hash_set<DeviceType>
+        # 允许注册自定义创建函数的设备类型白名单
+        # 默认: {DeviceType::PrivateUse1}
+
+【接口】
+    SetStorageImplCreate(t: DeviceType, fptr: StorageImplCreateHelper)
+        用途: 注册设备类型的自定义StorageImpl创建函数
+        约束: 只允许白名单中的设备类型（当前仅PrivateUse1）
+        逻辑:
+            assert t in DeviceTypeAllowList
+            assert StorageImplCreate[t] == nullptr
+            StorageImplCreate[t] = fptr
+
+    GetStorageImplCreate(t: DeviceType) -> StorageImplCreateHelper
+        用途: 获取设备类型的自定义StorageImpl创建函数
+
+    make_storage_impl(
+        use_byte_size: use_byte_size_t,
+        size_bytes: SymInt,
+        data_ptr: DataPtr,
+        allocator: Allocator*,
+        resizable: bool,
+        device_opt: optional<Device>
+    ) -> intrusive_ptr<StorageImpl>
+        用途: 创建StorageImpl，支持自定义设备实现
+        逻辑:
+            fptr = nullptr
+            if device_opt.has_value():
+                fptr = GetStorageImplCreate(device_opt.value().type())
+
+            if fptr != nullptr:
+                return fptr(use_byte_size, size_bytes, data_ptr, allocator, resizable)
+
+            if data_ptr != nullptr:
+                return make_intrusive<StorageImpl>(use_byte_size, size_bytes, data_ptr, allocator, resizable)
+            else:
+                return make_intrusive<StorageImpl>(use_byte_size, size_bytes, allocator, resizable)
+
+【备注】
+    - 允许自定义设备（如PrivateUse1）注册自己的StorageImpl子类
+    - 白名单机制防止随意扩展
+
+--------------------------------
+错误处理工具
+来源: c10/core/StorageImpl.cpp
+--------------------------------
+
+【函数】
+    throwNullDataPtrError() -> [[noreturn]]
+        用途: 抛出空数据指针错误（用于FakeTensor等）
+        调用: TORCH_CHECK
+
+    warnDeprecatedDataPtr()
+        用途: 发出FakeTensor数据指针访问废弃警告
+        调用: TORCH_WARN_ONCE
+
+【备注】
+    - throwNullDataPtrError: 用于torch.compile中访问FakeTensor/FunctionalTensor的data_ptr时
+    - warnDeprecatedDataPtr: 用于非compile场景下的FakeTensor.data_ptr访问

@@ -1,0 +1,217 @@
+--------------------------------
+Device (设备抽象)
+来源: c10/core/Device.h, c10/core/Device.cpp
+--------------------------------
+
+【状态】
+    type_: DeviceType    # 设备类型 (CPU, CUDA, XPU, etc.)
+    index_: DeviceIndex  # 设备索引 (int8_t, -1表示当前设备)
+
+【接口】
+    Device(type: DeviceType, index: DeviceIndex = -1)
+        用途: 构造设备对象
+        调用: validate()
+
+    Device(device_string: string)
+        参数: device_string=格式为 "type[:index]"，如 "cuda:0", "cpu"
+        用途: 从字符串解析设备
+        调用: parse_type(), validate()
+
+    operator==(other: Device) -> bool
+        用途: 比较设备类型和索引是否相同
+
+    operator!=(other: Device) -> bool
+        用途: 比较设备是否不同
+
+    set_index(index: DeviceIndex)
+        用途: 设置设备索引
+
+    type() -> DeviceType
+        用途: 获取设备类型
+
+    index() -> DeviceIndex
+        用途: 获取设备索引
+
+    has_index() -> bool
+        用途: 判断是否有显式索引 (index != -1)
+
+    is_cuda() -> bool
+        用途: 判断是否为 CUDA 设备
+
+    is_cpu() -> bool
+        用途: 判断是否为 CPU 设备
+
+    is_privateuseone() -> bool
+        用途: 判断是否为 PrivateUse1 设备
+
+    is_mps() -> bool
+        用途: 判断是否为 MPS 设备
+
+    is_hip() -> bool
+        用途: 判断是否为 HIP 设备
+
+    is_ve() -> bool
+        用途: 判断是否为 VE 设备
+
+    is_xpu() -> bool
+        用途: 判断是否为 XPU 设备
+
+    is_ipu() -> bool
+        用途: 判断是否为 IPU 设备
+
+    is_xla() -> bool
+        用途: 判断是否为 XLA 设备
+
+    is_mtia() -> bool
+        用途: 判断是否为 MTIA 设备
+
+    is_hpu() -> bool
+        用途: 判断是否为 HPU 设备
+
+    is_lazy() -> bool
+        用途: 判断是否为 Lazy 设备
+
+    is_vulkan() -> bool
+        用途: 判断是否为 Vulkan 设备
+
+    is_metal() -> bool
+        用途: 判断是否为 Metal 设备
+
+    is_maia() -> bool
+        用途: 判断是否为 MAIA 设备
+
+    is_meta() -> bool
+        用途: 判断是否为 Meta 设备
+
+    supports_as_strided() -> bool
+        用途: 判断设备是否支持任意步长
+        返回: type != IPU && type != XLA && type != Lazy && type != MTIA
+
+    str() -> string
+        用途: 转换为字符串表示，格式为 "type" 或 "type:index"
+        调用: DeviceTypeName()
+
+    validate()
+        用途: 验证设备参数合法性
+        约束:
+        - index >= -1
+        - CPU 设备的 index 必须 <= 0
+
+【依赖】
+    DeviceTypeName()           # 获取设备类型名称
+    get_privateuse1_backend()  # 获取自定义后端名称
+    TORCH_CHECK / TORCH_INTERNAL_ASSERT_DEBUG_ONLY  # 错误检查
+
+--------------------------------
+parse_type (设备类型解析)
+来源: c10/core/Device.cpp
+--------------------------------
+
+【函数】
+    parse_type(device_string: string) -> DeviceType
+        用途: 从字符串解析设备类型
+        调用: get_privateuse1_backend()
+
+【算法】
+    # 静态映射表
+    types = {
+        "cpu": CPU, "cuda": CUDA, "ipu": IPU, "xpu": XPU,
+        "mkldnn": MKLDNN, "opengl": OPENGL, "opencl": OPENCL,
+        "ideep": IDEEP, "hip": HIP, "ve": VE, "fpga": FPGA,
+        "maia": MAIA, "xla": XLA, "lazy": Lazy, "vulkan": Vulkan,
+        "mps": MPS, "meta": Meta, "hpu": HPU, "mtia": MTIA,
+        "privateuseone": PrivateUse1
+    }
+
+    if device_string == "mkldnn":
+        TORCH_WARN_ONCE("mkldnn 已弃用")
+
+    # 查找标准类型
+    if device_string in types:
+        return types[device_string]
+
+    # 检查自定义后端
+    if device_string == get_privateuse1_backend():
+        return PrivateUse1
+
+    # 未找到，报错
+    TORCH_CHECK(false, "无效设备类型: ", device_string)
+
+--------------------------------
+Device::Device(string) (字符串构造)
+来源: c10/core/Device.cpp
+--------------------------------
+
+【算法】
+    # 正则表达式: ([a-zA-Z_]+)(?::([1-9]\d*|0))?
+    # 状态机解析
+
+    device_name = ""
+    device_index_str = ""
+    state = START
+
+    for ch in device_string:
+        match state:
+            START:
+                if ch != ':':
+                    if isalpha(ch) or ch == '_':
+                        device_name += ch
+                    else:
+                        state = ERROR
+                else:
+                    state = INDEX_START
+
+            INDEX_START:
+                if isdigit(ch):
+                    device_index_str += ch
+                    state = INDEX_REST
+                else:
+                    state = ERROR
+
+            INDEX_REST:
+                if device_index_str[0] == '0':
+                    state = ERROR
+                    break
+                if isdigit(ch):
+                    device_index_str += ch
+                else:
+                    state = ERROR
+
+    # 验证解析结果
+    has_error = (device_name.empty() or 
+                 state == ERROR or 
+                 (state == INDEX_START and device_index_str.empty()))
+
+    TORCH_CHECK(!has_error, "无效设备字符串: ", device_string)
+
+    # 解析索引
+    if !device_index_str.empty():
+        index_ = stoi(device_index_str)
+
+    # 解析类型
+    type_ = parse_type(device_name)
+    validate()
+
+【备注】
+    - 支持格式: "cpu", "cuda:0", "xpu:2"
+    - 索引不能以 0 开头 (除非就是 "0")
+    - 索引为空时默认为 -1 (当前设备)
+
+--------------------------------
+std::hash<Device> (设备哈希)
+来源: c10/core/Device.h
+--------------------------------
+
+【函数】
+    hash(d: Device) -> size_t
+        用途: 计算设备对象的哈希值
+
+【算法】
+    # 将 type (uint8) 和 index (int8) 拼接为 uint32
+    # 注意: 必须先转为 uint8 避免符号扩展
+    bits = (uint32(uint8(d.type())) << 16) | uint32(uint8(d.index()))
+    return hash<uint32>(bits)
+
+【备注】
+    - DeviceType 和 DeviceIndex 都是 8 位
+    - 必须避免符号扩展 (index 可能为 -1)

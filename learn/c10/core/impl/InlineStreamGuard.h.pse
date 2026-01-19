@@ -1,0 +1,135 @@
+--------------------------------
+InlineStreamGuard (流守卫)
+来源: c10/core/impl/InlineStreamGuard.h
+--------------------------------
+
+【状态】
+    original_stream_of_original_device_: Stream    # 原始设备的原始流
+    original_stream_of_current_device_: Stream     # 当前设备的原始流
+    current_stream_: Stream                        # 当前流
+
+【接口】
+    InlineStreamGuard(stream: Stream)
+        用途: 切换到 stream 对应的设备，并设置该设备的当前流为 stream逻辑:
+            InlineDeviceGuard<T>(stream.device())original_stream_of_original_device_ = impl_.getStream(original_device())
+            original_stream_of_current_device_ = impl_.exchangeStream(stream)
+            current_stream_ = streamInlineStreamGuard(stream: Stream, impl: DeviceGuardImplInterface*)
+        用途: 测试用构造函数，允许指定自定义 impl
+        约束: 仅当 T == VirtualGuardImpl 时可用
+
+    ~InlineStreamGuard()
+        用途: 析构时恢复当前设备的原始流
+        逻辑:
+            impl_.exchangeStream(original_stream_of_current_device_)
+
+    reset_stream(stream: Stream)
+        用途: 重置流守卫到新的 stream
+        逻辑:
+            if stream.device() == current_device():
+                impl_.exchangeStream(stream)
+                current_stream_ = stream
+            else:
+                # 跨设备切换：先恢复当前设备流，再切换设备，再设置新流
+                impl_.exchangeStream(original_stream_of_current_device_)
+                reset_device(stream.device())
+                original_stream_of_current_device_ = impl_.exchangeStream(stream)
+                current_stream_ = stream
+
+    original_stream() -> Stream
+        用途: 返回原始设备的原始流（用户最关心的流）
+
+    current_stream() -> Stream
+        用途: 返回当前流
+
+    current_device() -> Device
+        用途: 返回当前设备
+
+    original_device() -> Device
+        用途: 返回原始设备
+
+【备注】
+    - 禁止拷贝和移动（无未初始化状态）
+    - 继承自 InlineDeviceGuard<T>，复用设备切换逻辑
+    - reset_stream 不保留其他设备的流状态，多设备场景需用 MultiStreamGuard
+
+--------------------------------
+InlineOptionalStreamGuard (可选流守卫)
+来源: c10/core/impl/InlineStreamGuard.h
+--------------------------------
+
+【状态】
+    guard_: Optional<InlineStreamGuard<T>>    # 可选的流守卫
+
+【接口】
+    InlineOptionalStreamGuard()
+        用途: 创建未初始化的流守卫
+
+    InlineOptionalStreamGuard(stream_opt: Optional<Stream>)
+        用途: 如果 stream_opt 有值，则初始化流守卫
+
+    InlineOptionalStreamGuard(args...)
+        用途: 转发参数到 InlineStreamGuard 构造函数
+
+    reset_stream(stream: Stream)
+        用途: 重置流守卫到新的 stream，如果未初始化则初始化
+        逻辑:
+            if guard_.has_value():
+                guard_->reset_stream(stream)
+            else:
+                guard_.emplace(stream)
+
+    original_stream() -> Optional<Stream>
+        用途: 返回原始流，未初始化时返回 nullopt
+
+    current_stream() -> Optional<Stream>
+        用途: 返回当前流，未初始化时返回 nullopt
+
+    reset()
+        用途: 恢复原始流并重置为未初始化状态
+
+【备注】
+    - 禁止拷贝和移动
+    - 支持延迟初始化
+
+--------------------------------
+InlineMultiStreamGuard (多流守卫)
+来源: c10/core/impl/InlineStreamGuard.h
+--------------------------------
+
+【状态】
+    impl_: Optional<T>                # 设备守卫实现
+    original_streams_: Vector<Stream> # 所有设备的原始流
+
+【接口】
+    InlineMultiStreamGuard(streams: ArrayRef<Stream>)
+        用途: 对每个流调用 exchangeStream，用于多设备场景
+        逻辑:
+            if streams.empty():
+                return
+            
+            device_type = getDeviceTypeOfStreams(streams)
+            impl_.emplace(device_type)
+            
+            for s in streams:
+                original_streams_.push_back(impl_->exchangeStream(s))
+
+    ~InlineMultiStreamGuard()
+        用途: 析构时恢复所有流
+        逻辑:
+            if impl_.has_value():
+                for s in original_streams_:
+                    impl_->exchangeStream(s)
+
+【依赖】
+    getDeviceTypeOfStreams(streams: ArrayRef<Stream>) -> DeviceType
+        用途: 验证所有流的设备类型一致并返回
+        逻辑:
+            assert streams.size() > 0
+            type = streams[0].device_type()
+            for idx in range(1, streams.size()):
+                assert streams[idx].device_type() == type
+            return type
+
+【备注】
+    - 禁止拷贝和移动
+    - 所有流必须属于同一设备类型

@@ -1,0 +1,112 @@
+--------------------------------
+PyObjectSlot (Python对象槽管理)
+来源: c10/core/impl/PyObjectSlot.cpp, c10/core/impl/PyObjectSlot.h
+--------------------------------
+
+【状态】
+    pyobj_interpreter_: atomic<PyInterpreter*>    # 解释器标签，标识此对象属于哪个Python解释器
+    pyobj_: PyObject*                              # Python对象指针，最低位作为所有权标志位
+
+【接口】
+    PyObjectSlot()用途: 初始化为空状态 (pyobj_interpreter_=nullptr, pyobj_=nullptr)
+
+    ~PyObjectSlot()
+        用途: 析构时调用 maybe_destroy_pyobj()
+
+    maybe_destroy_pyobj()
+        用途: 如果拥有PyObject所有权，则调用解释器的decref释放
+        算法:
+            if owns_pyobj():
+                interpreter = pyobj_interpreter_.load(memory_order_acquire)
+                interpreter->decref(_unchecked_untagged_pyobj(), has_pyobj_slot=true)
+                pyobj_ = nullptr
+
+    init_pyobj(self_interpreter: PyInterpreter*, pyobj: PyObject*, status: PyInterpreterStatus)
+        参数: status=当前解释器标签状态 (DEFINITELY_UNINITIALIZED|TAGGED_BY_US|MAYBE_UNINITIALIZED|TAGGED_BY_OTHER)
+        用途: 关联PyObject到TensorImpl，并根据状态设置解释器标签
+        算法:
+            match status:
+                DEFINITELY_UNINITIALIZED:
+                    # 无竞争，直接relaxed store
+                    pyobj_interpreter_.store(self_interpreter, memory_order_relaxed)
+                
+                TAGGED_BY_US:
+                    # 已标记，无需操作
+                    pass
+                
+                MAYBE_UNINITIALIZED:
+                    # CAS尝试标记
+                    expected = nullptr
+                    if pyobj_interpreter_.compare_exchange_strong(expected, self_interpreter, memory_order_acq_rel):
+                        break
+                    # CAS失败，检查是否已被自己标记
+                    if expected == self_interpreter:
+                        break
+                    # 被其他解释器标记，fallthrough到错误处理
+                    [[fallthrough]]
+                
+                TAGGED_BY_OTHER:
+                    TORCH_CHECK(false, "解释器冲突")
+            pyobj_ = pyobj    # 初始owns_pyobj=false
+
+    pyobj_interpreter() -> PyInterpreter*
+        用途: 查询当前解释器标签 (可能为nullptr)
+        调用: pyobj_interpreter_.load(memory_order_acquire)
+
+    check_pyobj(self_interpreter: PyInterpreter*, ignore_hermetic_tls: bool = false) -> optional<PyObject*>
+        参数: ignore_hermetic_tls=是否忽略hermetic上下文检查
+        用途: 检查解释器标签并返回PyObject，若标签不匹配或在hermetic上下文中则返回nullopt
+        算法:
+            interpreter = pyobj_interpreter_.load(memory_order_acquire)
+            
+            if interpreter == nullptr:
+                return nullopt    # 可能未初始化或竞争
+            
+            if interpreter == self_interpreter:
+                if not ignore_hermetic_tls and HermeticPyObjectTLS::get_state():
+                    return nullopt    # hermetic上下文中禁止访问
+                return _unchecked_untagged_pyobj()
+            
+            TORCH_CHECK(false, "解释器冲突")
+
+    _unchecked_untagged_pyobj() -> PyObject*
+        用途: 获取未标记的原始PyObject指针 (清除最低位)
+        算法: return (PyObject*)(uintptr_t(pyobj_) & ~0x1ULL)
+
+    unchecked_clear_pyobj(interpreter: PyInterpreter*)
+        用途: 清除PyObject字段 (调用者保证解释器匹配)
+        算法: pyobj_ = nullptr
+
+    load_pyobj_interpreter() -> PyInterpreter&
+        用途: 加载解释器，若为nullptr则报错
+        算法:
+            interpreter = pyobj_interpreter_.load(memory_order_acquire)
+            if interpreter:
+                return *interpreterTORCH_CHECK(false, "无法访问PyObject")
+
+    check_interpreter(interpreter: PyInterpreter*) -> bool
+        用途: 检查解释器是否匹配
+        算法: return interpreter == pyobj_interpreter()
+
+    has_pyobj_nonhermetic() -> bool
+        用途: 检查是否持有PyObject (忽略hermetic上下文)
+        算法: return check_pyobj(pyobj_interpreter(), ignore_hermetic_tls=true).has_value()
+
+    owns_pyobj() -> bool
+        用途: 检查C++对象是否拥有PyObject所有权 (检查最低位)
+        算法: return uintptr_t(pyobj_) & 1
+
+    set_owns_pyobj(b: bool)
+        用途: 设置所有权标志位
+        算法: pyobj_ = (PyObject*)(uintptr_t(_unchecked_untagged_pyobj()) | b)
+
+【依赖】
+    TORCH_INTERNAL_ASSERT / TORCH_CHECK    # 断言与错误检查
+    HermeticPyObjectTLS::get_state()       # hermetic上下文状态查询
+    PyInterpreter::decref()                # Python引用计数管理
+
+【备注】
+    - pyobj_指针的最低位用作所有权标志: 0=PyObject拥有C++对象, 1=C++对象拥有PyObject
+    - pyobj_interpreter_使用acquire/release语义保证可见性，但因单调性(nullptr->固定值)无需seq_cst
+    - pyobj_访问需持有GIL或在析构期间
+    - hermetic上下文: 某些执行路径中禁止访问非hermetic PyObject，但析构函数需ignore_hermetic_tls=true处理

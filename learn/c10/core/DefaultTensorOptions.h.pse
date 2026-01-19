@@ -1,0 +1,35 @@
+--------------------------------
+DefaultTensorOptions (默认张量选项)
+来源: c10/core/DefaultTensorOptions.h
+--------------------------------
+
+【状态】
+    dtype_: TypeMeta = TypeMeta::Make<float>()    # 数据类型，默认float (64-bit)
+    device_: Device = at::kCPU                     # 设备，默认CPU (32-bit)
+    layout_: Layout = at::kStrided                 # 布局，默认strided (8-bit)
+    requires_grad_: bool = false                   # 是否需要梯度 (8-bit)
+
+【接口】
+    dtype() -> TypeMeta
+        用途: 获取数据类型
+
+    device() -> Device
+        用途: 获取设备
+
+    layout() -> Layout
+        用途: 获取布局
+
+    requires_grad() -> bool
+        用途: 获取是否需要梯度
+
+    merge(options: TensorOptions) -> DefaultTensorOptions&
+        用途: 合并用户提供的TensorOptions，更新非空字段
+        调用: TensorOptions.h中定义
+
+    getDefaultTensorOptions() -> DefaultTensorOptions&
+        用途: 获取全局默认张量选项单例
+
+【备注】
+    - 与TensorOptions不同，所有字段保证已填充
+    - 用于提供PyTorch张量创建时的默认配置
+    - 单例模式，全局共享

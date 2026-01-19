@@ -1,0 +1,43 @@
+--------------------------------
+GradMode (梯度模式管理)
+来源: c10/core/GradMode.cpp, c10/core/GradMode.h
+--------------------------------
+
+【状态】
+    grad_mode: bool        # 反向传播梯度计算开关 (thread-local)
+    fw_grad_mode: bool     # 前向模式自动微分开关 (thread-local)
+
+【接口】
+    GradMode::is_enabled() -> bool
+        用途: 查询当前线程的梯度模式状态
+        调用: AutogradState::get_tls_state().get_grad_mode()
+
+    GradMode::set_enabled(enabled: bool)
+        用途: 设置当前线程的梯度模式
+        调用: AutogradState::get_tls_state().set_grad_mode()
+
+【RAII Guards】
+    AutoGradMode(enabled: bool)
+        用途: 临时切换梯度模式，析构时恢复
+        生命周期:
+            构造: prev_mode = GradMode::is_enabled()
+                  GradMode::set_enabled(enabled)
+            析构: GradMode::set_enabled(prev_mode)
+
+    NoGradGuard()
+        用途: 临时禁用梯度计算 (等价于 AutoGradMode(false))
+
+    AutoFwGradMode(enabled: bool)
+        用途: 临时切换前向梯度模式，析构时恢复
+        生命周期:
+            构造: prev_mode = AutogradState::get_tls_state().get_fw_grad_mode()
+                  AutogradState::get_tls_state().set_fw_grad_mode(enabled)
+            析构: AutogradState::get_tls_state().set_fw_grad_mode(prev_mode)
+
+【依赖】
+    AutogradState::get_tls_state()    # 获取线程局部自动微分状态
+
+【备注】
+    - 所有状态均为 thread-local，不同线程独立
+    - RAII guards 禁止拷贝和移动，确保栈上生命周期管理
+    - NoGradGuard 是 AutoGradMode(false) 的语法糖

@@ -1,0 +1,57 @@
+--------------------------------
+CompileTimeFunctionPointer (编译期函数指针包装器)
+来源: c10/core/CompileTimeFunctionPointer.h
+--------------------------------
+
+【概述】
+    将函数指针作为类型参数传递，使编译器能在编译期内联函数调用
+
+【核心类型】
+    CompileTimeFunctionPointer<FuncType, func_ptr>模板参数:
+            FuncType: 函数类型（非指针）
+            func_ptr: 函数指针常量
+        约束:
+            FuncType 必须是函数类型（通过 guts::is_function_type 检查）
+        接口:
+            static constexpr func_ptr() -> FuncType*用途: 返回编译期已知的函数指针
+
+【类型特征】
+    is_compile_time_function_pointer<T>
+        用途: 检测类型 T 是否为 CompileTimeFunctionPointer 实例
+        默认: false_type
+        特化: CompileTimeFunctionPointer<FuncType, func_ptr> -> true_type
+
+【宏】
+    TORCH_FN_TYPE(func)
+        用途: 将函数转换为 CompileTimeFunctionPointer 类型
+        展开: CompileTimeFunctionPointer<remove_pointer_t<remove_reference_t<decltype(func)>>, func>
+    TORCH_FN(func)
+        用途: 创建 CompileTimeFunctionPointer 实例
+        展开: TORCH_FN_TYPE(func)()
+
+【使用场景】
+    示例1 - 模板类执行器:
+        int add(int a, int b) { return a + b; }
+        using Add = TORCH_FN_TYPE(add);
+        
+        template<class Func>
+        struct Executor {
+            int execute(int a, int b) {
+                return Func::func_ptr()(a, b);  // 编译期内联
+            }
+        };
+        
+        Executor<Add> executor;
+        executor.execute(1, 2)  // 返回 3
+
+    示例2 - 模板函数参数:
+        int add(int a, int b) { return a + b; }
+        template<class Func>
+        int execute(Func, int a, int b) {
+            return Func::func_ptr()(a, b);
+        }
+        
+        execute(TORCH_FN(add), 1, 2)  // 返回 3
+
+【依赖】
+    c10::guts::is_function_type    # 函数类型检测

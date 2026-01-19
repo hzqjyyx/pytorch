@@ -1,0 +1,52 @@
+--------------------------------
+Layout (张量布局枚举)
+来源: c10/core/Layout.h
+--------------------------------
+
+【枚举】
+    Layout: int8_t
+        Strided      # 密集张量（默认）
+        Sparse       # COO稀疏张量
+        SparseCsr    # CSR稀疏张量
+        Mkldnn       # MKLDNN优化布局
+        SparseCsc    # CSC稀疏张量
+        SparseBsr    # BSR块稀疏张量
+        SparseBsc    # BSC块稀疏张量Jagged       # 不规则张量
+        NumOptions   # 枚举计数
+
+    常量别名:
+        kStrided, kSparse, kSparseCsr, kMkldnn, 
+        kSparseCsc, kSparseBsr, kSparseBsc, kJagged
+
+【函数】
+    layout_from_backend(backend: Backend) -> Layout
+        用途: 从后端类型推断布局类型
+        逻辑:
+            match backend:
+                SparseCPU | SparseCUDA | SparseHIP | SparseVE | SparseXPU | SparsePrivateUse1:
+                    return Sparse
+                MkldnnCPU:
+                    return Mkldnn
+                SparseCsrCPU | SparseCsrCUDA | SparseCsrHIP | SparseCsrVE | SparseCsrXPU:
+                    TORCH_CHECK(false, "Cannot map Backend SparseCsr* to a unique layout")
+                default:
+                    return Strided
+
+    operator<<(stream: ostream, layout: Layout) -> ostream
+        用途: 布局类型的流输出
+        
+        逻辑:
+            match layout:
+                kStrided   -> "Strided"
+                kSparse    -> "Sparse"
+                kSparseCsr -> "SparseCsr"
+                kSparseCsc -> "SparseCsc"
+                kSparseBsr -> "SparseBsr"
+                kSparseBsc -> "SparseBsc"
+                kMkldnn    -> "Mkldnn"
+                kJagged    -> "Jagged"
+                default    -> TORCH_CHECK(false, "Unknown layout")
+
+【依赖】
+    Backend           # 后端类型枚举
+    TORCH_CHECK       # 错误检查

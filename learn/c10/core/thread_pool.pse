@@ -1,0 +1,190 @@
+--------------------------------
+TaskThreadPoolBase::defaultNumThreads
+来源: c10/core/thread_pool.cpp:10-31
+--------------------------------
+
+【签名】
+    defaultNumThreads() -> size_t
+
+【算法】
+    # 平台特定的CPU核心数检测
+    if platform not in [powerpc, s390x]:
+        if cpuinfo_initialize():
+            num_cores = cpuinfo_get_cores_count()        # 物理核心数
+            num_threads = cpuinfo_get_processors_count() # 逻辑处理器数
+            
+            # 优先返回物理核心数
+            if num_cores > 0 and num_cores < num_threads:
+                return num_cores
+            
+            if num_threads > 0:
+                return num_threads
+    
+    # 回退到标准库
+    num_threads = std::thread::hardware_concurrency()
+    return max(num_threads, 1)
+
+【备注】
+    - cpuinfo库在powerpc和s390x平台不可用
+    - 默认使用物理核心数而非超线程数
+
+--------------------------------
+ThreadPool (线程池管理)
+来源: c10/core/thread_pool.cpp:33-166, c10/core/thread_pool.h:41-102
+--------------------------------
+
+【状态】
+    threads_: vector<thread>           # 工作线程池
+    tasks_: queue<task_element_t>      # 任务队列
+    mutex_: mutex                      # 队列保护锁
+    condition_: condition_variable     # 任务到达通知
+    completed_: condition_variable     # 任务完成通知
+    running_: atomic<bool>             # 线程池运行状态
+    complete_: bool                    # 所有任务是否完成
+    available_: size_t                 # 空闲线程数
+    total_: size_t                     # 总线程数
+    numa_node_id_: int                 # NUMA节点ID
+
+【接口】
+    ThreadPool(pool_size: int, numa_node_id: int = -1, init_thread: function<void()> = nullptr)
+        参数: pool_size=线程数(负数则自动检测), numa_node_id=NUMA绑定, init_thread=线程初始化回调
+        用途: 创建线程池，启动所有工作线程
+        调用: c10::setThreadName("pt_thread_pool")
+
+    ~ThreadPool()
+        用途: 停止所有线程并等待退出
+
+    size() -> size_t
+        用途: 返回线程池大小
+
+    numAvailable() -> size_t
+        用途: 返回当前空闲线程数
+
+    inThreadPool() -> bool
+        用途: 检查当前线程是否属于此线程池
+
+    run(func: function<void()>)
+        用途: 提交无参任务到队列
+        调用: condition_.notify_one()
+
+    runTaskWithID(task: function<void(size_t)>)
+        用途: 提交带线程ID参数的任务到队列
+        调用: condition_.notify_one()
+
+    waitWorkComplete()
+        用途: 阻塞等待所有任务完成
+
+【算法】
+    # 构造函数
+    pool_size = pool_size if pool_size >= 0 else defaultNumThreads()
+    for i in range(pool_size):
+        threads_[i] = thread(lambda:
+            setThreadName("pt_thread_pool")
+            if init_thread:
+                init_thread()
+            main_loop(i)
+        )
+
+    # 析构函数
+    lock(mutex_):
+        running_ = false
+        condition_.notify_all()
+    
+    for t in threads_:
+        t.join()
+
+    # 主循环 (每个工作线程执行)
+    main_loop(index: size_t):
+        lock(mutex_):
+            while running_:
+                # 等待任务
+                condition_.wait(lock, lambda: not tasks_.empty() or not running_)
+                
+                if not running_:
+                    break
+                
+                # 取出任务
+                task = tasks_.front()
+                tasks_.pop()
+                available_ -= 1
+                
+                lock.unlock()
+                
+                # 执行任务 (锁外执行)
+                try:
+                    if task.run_with_id:
+                        task.with_id(index)
+                    else:
+                        task.no_id()
+                catch exception:
+                    LOG(ERROR) << exception
+                
+                # 任务析构 (锁外析构，防止重入死锁)
+                
+                lock.lock()
+                
+                # 更新状态
+                available_ += 1
+                if tasks_.empty() and available_ == total_:
+                    complete_ = true
+                    completed_.notify_one()
+
+    # 提交任务
+    run(func):
+        if threads_.empty():
+            throw "No threads to run a task"
+        
+        lock(mutex_):
+            tasks_.push(task_element_t(func))
+            complete_ = false
+            condition_.notify_one()
+
+    # 等待完成
+    waitWorkComplete():
+        lock(mutex_):
+            completed_.wait(lock, lambda: complete_)
+
+【备注】
+    - task_element_t: 支持两种任务类型 (无参/带线程ID)
+    - 任务析构在锁外进行，避免用户代码重入导致死锁
+    - 工作线程在循环回边持有锁，优先获取下一个任务
+
+--------------------------------
+TaskThreadPool (NUMA感知线程池)
+来源: c10/core/thread_pool.h:104-111
+--------------------------------
+
+【签名】
+    TaskThreadPool(pool_size: int, numa_node_id: int = -1)
+
+【算法】
+    # 继承ThreadPool，添加NUMA绑定和线程命名
+    ThreadPool(pool_size, numa_node_id, lambda:
+        setThreadName("CaffeTaskThread")
+        NUMABind(numa_node_id)
+    )
+
+【依赖】
+    c10::setThreadName    # 线程命名
+    c10::NUMABind         # NUMA节点绑定
+
+--------------------------------
+ThreadPoolRegistry (线程池工厂注册)
+来源: c10/core/thread_pool.cpp:168-173
+--------------------------------
+
+【用途】
+    全局注册表，用于创建不同类型的TaskThreadPoolBase实例
+
+【签名】
+    C10_DEFINE_SHARED_REGISTRY(
+        ThreadPoolRegistry,
+        TaskThreadPoolBase,
+        int,      # pool_size
+        int,      # numa_node_id
+        bool      # 额外参数
+    )
+
+【备注】
+    - 使用c10的注册表宏定义
+    - 允许运行时注册和创建自定义线程池实现

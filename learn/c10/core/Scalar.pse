@@ -1,0 +1,197 @@
+--------------------------------
+Scalar (标量类型)
+来源: c10/core/Scalar.h, c10/core/Scalar.cpp
+--------------------------------
+
+【状态】
+    tag: Tag                # 类型标签 (HAS_d|HAS_i|HAS_u|HAS_z|HAS_b|HAS_sd|HAS_si|HAS_sb)
+    v: union {                         # 值存储d: double                      # 浮点数
+        i: int64_t                     # 有符号整数
+        u: uint64_t                    # 无符号整数 (仅当 > INT64_MAX)
+        z: complex<double>             # 复数
+        p: intrusive_ptr_target*       # 符号类型指针 (SymInt/SymFloat/SymBool)
+    }
+
+【接口】
+    # 构造函数
+    Scalar()用途: 默认构造为 int64_t(0)Scalar(vv: T)
+        参数: vv=任意标量类型 (int/float/complex/bool/Half/BFloat16/uint16/uint32/uint64)
+        用途: 隐式转换构造
+        逻辑:
+            - 整数类型 -> HAS_i (存为 int64_t)
+            - 浮点类型 -> HAS_d (存为 double)
+            - 复数类型 -> HAS_z (存为 complex<double>)
+            - bool -> HAS_b (存为 int64_t)
+            - uint64_t: 若 > INT64_MAX 则 HAS_u，否则 HAS_i
+
+    Scalar(si: SymInt)
+        用途: 符号整数构造
+        逻辑:
+            if si.maybe_as_int() 存在:
+                tag = HAS_i, v.i = 具体值
+            else:
+                tag = HAS_si, v.p = si.release()
+
+    Scalar(sd: SymFloat)
+        用途: 符号浮点构造
+        逻辑:
+            if sd.is_symbolic():
+                tag = HAS_sd, v.p = sd.release()
+            else:
+                tag = HAS_d, v.d = sd.as_float_unchecked()
+
+    Scalar(sb: SymBool)
+        用途: 符号布尔构造
+        逻辑:
+            if sb.maybe_as_bool() 存在:
+                tag = HAS_b, v.i = 具体值
+            else:
+                tag = HAS_sb, v.p = sb.release()
+
+    # 类型转换
+    to<T>() -> T
+    toInt() / toLong() / toFloat() / toDouble() / toBool() / toComplexDouble() -> T
+        用途: 转换为目标类型，带溢出检查
+        逻辑:
+            match tag:
+                HAS_d: checked_convert<T>(v.d)
+                HAS_z: checked_convert<T>(v.z)
+                HAS_i: checked_convert<T>(v.i)
+                HAS_u: checked_convert<T>(v.u)
+                HAS_b: checked_convert<T>(v.i)
+                HAS_si: checked_convert<T>(toSymInt().guard_int())
+                HAS_sd: checked_convert<T>(toSymFloat().guard_float())
+                HAS_sb: checked_convert<T>(toSymBool().guard_bool())
+
+    toSymInt() -> SymInt
+        用途: 转换为符号整数
+        逻辑:
+            if tag == HAS_si:
+                return SymInt(intrusive_ptr::reclaim_copy(v.p))
+            else:
+                return toLong()
+
+    toSymFloat() -> SymFloat
+        用途: 转换为符号浮点
+        逻辑:
+            if tag == HAS_sd:
+                return SymFloat(intrusive_ptr::reclaim_copy(v.p))
+            else:
+                return toDouble()
+
+    toSymBool() -> SymBool
+        用途: 转换为符号布尔
+        逻辑:
+            if tag == HAS_sb:
+                return SymBool(intrusive_ptr::reclaim_copy(v.p))
+            else:
+                return toBool()
+
+    # 类型查询
+    isFloatingPoint() -> bool
+        用途: 是否为浮点类型 (HAS_d 或 HAS_sd)
+
+    isIntegral(includeBool: bool) -> bool
+        用途: 是否为整数类型 (HAS_i|HAS_si|HAS_u，可选包含 bool)
+
+    isComplex() -> bool
+        用途: 是否为复数类型 (HAS_z)
+
+    isBoolean() -> bool
+        用途: 是否为布尔类型 (HAS_b 或 HAS_sb)
+
+    isSymbolic() -> bool
+        用途: 是否为符号类型 (HAS_si|HAS_sd|HAS_sb)
+
+    type() -> ScalarType
+        用途: 返回对应的 ScalarType 枚举
+        逻辑:
+            if isComplex(): ComplexDouble
+            elif isFloatingPoint(): Double
+            elif isIntegral(false):
+                if tag == HAS_u: UInt64
+                else: Long
+            elif isBoolean(): Bool
+
+    # 运算符
+    operator-() -> Scalar
+        用途: 取负
+        逻辑:
+            assert not isBoolean()
+            if isFloatingPoint():
+                assert not isSymbolic()
+                return Scalar(-v.d)
+            elif isComplex():
+                assert not isSymbolic()
+                return Scalar(-v.z)
+            elif isIntegral(false):
+                assert not isSymbolic()
+                return Scalar(-v.i)
+
+    conj() -> Scalar
+        用途: 共轭
+        逻辑:
+            if isComplex():
+                assert not isSymbolic()
+                return Scalar(std::conj(v.z))
+            else:
+                return *this
+
+    log() -> Scalar
+        用途: 对数
+        逻辑:
+            if isComplex():
+                assert not isSymbolic()
+                return std::log(v.z)
+            elif isFloatingPoint():
+                assert not isSymbolic()
+                return std::log(v.d)
+            elif isIntegral(false):
+                assert not isSymbolic()
+                return std::log(v.i)
+
+    equal(num: T) -> bool
+        用途: 相等比较
+        逻辑:
+            if isComplex():
+                assert not isSymbolic()
+                return v.z == num (复数) 或 (v.z.real == num 且 v.z.imag == 0) (实数)
+            elif isFloatingPoint():
+                return toDouble() == num
+            elif tag == HAS_i:
+                if overflows<T>(v.i): return false
+                return static_cast<T>(v.i) == num
+            elif tag == HAS_u:
+                if overflows<T>(v.u): return false
+                return static_cast<T>(v.u) == num
+            elif isBoolean():
+                assert not isSymbolic()
+                return false (非布尔值比较)
+
+    # 内存管理
+    destroy()
+        用途: 释放符号类型的引用计数
+        逻辑:
+            if tag in [HAS_si, HAS_sd, HAS_sb]:
+                intrusive_ptr::decref(v.p)
+                v.p = nullptr
+
+    moveFrom(rhs: Scalar&&)
+        用途: 移动语义，转移所有权
+        逻辑:
+            v = rhs.v
+            tag = rhs.tag
+            if rhs.tag in [HAS_si, HAS_sd, HAS_sb]:
+                rhs.tag = HAS_i
+                rhs.v.i = 0
+
+【依赖】
+    checked_convert / convert           # 类型转换与溢出检查
+    intrusive_ptr                        # 符号类型的引用计数管理
+    SymInt / SymFloat / SymBool          # 符号类型
+
+【备注】
+    - HAS_u 仅用于表示无法用 int64_t 表示的 uint64_t (> INT64_MAX)
+    - 符号类型 (HAS_si/HAS_sd/HAS_sb) 使用侵入式指针管理生命周期
+    - 所有符号类型操作 (如 operator-) 当前不支持，会触发断言
+    - 拷贝构造会增加符号类型的引用计数，移动构造会转移所有权

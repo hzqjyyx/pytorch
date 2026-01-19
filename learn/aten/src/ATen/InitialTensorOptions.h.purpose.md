@@ -1,0 +1,10 @@
+- **文件目的**：定义初始张量选项的工具函数
+- **核心函数**：`initialTensorOptions()` 返回一个预配置的 `TensorOptions` 对象
+- **默认配置**：
+  - 设备：CPU
+  - 数据类型：Float（32位浮点数）
+  - 布局：Strided（标准内存布局）
+  - 梯度追踪：禁用（`requires_grad=false`）
+- **使用场景**：库代码中需要显式指定设备、数据类型等参数时使用
+- **稳定性**：非稳定API，不保证向后兼容性
+- **依赖**：引入 `c10/core/TensorOptions.h` 头文件

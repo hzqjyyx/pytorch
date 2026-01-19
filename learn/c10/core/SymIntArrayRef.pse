@@ -1,0 +1,56 @@
+--------------------------------
+SymIntArrayRef 类型转换工具
+来源: c10/core/SymIntArrayRef.h
+--------------------------------
+
+【类型定义】
+    SymIntArrayRef = ArrayRef<SymInt>
+        # SymInt 可表示具体整数或符号整数（用于动态形状）
+        # 具体整数直接存储在 SymInt 内部
+        # 大负数或符号整数需要堆分配
+
+【函数】
+    asIntArrayRefUnchecked(ar: SymIntArrayRef) -> IntArrayRef
+        用途: 零拷贝转换，直接 reinterpret_cast
+        警告: 不检查是否包含堆分配的符号整数
+
+    asIntArrayRefSlowOpt(ar: SymIntArrayRef) -> Optional<IntArrayRef>
+        用途: 安全转换，检查所有元素是否为具体整数
+        返回: 若存在堆分配元素返回 nullopt，否则返回 IntArrayRef
+
+    asIntArrayRefSlow(ar: SymIntArrayRef, file: str, line: int64) -> IntArrayRef
+        用途: 强制转换为具体整数数组，遇到符号整数则报错
+        调用: TORCH_CHECK, asIntArrayRefUnchecked
+
+    asIntArrayRefSlowAlloc(ar: SymIntArrayRef, file: str, line: int64) -> DimVector
+        用途: 强制特化，分配新数组并逐元素转换
+        调用: SymInt.guard_int(file, line)
+        备注: 最慢但能处理符号整数（通过 guard_int 强制特化）
+
+    fromIntArrayRefUnchecked(array_ref: IntArrayRef) -> SymIntArrayRef
+        用途: 零拷贝转换，直接 reinterpret_cast
+        警告: 不检查整数范围
+
+    fromIntArrayRefKnownNonNegative(array_ref: IntArrayRef) -> SymIntArrayRef
+        用途: 已知非负时的转换（非负整数必在 SymInt 表示范围内）
+        调用: fromIntArrayRefUnchecked
+
+    fromIntArrayRefSlow(array_ref: IntArrayRef) -> SymIntArrayRef
+        用途: 安全转换，检查所有整数是否在 SymInt 表示范围内
+        调用: SymInt::check_range, fromIntArrayRefUnchecked
+
+【宏】
+    C10_AS_INTARRAYREF_SLOW(a)
+        展开: asIntArrayRefSlow(a, __FILE__, __LINE__)
+
+    C10_AS_INTARRAYREF_SLOW_ALLOC(a)
+        展开: asIntArrayRefSlowAlloc(a, __FILE__, __LINE__)
+
+【备注】
+    - SymInt 内部表示: 小整数直接存储，大负数/符号整数堆分配
+    - reinterpret_cast 可行的前提: SymInt 和 int64_t 内存布局兼容
+    - 堆分配检测: SymInt.is_heap_allocated()
+    - 转换策略:
+        * Unchecked: 零拷贝，无检查，最快
+        * Slow: 检查后零拷贝
+        * SlowAlloc: 分配新数组，可强制特化

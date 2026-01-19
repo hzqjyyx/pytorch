@@ -12,7 +12,7 @@ target: ./learn/aten
 base_dir: ./
 
 # HTTPS 代理（可选）
-https_proxy: http://123.206.229.164:25673
+# https_proxy: http://123.206.229.164:25673
 
 # 要执行的任务列表
 tasks:
@@ -59,7 +59,7 @@ model_selection:
   # token 阈值，超过该阈值使用更强模型
   token_thresholds:
     tier1: 30000000  # >30000000 tokens 用 tier1 (opus)
-    tier2: 3000   # >3000 tokens 用 tier2 (sonnet)
+    tier2: 1000   # >3000 tokens 用 tier2 (sonnet)
 
   # 路径匹配覆盖，匹配的文件使用指定模型
   path_overrides:

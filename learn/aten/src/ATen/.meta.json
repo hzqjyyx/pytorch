@@ -756,6 +756,1122 @@
       "tasks": {
         "purpose": "done"
       }
+    },
+    "nnapi/codegen.py": {
+      "type": "file",
+      "hashes": {
+        "nnapi/codegen.py": "e1411a686984668f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/RegisterDispatchDefinitions.ini": {
+      "type": "file",
+      "hashes": {
+        "templates/RegisterDispatchDefinitions.ini": "86727243e042b628"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorSubclassLikeUtils.h": {
+      "type": "file",
+      "hashes": {
+        "TensorSubclassLikeUtils.h": "00da0153d2b54e69"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Formatting.h": {
+      "type": "file",
+      "hashes": {
+        "Formatting.h": "bbdb7cc557be5801"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ParallelThreadPoolNative.cpp": {
+      "type": "file",
+      "hashes": {
+        "ParallelThreadPoolNative.cpp": "3a07dc25a4ba97c3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorOptions.h": {
+      "type": "file",
+      "hashes": {
+        "TensorOptions.h": "d1818ea25c648dbe"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "jiterator_macros.h": {
+      "type": "file",
+      "hashes": {
+        "jiterator_macros.h": "5fc7c5a05c3f2c0c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Device.h": {
+      "type": "file",
+      "hashes": {
+        "Device.h": "c285361c7eae97e6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ceil_div.h": {
+      "type": "file",
+      "hashes": {
+        "ceil_div.h": "4ed90a9eace5025a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CMakeLists.txt": {
+      "type": "file",
+      "hashes": {
+        "CMakeLists.txt": "edf9f65dfd4c5e36"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CollapseDims.h": {
+      "type": "file",
+      "hashes": {
+        "CollapseDims.h": "61c15b1f58fe964c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "dlpack.h": {
+      "type": "file",
+      "hashes": {
+        "dlpack.h": "701e24d408eed779"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TracerMode.h": {
+      "type": "file",
+      "hashes": {
+        "TracerMode.h": "9158362122ee5972"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "BlasBackend.h": {
+      "type": "file",
+      "hashes": {
+        "BlasBackend.h": "79f6d72179e2d721"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Backend.h": {
+      "type": "file",
+      "hashes": {
+        "Backend.h": "b8a2d653d7015f89"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SparseCsrTensorUtils.h": {
+      "type": "file",
+      "hashes": {
+        "SparseCsrTensorUtils.h": "60064ba825e30452"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PTThreadPool.h": {
+      "type": "file",
+      "hashes": {
+        "PTThreadPool.h": "5f616896970569cb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TypeDefault.h": {
+      "type": "file",
+      "hashes": {
+        "TypeDefault.h": "ecea9e67592dda4f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "OpaqueTensorImpl.h": {
+      "type": "file",
+      "hashes": {
+        "OpaqueTensorImpl.h": "2086113fd5130862"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ZeroTensorFallback.cpp": {
+      "type": "file",
+      "hashes": {
+        "ZeroTensorFallback.cpp": "df4f2a42f84f4c2a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "WrapDimUtils.h": {
+      "type": "file",
+      "hashes": {
+        "WrapDimUtils.h": "691c33368dc705ef"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "div_rtn.h": {
+      "type": "file",
+      "hashes": {
+        "div_rtn.h": "b0fa1639b206ecbb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ConjugateFallback.cpp": {
+      "type": "file",
+      "hashes": {
+        "ConjugateFallback.cpp": "c8f168e122e049b2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CPUFixedAllocator.h": {
+      "type": "file",
+      "hashes": {
+        "CPUFixedAllocator.h": "db9e8db1a39e6e91"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FunctionalInverses.cpp": {
+      "type": "file",
+      "hashes": {
+        "FunctionalInverses.cpp": "6b7b6eaa6141dfd4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Scalar.h": {
+      "type": "file",
+      "hashes": {
+        "Scalar.h": "e2e4615f9635c19a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NamedTensor.h": {
+      "type": "file",
+      "hashes": {
+        "NamedTensor.h": "0ccb3b4c5165e57d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ParallelCommon.cpp": {
+      "type": "file",
+      "hashes": {
+        "ParallelCommon.cpp": "6691386803fb4a36"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LinalgBackend.h": {
+      "type": "file",
+      "hashes": {
+        "LinalgBackend.h": "f0519e2f717b1149"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorIteratorInternal.h": {
+      "type": "file",
+      "hashes": {
+        "TensorIteratorInternal.h": "009c278cffe437ba"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nnapi/CMakeLists.txt": {
+      "type": "file",
+      "hashes": {
+        "nnapi/CMakeLists.txt": "2d559c5177ebbc1b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Backtrace.h": {
+      "type": "file",
+      "hashes": {
+        "Backtrace.h": "890c0d60a14f2beb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ArrayRef.h": {
+      "type": "file",
+      "hashes": {
+        "ArrayRef.h": "3a3e77bac7cd264c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ExpandBase.h": {
+      "type": "file",
+      "hashes": {
+        "ExpandBase.h": "9d45d7a1d2f842b3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Parallel-inl.h": {
+      "type": "file",
+      "hashes": {
+        "Parallel-inl.h": "3f5f0b88547cf2a3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "MatrixRef.h": {
+      "type": "file",
+      "hashes": {
+        "MatrixRef.h": "b263a9308cbff9dc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ATen.h": {
+      "type": "file",
+      "hashes": {
+        "ATen.h": "9a48d6de9d841fe9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Layout.h": {
+      "type": "file",
+      "hashes": {
+        "Layout.h": "97d4e965ffa02ed9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "NumericUtils.h": {
+      "type": "file",
+      "hashes": {
+        "NumericUtils.h": "2ac2aec325c036bd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "WrapDimUtilsMulti.h": {
+      "type": "file",
+      "hashes": {
+        "WrapDimUtilsMulti.h": "d62fdc1d99f5e943"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "InitialTensorOptions.h": {
+      "type": "file",
+      "hashes": {
+        "InitialTensorOptions.h": "1f06ecc1f9b2c767"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "code_template.h": {
+      "type": "file",
+      "hashes": {
+        "code_template.h": "03bbe74007694332"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Storage.h": {
+      "type": "file",
+      "hashes": {
+        "Storage.h": "120cc3dd23b5921b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ScalarType.h": {
+      "type": "file",
+      "hashes": {
+        "ScalarType.h": "629523814f334ee0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "PadNd.h": {
+      "type": "file",
+      "hashes": {
+        "PadNd.h": "858b3aa918d490b4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DeviceGuard.h": {
+      "type": "file",
+      "hashes": {
+        "DeviceGuard.h": "40b4062afcec0739"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "cpp_custom_type_hack.h": {
+      "type": "file",
+      "hashes": {
+        "cpp_custom_type_hack.h": "8ffc31b8c80e58a2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "jit_macros.h": {
+      "type": "file",
+      "hashes": {
+        "jit_macros.h": "3fd9b595519fd6cc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "OpMathType.h": {
+      "type": "file",
+      "hashes": {
+        "OpMathType.h": "99bac953a71974d1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ParallelFuture.h": {
+      "type": "file",
+      "hashes": {
+        "ParallelFuture.h": "17b928ba88af714b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Dispatch_v2.h": {
+      "type": "file",
+      "hashes": {
+        "Dispatch_v2.h": "85649a08ae3fd090"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "VmapModeRegistrations.cpp": {
+      "type": "file",
+      "hashes": {
+        "VmapModeRegistrations.cpp": "ab98a6c009b605b5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorOperators.h": {
+      "type": "file",
+      "hashes": {
+        "TensorOperators.h": "8e3f9eadb9b29fff"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Dimname.h": {
+      "type": "file",
+      "hashes": {
+        "Dimname.h": "383bd6abbf096ad6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "CPUApplyUtils.h": {
+      "type": "file",
+      "hashes": {
+        "CPUApplyUtils.h": "a00b9ece5f18f576"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ROCmFABackend.h": {
+      "type": "file",
+      "hashes": {
+        "ROCmFABackend.h": "cf4b150424799c48"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Generator.h": {
+      "type": "file",
+      "hashes": {
+        "Generator.h": "2817aef832190676"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "InferSize.h": {
+      "type": "file",
+      "hashes": {
+        "InferSize.h": "4812e5170fd34bef"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SmallVector.h": {
+      "type": "file",
+      "hashes": {
+        "SmallVector.h": "6f4cd169446d2f4a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Parallel.h": {
+      "type": "file",
+      "hashes": {
+        "Parallel.h": "9a7e2fc21762a018"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "Tensor.h": {
+      "type": "file",
+      "hashes": {
+        "Tensor.h": "7ab70ecd76d85ff5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/MetaGuardImpl.cpp": {
+      "type": "file",
+      "hashes": {
+        "detail/MetaGuardImpl.cpp": "e737a4fd5c5f6d2a"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nnapi/nnapi_register.cpp": {
+      "type": "file",
+      "hashes": {
+        "nnapi/nnapi_register.cpp": "17f36553f7e9f7d0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/AcceleratorHooksInterface.h": {
+      "type": "file",
+      "hashes": {
+        "detail/AcceleratorHooksInterface.h": "eb3d344fd83088bd"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "SDPBackend.h": {
+      "type": "file",
+      "hashes": {
+        "SDPBackend.h": "a8ee3206ba273da3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/CPUGuardImpl.cpp": {
+      "type": "file",
+      "hashes": {
+        "detail/CPUGuardImpl.cpp": "bc50be6a052712a6"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "nnapi/NeuralNetworks.h": {
+      "type": "file",
+      "hashes": {
+        "nnapi/NeuralNetworks.h": "affe80bb83b440da"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "TensorAccessor.h": {
+      "type": "file",
+      "hashes": {
+        "TensorAccessor.h": "d283d4e508d9e6af"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "detail/FunctionTraits.h": {
+      "type": "file",
+      "hashes": {
+        "detail/FunctionTraits.h": "857c64c4c1046257"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/CompositeViewCopyKernels.cpp": {
+      "type": "file",
+      "hashes": {
+        "templates/CompositeViewCopyKernels.cpp": "1fae001e808107b3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/NativeMetaFunctions.h": {
+      "type": "file",
+      "hashes": {
+        "templates/NativeMetaFunctions.h": "9883b09a991063dc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/DispatchKeyFunctions.h": {
+      "type": "file",
+      "hashes": {
+        "templates/DispatchKeyFunctions.h": "2a52df2d9498106f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/UfuncCPU.cpp": {
+      "type": "file",
+      "hashes": {
+        "templates/UfuncCPU.cpp": "2eb9c84a7741917b"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/RegistrationDeclarations.h": {
+      "type": "file",
+      "hashes": {
+        "templates/RegistrationDeclarations.h": "2889a273f20bca1c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/NativeFunction.h": {
+      "type": "file",
+      "hashes": {
+        "templates/NativeFunction.h": "0bcad0a2c5591776"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/Operator.h": {
+      "type": "file",
+      "hashes": {
+        "templates/Operator.h": "e53a987360d51b30"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/UfuncCUDA.cu": {
+      "type": "file",
+      "hashes": {
+        "templates/UfuncCUDA.cu": "1ce073f323b8405c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/RegisterFunctionalization.cpp": {
+      "type": "file",
+      "hashes": {
+        "templates/RegisterFunctionalization.cpp": "75173a4a4dc94a9e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/MethodOperators.h": {
+      "type": "file",
+      "hashes": {
+        "templates/MethodOperators.h": "89f8ab62578d3e59"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/ATenOpList.cpp": {
+      "type": "file",
+      "hashes": {
+        "templates/ATenOpList.cpp": "6286e78489bdd440"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/RegisterDispatchKey.cpp": {
+      "type": "file",
+      "hashes": {
+        "templates/RegisterDispatchKey.cpp": "c0b63c4a6ccb18e5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/TensorBody.h": {
+      "type": "file",
+      "hashes": {
+        "templates/TensorBody.h": "5928d94e1f243774"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/RegisterBackendSelect.cpp": {
+      "type": "file",
+      "hashes": {
+        "templates/RegisterBackendSelect.cpp": "3a9f9157bffc5271"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/TensorMethods.cpp": {
+      "type": "file",
+      "hashes": {
+        "templates/TensorMethods.cpp": "e02eea72b7e032cc"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/DispatchKeyFunction.h": {
+      "type": "file",
+      "hashes": {
+        "templates/DispatchKeyFunction.h": "9e9514f16a54efab"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "FunctionalizeFallbackKernel.cpp": {
+      "type": "file",
+      "hashes": {
+        "FunctionalizeFallbackKernel.cpp": "0c59937a7a4247c3"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/enum_tag.h": {
+      "type": "file",
+      "hashes": {
+        "templates/enum_tag.h": "c37842a2fe024e82"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "LegacyBatchingRegistrations.cpp": {
+      "type": "file",
+      "hashes": {
+        "LegacyBatchingRegistrations.cpp": "d2f9ed1d2cb33060"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/NativeFunctions.h": {
+      "type": "file",
+      "hashes": {
+        "templates/NativeFunctions.h": "377e7572836033d1"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/UfuncCPUKernel.cpp": {
+      "type": "file",
+      "hashes": {
+        "templates/UfuncCPUKernel.cpp": "a5acfae85ed4e84f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/DispatchKeyFunctions_inl.h": {
+      "type": "file",
+      "hashes": {
+        "templates/DispatchKeyFunctions_inl.h": "9e5014d3158742a4"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/LazyNonNativeIr.h": {
+      "type": "file",
+      "hashes": {
+        "templates/LazyNonNativeIr.h": "2906e3c99d10f2a2"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/Function.h": {
+      "type": "file",
+      "hashes": {
+        "templates/Function.h": "6763a29b1b07c78d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/RegisterSchema.cpp": {
+      "type": "file",
+      "hashes": {
+        "templates/RegisterSchema.cpp": "1e82d30cdc1185ef"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/FunctionalInverses.h": {
+      "type": "file",
+      "hashes": {
+        "templates/FunctionalInverses.h": "6b394c60cd5e26a0"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/LazyIr.h": {
+      "type": "file",
+      "hashes": {
+        "templates/LazyIr.h": "f9a54e21d8c1ef5f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "DimVector.h": {
+      "type": "file",
+      "hashes": {
+        "DimVector.h": "843b44bbb4cb9bea"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/NativeMetaFunction.h": {
+      "type": "file",
+      "hashes": {
+        "templates/NativeMetaFunction.h": "0b46a59c863a27ee"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ops/from_blob.h": {
+      "type": "file",
+      "hashes": {
+        "ops/from_blob.h": "bea1b695a6522faf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesConvolution.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesConvolution.cpp": "f054cabfddc96e79"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesIndexing.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesIndexing.cpp": "2b0d655d675c05bb"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/aten_interned_strings.h": {
+      "type": "file",
+      "hashes": {
+        "templates/aten_interned_strings.h": "fc53368d70210138"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesViews.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesViews.cpp": "76f85036c4b1482f"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesDecompositions.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesDecompositions.cpp": "17c403c0cb2ebfea"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesPooling.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesPooling.cpp": "a3cf7d3fcfdad07d"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesLoss.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesLoss.cpp": "c2d7c812ac4c3ec7"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesModules.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesModules.cpp": "fd2c6ed0c6a4cbaf"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesRandomness.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesRandomness.cpp": "454ef9a2e154c0e8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesActivation.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesActivation.cpp": "7938e090ddf916de"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesScatterOps.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesScatterOps.cpp": "de19280de3032f43"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/VmapModeRegistrations.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/VmapModeRegistrations.cpp": "93f21b1898eb4d04"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/PyTorchOperatorHacks.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/PyTorchOperatorHacks.cpp": "2a2ddba023587d23"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/Macros.h": {
+      "type": "file",
+      "hashes": {
+        "functorch/Macros.h": "2953779a19e09ab9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/LegacyBatchingRegistrations.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/LegacyBatchingRegistrations.cpp": "2f90f863f3b05a61"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesReduceOps.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesReduceOps.cpp": "b225749525fb29ec"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "templates/RegisterCodegenUnboxedKernels.cpp": {
+      "type": "file",
+      "hashes": {
+        "templates/RegisterCodegenUnboxedKernels.cpp": "b6ec76c12b7d45a9"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesBinaryOps.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesBinaryOps.cpp": "43a0ae3e6cae64b8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesNorm.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesNorm.cpp": "26ba7645fb70986c"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesFactory.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesFactory.cpp": "b312ecda875555f5"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesDynamic.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesDynamic.cpp": "d3410e78b55c50fe"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "ops/tensor.h": {
+      "type": "file",
+      "hashes": {
+        "ops/tensor.h": "8aca1eb3bc10955e"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchingMetaprogramming.h": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchingMetaprogramming.h": "e5f47a8239f4c885"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesLinearAlgebra.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesLinearAlgebra.cpp": "c0b2ec12278488a8"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
+    },
+    "functorch/BatchRulesUnaryOps.cpp": {
+      "type": "file",
+      "hashes": {
+        "functorch/BatchRulesUnaryOps.cpp": "6f429ba3092ec213"
+      },
+      "tasks": {
+        "purpose": "done"
+      }
     }
   }
 }

@@ -1,0 +1,223 @@
+--------------------------------
+Allocator (内存分配器基类)
+来源: c10/core/Allocator.h, c10/core/Allocator.cpp
+--------------------------------
+
+【核心类型】
+
+DataPtr:
+    字段:
+        ptr_: UniqueVoidPtr           # 数据指针 + 上下文 + 删除器
+        device_: Device                # 设备信息
+    
+    接口:
+        get() -> void*                 # 获取数据指针
+        get_context() -> void*         # 获取上下文指针
+        get_deleter() -> DeleterFnPtr  # 获取删除器
+        device() -> Device             # 获取设备
+        compare_exchange_deleter(expected, new) -> bool  # 原子替换删除器
+
+Allocator (抽象基类):
+    纯虚接口:
+        allocate(n: size_t) -> DataPtr
+            用途: 分配 n 字节内存
+        
+        copy_data(dest: void*, src: void*, count: size_t)
+            用途: 在分配器管理的内存间拷贝数据
+    
+    虚接口:
+        raw_deleter() -> DeleterFnPtr
+            用途: 返回简单删除器（若支持 raw API）
+            默认: nullptr
+        
+        is_simple_data_ptr(data_ptr: DataPtr) -> bool
+            用途: 检查 DataPtr 是否为简单形式（ptr == context）
+            默认: data_ptr.get() == data_ptr.get_context()
+    
+    实现接口:
+        clone(data: void*, n: size_t) -> DataPtr
+            用途: 克隆内存块
+            算法:
+                new_data = allocate(n)
+                copy_data(new_data.mutable_get(), data, n)
+                return new_data
+        
+        raw_allocate(n: size_t) -> void*
+            用途: 原始分配（Thrust 兼容）
+            算法:
+                dptr = allocate(n)
+                assert dptr.get() == dptr.get_context()
+                return dptr.release_context()
+        
+        raw_deallocate(ptr: void*)
+            用途: 原始释放（Thrust 兼容）
+            算法:
+                d = raw_deleter()
+                assert d != nullptr
+                d(ptr)
+        
+        default_copy_data(dest: void*, src: void*, count: size_t)
+            用途: 默认拷贝实现（使用 memcpy）
+            算法:
+                memcpy(dest, src, count)
+
+--------------------------------
+InefficientStdFunctionContext (std::function 删除器包装)
+来源: c10/core/Allocator.h, c10/core/Allocator.cpp
+--------------------------------
+
+【状态】
+    ptr_: void*                       # 原始指针
+    deleter_: function<void(void*)>   # 用户提供的删除器
+
+【接口】
+    makeDataPtr(ptr: void*, deleter: function<void(void*)>, device: Device) -> DataPtr
+        用途: 创建带 std::function 删除器的 DataPtr
+        算法:
+            ctx = new InefficientStdFunctionContext(ptr, deleter)
+            return DataPtr(ptr, ctx, deleteInefficientStdFunctionContext, device)
+
+【备注】
+    - 需要两次动态分配（Context 对象 + std::function 内部）
+    - 仅用于用户友好的外部接口
+
+--------------------------------
+全局分配器注册
+来源: c10/core/Allocator.cpp
+--------------------------------
+
+【状态】
+    allocator_array: array<Allocator*, COMPILE_TIME_MAX_DEVICE_TYPES>
+    allocator_priority: array<uint8_t, COMPILE_TIME_MAX_DEVICE_TYPES>
+
+【接口】
+    SetAllocator(t: DeviceType, alloc: Allocator*, priority: uint8_t = 0)
+        用途: 注册设备分配器（高优先级覆盖）
+        算法:
+            if priority >= allocator_priority[t]:
+                allocator_array[t] = alloc
+                allocator_priority[t] = priority
+    
+    GetAllocator(t: DeviceType) -> Allocator*
+        用途: 获取设备分配器
+        算法:
+            alloc = allocator_array[t]
+            assert alloc != nullptr
+            return alloc
+
+【备注】
+    - 非线程安全，仅在初始化时调用
+    - 分配器指针需静态生命周期
+
+--------------------------------
+内存性能分析接口
+来源: c10/core/Allocator.h, c10/core/Allocator.cpp
+--------------------------------
+
+【接口】
+    memoryProfilingEnabled() -> bool
+        用途: 检查是否启用内存性能分析
+        算法:
+            reporter = ThreadLocalDebugInfo::get(PROFILER_STATE)
+            return reporter != nullptr && reporter.memoryProfilingEnabled()
+    
+    reportMemoryUsageToProfiler(
+        ptr: void*,
+        alloc_size: int64,
+        total_allocated: size_t,
+        total_reserved: size_t,
+        device: Device
+    )
+        用途: 向性能分析器报告内存使用
+        算法:
+            reporter = ThreadLocalDebugInfo::get(PROFILER_STATE)
+            if reporter:
+                reporter.reportMemoryUsage(ptr, alloc_size, total_allocated, total_reserved, device)
+    
+    reportOutOfMemoryToProfiler(
+        alloc_size: int64,
+        total_allocated: size_t,
+        total_reserved: size_t,
+        device: Device
+    )
+        用途: 向性能分析器报告 OOM
+        算法:
+            reporter = ThreadLocalDebugInfo::get(PROFILER_STATE)
+            if reporter:
+                reporter.reportOutOfMemory(alloc_size, total_allocated, total_reserved, device)
+
+【依赖】
+    ThreadLocalDebugInfo::get    # 获取线程局部调试信息
+
+--------------------------------
+CachingAllocator 统计工具
+来源: c10/core/Allocator.h
+--------------------------------
+
+【类型】
+    Stat:
+        字段:
+            current: int64    # 当前使用量
+            peak: int64       # 峰值使用量
+            allocated: int64  # 累计分配量
+            freed: int64      # 累计释放量
+        
+        接口:
+            increase(amount: size_t)
+                算法:
+                    current += amount
+                    peak = max(current, peak)
+                    allocated += amount
+            
+            decrease(amount: size_t)
+                算法:
+                    current -= amount
+                    assert current >= 0
+                    freed += amount
+            
+            reset_accumulated()
+                算法:
+                    allocated = 0
+                    freed = 0
+            
+            reset_peak()
+                算法:
+                    peak = current
+    
+    StatType:
+        枚举: AGGREGATE | SMALL_POOL | LARGE_POOL
+    
+    StatArray: array<Stat, 3>
+    
+    DurationStat:
+        字段:
+            total: int64      # 总耗时
+            count: int64      # 调用次数
+            max: int64        # 最大耗时
+            min: int64        # 最小耗时
+        
+        接口:
+            increase(amount: int64)
+                算法:
+                    total += amount
+                    count += 1
+                    max = max(amount, max)
+                    min = min(amount, min) if min != 0 else amount
+            
+            reset_accumulated()
+                算法:
+                    total = 0
+                    count = 0
+            
+            reset_peak()
+                算法:
+                    min = 0
+                    max = 0
+
+【工具函数】
+    for_each_selected_stat_type(stat_types: StatTypes, f: Func)
+        用途: 遍历选中的统计类型
+        算法:
+            for stat_type in range(stat_types.size()):
+                if stat_types[stat_type]:
+                    f(stat_type)

@@ -1,0 +1,23 @@
+--------------------------------
+GPUTrace (GPU追踪状态管理)
+来源: c10/core/impl/GPUTrace.cpp, c10/core/impl/GPUTrace.h
+--------------------------------
+
+【状态】
+    gpuTraceState: atomic<PyInterpreter*>    # GPU追踪解释器指针，原子操作
+    haveState: bool                          # 是否已设置状态标志（非原子）
+
+【接口】
+    set_trace(trace: PyInterpreter*)用途: 注册GPU追踪解释器，仅首次调用生效
+        实现: 使用静态局部变量确保只执行一次gpuTraceState.store(trace, memory_order_release)haveState = true
+
+    get_trace() -> PyInterpreter*
+        用途: 获取当前GPU追踪解释器
+        实现: if not haveState: return nullptr
+              return gpuTraceState.load(memory_order_acquire)
+
+【备注】
+    - 单次注册机制: set_trace 使用 static bool once_flag 确保只有第一个解释器能注册成功
+    - 内存序: store 使用 release，load 使用 acquire，保证跨线程可见性
+    - haveState 非同步: 注释说明该变量只会被首次访问的解释器翻转一次，因此不需要同步
+    - x86架构: 原子操作是无锁的

@@ -1,0 +1,210 @@
+```
+--------------------------------
+SymFloat (符号浮点数类)
+来源: c10/core/SymFloat.h, c10/core/SymFloat.cpp
+--------------------------------
+
+【状态】
+    data_: double                    # 具体浮点值
+    ptr_: SymNode                    # 符号节点指针 (为空时表示具体值)
+
+【接口】
+    SymFloat(d: double)
+        用途: 从具体浮点数构造
+
+    SymFloat(ptr: SymNode)
+        用途: 从符号节点构造
+        调用: TORCH_CHECK(ptr_->is_float())
+
+    is_symbolic() -> bool
+        用途: 判断是否为符号值 (ptr_ 非空)
+
+    as_float_unchecked() -> double
+        用途: 获取具体值 (仅当 !is_symbolic() 时有效)
+
+    expect_float() -> double
+        用途: 获取具体值 (检查版本)
+        调用: TORCH_CHECK(!is_symbolic())
+
+    toSymNodeImpl() -> SymNode
+        用途: 获取符号节点 (仅当 is_symbolic() 时有效)
+        调用: SymNode::reclaim_copy(toSymNodeImplUnowned())
+
+    wrap_node(base: SymNode) -> SymNode
+        用途: 包装为符号节点 (具体值时用 base 包装)
+        算法:
+            if is_symbolic():
+                return toSymNodeImpl()
+            else:
+                return base->wrap_float(as_float_unchecked())
+
+    guard_float(file: char*, line: int64) -> double
+        用途: 插入具体值守卫并返回该值
+        算法:
+            if !is_symbolic():
+                return data_
+            else:
+                return toSymNodeImpl()->guard_float(file, line)
+
+    has_hint() -> bool
+        用途: 判断是否有具体值提示
+        算法:
+            if !is_symbolic():
+                return true
+            else:
+                return toSymNodeImpl()->has_hint()
+
+    operator+(other: SymFloat) -> SymFloat
+        算法:
+            if !is_symbolic() and !other.is_symbolic():
+                return SymFloat(data_ + other.data_)
+            else:
+                [a, b] = normalize_symfloats(*this, other)
+                return SymFloat(a->add(b))
+
+    operator-(other: SymFloat) -> SymFloat
+        算法:
+            if !is_symbolic() and !other.is_symbolic():
+                return SymFloat(data_ - other.data_)
+            else:
+                [a, b] = normalize_symfloats(*this, other)
+                return SymFloat(a->sub(b))
+
+    operator*(other: SymFloat) -> SymFloat
+        算法:
+            if !is_symbolic() and !other.is_symbolic():
+                return SymFloat(data_ * other.data_)
+            else:
+                [a, b] = normalize_symfloats(*this, other)
+                return SymFloat(a->mul(b))
+
+    operator/(other: SymFloat) -> SymFloat
+        算法:
+            if !is_symbolic() and !other.is_symbolic():
+                return SymFloat(data_ / other.data_)
+            else:
+                [a, b] = normalize_symfloats(*this, other)
+                return SymFloat(a->truediv(b))
+
+    sym_eq(other: SymFloat) -> SymBool
+        算法:
+            if !is_symbolic() and !other.is_symbolic():
+                return data_ == other.data_
+            else:
+                [a, b] = normalize_symfloats(*this, other)
+                return a->eq(b)
+
+    sym_ne(other: SymFloat) -> SymBool
+        算法:
+            if !is_symbolic() and !other.is_symbolic():
+                return data_ != other.data_
+            else:
+                [a, b] = normalize_symfloats(*this, other)
+                return a->ne(b)
+
+    sym_lt(other: SymFloat) -> SymBool
+        算法:
+            if !is_symbolic() and !other.is_symbolic():
+                return data_ < other.data_
+            else:
+                [a, b] = normalize_symfloats(*this, other)
+                return a->lt(b)
+
+    sym_le(other: SymFloat) -> SymBool
+        算法:
+            if !is_symbolic() and !other.is_symbolic():
+                return data_ <= other.data_
+            else:
+                [a, b] = normalize_symfloats(*this, other)
+                return a->le(b)
+
+    sym_gt(other: SymFloat) -> SymBool
+        算法:
+            if !is_symbolic() and !other.is_symbolic():
+                return data_ > other.data_
+            else:
+                [a, b] = normalize_symfloats(*this, other)
+                return a->gt(b)
+
+    sym_ge(other: SymFloat) -> SymBool
+        算法:
+            if !is_symbolic() and !other.is_symbolic():
+                return data_ >= other.data_
+            else:
+                [a, b] = normalize_symfloats(*this, other)
+                return a->ge(b)
+
+    operator==(other: SymFloat) -> bool
+        算法: sym_eq(other).guard_bool(__FILE__, __LINE__)
+
+    operator!=(other: SymFloat) -> bool
+        算法: sym_ne(other).guard_bool(__FILE__, __LINE__)
+
+    operator<(other: SymFloat) -> bool
+        算法: sym_lt(other).guard_bool(__FILE__, __LINE__)
+
+    operator<=(other: SymFloat) -> bool
+        算法: sym_le(other).guard_bool(__FILE__, __LINE__)
+
+    operator>(other: SymFloat) -> bool
+        算法: sym_gt(other).guard_bool(__FILE__, __LINE__)
+
+    operator>=(other: SymFloat) -> bool
+        算法: sym_ge(other).guard_bool(__FILE__, __LINE__)
+
+    min(other: SymFloat) -> SymFloat
+        算法:
+            if !is_symbolic() and !other.is_symbolic():
+                return std::min(data_, other.data_)
+            else:
+                [a, b] = normalize_symfloats(*this, other)
+                return SymFloat(a->sym_min(b))
+
+    max(other: SymFloat) -> SymFloat
+        算法:
+            if !is_symbolic() and !other.is_symbolic():
+                return std::max(data_, other.data_)
+            else:
+                [a, b] = normalize_symfloats(*this, other)
+                return SymFloat(a->sym_max(b))
+
+    sqrt() -> SymFloat
+        算法:
+            if !is_symbolic():
+                return SymFloat(std::sqrt(data_))
+            else:
+                other = SymFloat(0.5)
+                [a, b] = normalize_symfloats(*this, other)
+                return SymFloat(a->pow(b))
+
+【依赖】
+    normalize_symfloats(a: SymFloat, b: SymFloat) -> [SymNode, SymNode]
+        用途: 将两个 SymFloat 统一为符号节点对
+        算法:
+            a_node = a.toSymNodeImpl() if a.is_symbolic() else null
+            b_node = b.toSymNodeImpl() if b.is_symbolic() else null
+            
+            common = a_node if a_node else b_node
+            
+            if !a_node:
+                a_node = common->wrap_float(a.as_float_unchecked())
+            if !b_node:
+                b_node = common->wrap_float(b.as_float_unchecked())
+            
+            return [a_node, b_node]
+
+    operator<<(os: ostream, s: SymFloat) -> ostream
+        用途: 输出流操作符
+        算法:
+            if s.is_symbolic():
+                os << s.toSymNodeImpl()->str()
+            else:
+                os << s.as_float_unchecked()
+            return os
+
+【备注】
+    - SymFloat 支持混合模式: 具体值 (data_) 或符号值 (ptr_)
+    - 所有算术/比较操作: 两个具体值时直接计算，否则委托给 SymNode
+    - normalize_symfloats: 确保两个操作数都转为符号节点 (使用同一个 common 节点包装)
+    - sqrt 实现为 pow(0.5)
+```

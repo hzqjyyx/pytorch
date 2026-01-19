@@ -1,0 +1,74 @@
+--------------------------------
+动态类型转换工具
+来源: c10/core/DynamicCast.h
+--------------------------------
+
+【函数】
+    fetch_and_cast<dest_t>(src_type: ScalarType, ptr: void*) -> dest_t参数: src_type=源数据的动态类型, ptr=指向源数据的指针, dest_t=目标静态类型
+        用途: 从 void* 读取动态类型的值，转换为静态类型 dest_t
+        调用: c10::load<T>(ptr), c10::convert<dest_t>(value)
+        
+    cast_and_store<src_t>(dest_type: ScalarType, ptr: void*, value: src_t)
+        参数: dest_type=目标动态类型, ptr=目标内存指针, value=源静态类型值
+        用途: 将静态类型值转换为动态类型，存储到 void*
+        调用: c10::convert<T>(value)
+
+【算法】
+    fetch_and_cast:
+        switch src_type:
+            case Byte:      return convert<dest_t>(load<uint8_t>(ptr))
+            case Char:      return convert<dest_t>(load<int8_t>(ptr))
+            case Short:     return convert<dest_t>(load<int16_t>(ptr))
+            case Int:       return convert<dest_t>(load<int32_t>(ptr))
+            case Long:      return convert<dest_t>(load<int64_t>(ptr))
+            case Half:      return convert<dest_t>(load<Half>(ptr))
+            case Float:     return convert<dest_t>(load<float>(ptr))
+            case Double:    return convert<dest_t>(load<double>(ptr))
+            case ComplexHalf:   return convert<dest_t>(load<complex<Half>>(ptr))
+            case ComplexFloat:  return convert<dest_t>(load<complex<float>>(ptr))
+            case ComplexDouble: return convert<dest_t>(load<complex<double>>(ptr))
+            case Bool:      return convert<dest_t>(load<bool>(ptr))
+            case BFloat16:  return convert<dest_t>(load<BFloat16>(ptr))
+            case UInt16:    return convert<dest_t>(load<uint16_t>(ptr))
+            case UInt32:    return convert<dest_t>(load<uint32_t>(ptr))
+            case UInt64:    return convert<dest_t>(load<uint64_t>(ptr))
+            default:        ERROR
+
+    cast_and_store:
+        switch dest_type:
+            case Byte:      *(uint8_t*)ptr = convert<uint8_t>(value); return
+            case Char:      *(int8_t*)ptr = convert<int8_t>(value); return
+            case Short:     *(int16_t*)ptr = convert<int16_t>(value); return
+            case Int:       *(int32_t*)ptr = convert<int32_t>(value); return
+            case Long:      *(int64_t*)ptr = convert<int64_t>(value); return
+            case Half:      *(Half*)ptr = convert<Half>(value); return
+            case Float:     *(float*)ptr = convert<float>(value); return
+            case Double:    *(double*)ptr = convert<double>(value); return
+            case ComplexHalf:   *(complex<Half>*)ptr = convert<complex<Half>>(value); return
+            case ComplexFloat:  *(complex<float>*)ptr = convert<complex<float>>(value); return
+            case ComplexDouble: *(complex<double>*)ptr = convert<complex<double>>(value); return
+            case Bool:      *(bool*)ptr = convert<bool>(value); return
+            case BFloat16:  *(BFloat16*)ptr = convert<BFloat16>(value); return
+            case UInt16:    *(uint16_t*)ptr = convert<uint16_t>(value); return
+            case UInt32:    *(uint32_t*)ptr = convert<uint32_t>(value); return
+            case UInt64:    *(uint64_t*)ptr = convert<uint64_t>(value); return
+            default:        ERROR
+
+【特化】
+    量化类型 (QInt8, QUInt8, QInt32) 不支持类型转换:
+        fetch_and_cast<QInt8>: 仅当 src_type == QInt8 时直接 load，否则 ASSERT
+        cast_and_store<QInt8>: 仅当 dest_type == QInt8 时直接 store，否则 ASSERT
+        (QUInt8, QInt32 同理)
+
+【依赖】
+    c10::load<T>        # 从 void* 安全读取类型 T
+    c10::convert<T>     # 类型转换
+    ScalarType          # 动态类型枚举
+
+【设计目的】
+    避免类型提升的组合爆炸:- 不使用动态转换: N 种类型需要 N³ 个 kernel (output × input1 × input2)
+    - 使用动态转换: 只需 N 个 kernel，在循环内做类型检查
+    性能考虑:
+    - CPU: 分支预测器可处理固定分支
+    - GPU: 同一 warp 内分支不发散
+    - 带宽受限的 kernel (如 add): 类型检查开销可忽略

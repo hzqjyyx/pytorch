@@ -1,0 +1,80 @@
+--------------------------------
+InlineEvent (设备事件管理)
+来源: c10/core/impl/InlineEvent.h
+--------------------------------
+
+【状态】
+    event_: void*                        # 底层事件句柄
+    backend_: T                          # 设备后端实现（模板参数）
+    device_type_: DeviceType             # 设备类型（CPU/CUDA等）
+    device_index_: DeviceIndex           # 设备索引，默认-1
+    flag_: EventFlag                     # 事件标志
+    was_marked_for_recording_: bool      # 是否已记录过
+
+【接口】
+    InlineEvent(device_type: DeviceType, flag: EventFlag = PYTORCH_DEFAULT)
+        用途: 构造事件对象，初始化后端和设备类型
+
+    ~InlineEvent()
+        用途: 析构时销毁底层事件
+        调用: backend_.destroyEvent(event_, device_index_)
+
+    device_type() -> DeviceType
+        用途: 查询设备类型
+
+    device_index() -> DeviceIndex
+        用途: 查询设备索引
+
+    flag() -> EventFlag
+        用途: 查询事件标志
+
+    was_marked_for_recording() -> bool
+        用途: 查询是否已记录
+
+    record(stream: Stream)
+        参数: stream=要记录的流
+        用途: 在指定流上记录事件，更新设备索引
+        调用: backend_.record(&event_, stream, device_index_, flag_)
+        约束: stream.device_type() == device_type_
+
+    recordOnce(stream: Stream)
+        用途: 仅在未记录时记录事件（幂等）
+
+    block(stream: Stream)
+        参数: stream=要阻塞的流
+        用途: 让指定流等待此事件完成
+        调用: backend_.block(event_, stream)
+        约束: stream.device_type() == device_type_
+
+    query() -> bool
+        用途: 查询事件是否已完成
+        调用: backend_.queryEvent(event_)
+        返回: 未记录时返回true，否则返回实际查询结果
+
+    synchronize()
+        用途: 同步等待事件完成
+        调用: backend_.synchronizeEvent(event_)
+
+    elapsedTime(other: InlineEvent) -> double
+        参数: other=结束事件
+        用途: 计算两个事件之间的时间差（毫秒）
+        调用: backend_.elapsedTime(event_, other.event_, device_index_)
+        约束: 
+            - self.was_marked_for_recording() == true
+            - other.was_marked_for_recording() == true
+            - other.device_type() == device_type_
+
+    eventId() -> void*
+        用途: 获取底层事件句柄
+
+    swap(other: InlineEvent&)
+        用途: 交换两个事件对象的所有状态
+
+【依赖】
+    DeviceGuardImplInterface    # 后端设备操作接口
+    TORCH_CHECK                 # 错误检查
+
+【备注】
+    - 不可拷贝，仅支持移动语义
+    - 模板参数 T 为设备后端实现类型
+    - 事件生命周期由 RAII 管理

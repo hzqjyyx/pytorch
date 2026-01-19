@@ -1,0 +1,272 @@
+--------------------------------
+TensorOptions (Tensor构造选项)
+来源: c10/core/TensorOptions.h, c10/core/TensorOptions.cpp
+--------------------------------
+
+【状态】
+    device_: Device = kCPU                              # 设备 (16-bit)
+    dtype_: TypeMeta = TypeMeta::Make<float>()          # 数据类型 (16-bit)
+    layout_: Layout = kStrided                          # 布局 (8-bit)
+    memory_format_: MemoryFormat = Contiguous           # 内存格式 (8-bit)
+    requires_grad_: bool (1-bit)                        # 是否需要梯度
+    pinned_memory_: bool (1-bit)                        # 是否固定内存
+    has_device_: bool (1-bit)                           # 是否指定了设备
+    has_dtype_: bool (1-bit)                            # 是否指定了数据类型
+    has_layout_: bool (1-bit)                           # 是否指定了布局
+    has_requires_grad_: bool (1-bit)                    # 是否指定了requires_grad
+    has_pinned_memory_: bool (1-bit)                    # 是否指定了pinned_memory
+    has_memory_format_: bool (1-bit)                    # 是否指定了memory_format
+
+【接口】
+    TensorOptions()
+        用途: 默认构造，所有选项未指定
+
+    TensorOptions(Layout layout)
+        用途: 从布局隐式构造
+
+    TensorOptions(Device device)
+        用途: 从设备隐式构造
+
+    TensorOptions(DeviceType, DeviceIndex)
+        用途: 从设备类型和索引隐式构造
+
+    TensorOptions(TypeMeta dtype)
+        用途: 从数据类型隐式构造
+
+    TensorOptions(ScalarType dtype)
+        用途: 从标量类型隐式构造
+
+    TensorOptions(MemoryFormat memory_format)
+        用途: 从内存格式隐式构造
+
+    device(Optional<Device>) -> TensorOptions
+        用途: 返回设置了指定设备的副本
+
+    device_index(DeviceIndex) -> TensorOptions
+        用途: 返回设置了CUDA设备索引的副本
+
+    dtype(Optional<TypeMeta>) -> TensorOptions
+        用途: 返回设置了指定数据类型的副本
+
+    dtype<T>() -> TensorOptions&
+        用途: 通过模板参数设置数据类型
+
+    layout(Optional<Layout>) -> TensorOptions
+        用途: 返回设置了指定布局的副本
+
+    requires_grad(Optional<bool>) -> TensorOptions
+        用途: 返回设置了requires_grad的副本
+
+    pinned_memory(Optional<bool>) -> TensorOptions
+        用途: 返回设置了pinned_memory的副本
+
+    memory_format(Optional<MemoryFormat>) -> TensorOptions
+        用途: 返回设置了memory_format的副本
+
+    device() -> Device
+        用途: 获取设备，未指定时返回默认值kCPU
+
+    has_device() -> bool
+        用途: 是否显式指定了设备
+
+    device_opt() -> Optional<Device>
+        用途: 获取设备的Optional形式
+
+    device_index() -> DeviceIndex
+        用途: 获取设备索引
+
+    dtype() -> TypeMeta
+        用途: 获取数据类型，未指定时返回默认值float
+
+    has_dtype() -> bool
+        用途: 是否显式指定了数据类型
+
+    dtype_opt() -> Optional<TypeMeta>
+        用途: 获取数据类型的Optional形式
+
+    layout() -> Layout
+        用途: 获取布局，未指定时返回默认值kStrided
+
+    has_layout() -> bool
+        用途: 是否显式指定了布局
+
+    layout_opt() -> Optional<Layout>
+        用途: 获取布局的Optional形式
+
+    requires_grad() -> bool
+        用途: 获取requires_grad，未指定时返回false
+
+    has_requires_grad() -> bool
+        用途: 是否显式指定了requires_grad
+
+    requires_grad_opt() -> Optional<bool>
+        用途: 获取requires_grad的Optional形式
+
+    pinned_memory() -> bool
+        用途: 获取pinned_memory，未指定时返回false
+
+    has_pinned_memory() -> bool
+        用途: 是否显式指定了pinned_memory
+
+    pinned_memory_opt() -> Optional<bool>
+        用途: 获取pinned_memory的Optional形式
+
+    has_memory_format() -> bool
+        用途: 是否显式指定了memory_format
+
+    memory_format_opt() -> Optional<MemoryFormat>
+        用途: 获取memory_format的Optional形式
+
+    is_sparse() -> bool
+        用途: 判断布局是否为Sparse
+
+    is_sparse_csr() -> bool
+        用途: 判断布局是否为SparseCsr (已废弃)
+
+    is_sparse_compressed() -> bool
+        用途: 判断布局是否为压缩稀疏格式 (SparseCsr/SparseCsc/SparseBsr/SparseBsc)
+
+    type_equal(TensorOptions other) -> bool
+        用途: 比较两个TensorOptions的类型是否相等 (DispatchKey和ScalarType)
+        调用: computeDispatchKey(), typeMetaToScalarType()
+
+    backend() -> Backend
+        用途: 获取后端类型 (已废弃)
+        调用: at::dispatchKeyToBackend(computeDispatchKey())
+
+    merge_in(TensorOptions options) -> TensorOptions
+        用途: 右偏合并，用options中已指定的选项覆盖当前选项
+
+    merge_memory_format(Optional<MemoryFormat>) -> TensorOptions
+        用途: 合并memory_format选项
+
+    computeDispatchKey() -> DispatchKey
+        用途: 计算当前选项对应的DispatchKey
+        调用: c10::computeDispatchKey(dtype_opt(), layout_opt(), device_opt())
+
+【依赖】
+    dtype_or_default(Optional<ScalarType>) -> ScalarType
+        用途: 返回dtype或默认值
+        调用: get_default_dtype_as_scalartype()
+
+    dtype_or_default(Optional<TypeMeta>) -> TypeMeta
+        用途: 返回dtype或默认值
+        调用: get_default_dtype()
+
+    layout_or_default(Optional<Layout>) -> Layout
+        用途: 返回layout或默认值kStrided
+
+    device_or_default(Optional<Device>) -> Device
+        用途: 返回device或默认值kCPU
+
+    pinned_memory_or_default(Optional<bool>) -> bool
+        用途: 返回pinned_memory或默认值false
+
+    computeDispatchKey(Optional<ScalarType>, Optional<Layout>, Optional<Device>) -> DispatchKey
+        用途: 根据dtype/layout/device计算DispatchKey
+        算法:
+            layout = layout_or_default(layout)
+            device = device_or_default(device)
+            
+            match layout:
+                Jagged | Strided:
+                    dtype = dtype_or_default(dtype)
+                    match device.type():
+                        CPU | CUDA | ...:
+                            if isQIntType(dtype):
+                                return DispatchKey::Quantized{Device}
+                            return DispatchKey::{Device}
+                        FPGA: return DispatchKey::FPGA
+                        MAIA: return DispatchKey::MAIA
+                        Vulkan: return DispatchKey::Vulkan
+                        Metal: return DispatchKey::Metal
+                        MKLDNN | OPENGL | OPENCL | IDEEP:
+                            TORCH_INTERNAL_ASSERT(0, "Grandfathered Caffe2 device type")
+                        default:
+                            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for dense layout")
+                
+                Sparse:
+                    match device.type():
+                        CPU | CUDA | ...:
+                            return DispatchKey::Sparse{Device}
+                        default:
+                            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for sparse layout")
+                
+                Mkldnn:
+                    match device.type():
+                        CPU: return DispatchKey::MkldnnCPU
+                        default:
+                            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for mkldnn layout")
+                
+                SparseCsr | SparseCsc | SparseBsr | SparseBsc:
+                    match device.type():
+                        CPU | CUDA | ...:
+                            return DispatchKey::SparseCsr{Device}
+                        default:
+                            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for sparse compressed layout")
+                
+                default:
+                    TORCH_CHECK(false, "Unsupported layout")
+
+    dispatchKeyToLayout(DispatchKey) -> Layout
+        用途: 从DispatchKey推断Layout
+        算法:
+            match dispatch_key:
+                Sparse{*}: return Layout::Sparse
+                SparseCsr{*}: TORCH_CHECK(false, "Cannot map to unique layout")
+                MkldnnCPU: return Layout::Mkldnn
+                default: return Layout::Strided
+
+    dispatchKeyToDeviceType(DispatchKey) -> DeviceType
+        用途: 从DispatchKey推断DeviceType
+        算法:
+            match dispatch_key:
+                {prefix}{suffix}: return DeviceType::{suffix}
+                MkldnnCPU: return DeviceType::CPU
+                Vulkan: return DeviceType::Vulkan
+                MAIA: return DeviceType::MAIA
+                default: TORCH_CHECK(false, "DispatchKey doesn't correspond to a device")
+
+    dispatchKeyToTensorOptions(DispatchKey) -> TensorOptions
+        用途: 从DispatchKey构造TensorOptions
+        调用: dispatchKeyToLayout(), dispatchKeyToDeviceType()
+
+    operator<<(ostream&, TensorOptions) -> ostream&
+        用途: 输出TensorOptions的字符串表示
+        算法:
+            print("TensorOptions(dtype=", dtype(), has_dtype() ? "" : " (default)")
+            print(", device=", device(), has_device() ? "" : " (default)")
+            print(", layout=", layout(), has_layout() ? "" : " (default)")
+            print(", requires_grad=", requires_grad(), has_requires_grad() ? "" : " (default)")
+            print(", pinned_memory=", pinned_memory(), has_pinned_memory() ? "" : " (default)")
+            print(", memory_format=", has_memory_format() ? *memory_format_opt() : "(nullopt)")
+            print(")")
+
+    toString(TensorOptions) -> string
+        用途: 将TensorOptions转换为字符串
+
+    dtype<T>() -> TensorOptions
+        用途: 创建指定模板类型的TensorOptions
+        调用: dtype(caffe2::TypeMeta::Make<T>())
+
+    detail::backend_supports_empty_operator(TensorOptions) -> bool
+        用途: 判断后端是否支持at::empty()操作
+        算法:
+            return !isQIntType(typeMetaToScalarType(options.dtype()))
+
+【便利构造函数】
+    dtype(TypeMeta | ScalarType) -> TensorOptions
+    layout(Layout) -> TensorOptions
+    device(Device) -> TensorOptions
+    device_index(DeviceIndex) -> TensorOptions
+    requires_grad(bool = true) -> TensorOptions
+    memory_format(MemoryFormat) -> TensorOptions
+
+【备注】
+    - TensorOptions大小 <= 128-bit (两个机器字)
+    - 使用位域压缩has_*标志以节省空间
+    - 所有属性都是可选的，getter提供默认值
+    - 支持链式调用: at::device(kCUDA).dtype(kInt)
+    - 隐式转换支持: at::zeros({2,2}, at::kCUDA)
+    - memory_format没有默认值getter，因为不同函数有不同默认行为
+    - merge_in不尊重设备合并语义，依赖device guard保证正确性

@@ -1,0 +1,55 @@
+--------------------------------
+COWDeleterContext (Copy-on-Write 删除器上下文)
+来源: c10/core/impl/COWDeleter.h, c10/core/impl/COWDeleter.cpp
+--------------------------------
+
+【状态】
+    data_: unique_ptr<void, DeleterFnPtr>    # 持有的数据指针及其原始删除器
+    refcount_: atomic<int64>                 # 引用计数，初始值为1
+    mutex_: shared_mutex                     # 读写锁，保护数据访问
+
+【接口】
+    COWDeleterContext(data: unique_ptr<void, DeleterFnPtr>)
+        用途: 创建实例，接管数据及其删除器
+        约束: data的删除器不能是cow_deleter（禁止嵌套包装）
+
+    increment_refcount() -> void
+        用途: 原子递增引用计数
+        约束: 递增后refcount必须>1
+
+    decrement_refcount() -> NotLastReference | LastReference
+        用途: 原子递减引用计数，返回处理指示
+        返回:
+            - NotLastReference (shared_lock<shared_mutex>): 
+                refcount > 0，返回共享锁供调用者在锁保护下复制数据
+            - LastReference (unique_ptr<void, DeleterFnPtr>): 
+                refcount == 0，返回数据所有权，同时delete this
+
+    cow_deleter(ctx: void*)
+        用途: DataPtr的ctx_deleter函数，调用COWDeleterContext::decrement_refcount()
+        约束: ctx必须是堆上分配的COWDeleterContext*
+
+【算法】
+    # decrement_refcount 的核心逻辑
+    refcount = atomic_decrement(refcount_)
+    assert refcount >= 0
+
+    if refcount == 0:
+        # 最后一个引用
+        lock = unique_lock(mutex_)
+        result = move(data_)
+        unlock(lock)
+        delete this
+        return LastReference(result)
+    else:
+        # 非最后引用，返回共享锁
+        return NotLastReference(shared_lock(mutex_))
+
+【依赖】
+    TORCH_INTERNAL_ASSERT    # 内部断言检查
+    c10::UniqueVoidPtr       # 类型别名，unique_ptr<void, DeleterFnPtr>
+
+【备注】
+    - 析构函数检查refcount_必须为0
+    - 锁策略: 共享锁允许多个读者并发复制数据，独占锁用于最后引用的清理
+    - 生命周期: 对象在refcount降为0时自我删除（delete this）

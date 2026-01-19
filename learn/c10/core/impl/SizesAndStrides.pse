@@ -1,0 +1,242 @@
+--------------------------------
+SizesAndStrides (Tensor维度和步长容器)
+来源: c10/core/impl/SizesAndStrides.h, c10/core/impl/SizesAndStrides.cpp
+--------------------------------
+
+【设计】
+    内存布局优化的容器，存储Tensor的sizes和strides
+    
+    布局策略:
+    - inline模式 (size <= 5): 使用栈上数组 inlineStorage_[10]
+      [size0, size1, ..., size4, stride0, stride1, ..., stride4]
+    - outline模式 (size > 5): 使用堆上数组 outOfLineStorage_
+      [size0, ..., sizeN, stride0, ..., strideN]
+
+【状态】
+    size_: size_t                    # 维度数量，默认1
+    union:
+        inlineStorage_[10]: int64_t  # 内联存储 (5个size + 5个stride)
+        outOfLineStorage_: int64_t*  # 堆上存储指针
+
+【接口】
+    # 构造与析构
+    SizesAndStrides()
+        用途: 默认构造，初始化为标量 (size=0, stride=1)
+    
+    ~SizesAndStrides()
+        用途: 析构时释放outline存储
+        算法: if not isInline(): free(outOfLineStorage_)
+    
+    SizesAndStrides(rhs: const SizesAndStrides&)
+        用途: 拷贝构造
+        算法:
+            size_ = rhs.size_
+            if rhs.isInline():
+                copyDataInline(rhs)
+            else:
+                allocateOutOfLineStorage(size_)
+                copyDataOutline(rhs)
+    
+    operator=(rhs: const SizesAndStrides&) -> SizesAndStrides&
+        用途: 拷贝赋值
+        算法:
+            if this == &rhs: return *this
+            
+            if rhs.isInline():
+                if not isInline(): free(outOfLineStorage_)
+                copyDataInline(rhs)
+            else:
+                if isInline():
+                    allocateOutOfLineStorage(rhs.size_)
+                else:
+                    resizeOutOfLineStorage(rhs.size_)
+                copyDataOutline(rhs)
+            
+            size_ = rhs.size_
+            return *this
+    
+    SizesAndStrides(rhs: SizesAndStrides&&)
+        用途: 移动构造，rhs.size()置0
+        算法:
+            size_ = rhs.size_
+            if isInline():
+                memcpy(inlineStorage_, rhs.inlineStorage_, sizeof(inlineStorage_))
+            else:
+                outOfLineStorage_ = rhs.outOfLineStorage_
+                rhs.outOfLineStorage_ = nullptr
+            rhs.size_ = 0
+    
+    operator=(rhs: SizesAndStrides&&) -> SizesAndStrides&
+        用途: 移动赋值，rhs.size()置0
+        算法:
+            if this == &rhs: return *this
+            
+            if rhs.isInline():
+                if not isInline(): free(outOfLineStorage_)
+                copyDataInline(rhs)
+            else:
+                if not isInline(): free(outOfLineStorage_)
+                outOfLineStorage_ = rhs.outOfLineStorage_
+                rhs.outOfLineStorage_ = nullptr
+            
+            size_ = rhs.size_
+            rhs.size_ = 0
+            return *this
+
+    # 查询接口
+    size() -> size_t
+        用途: 返回维度数量
+    
+    sizes_data() -> int64_t* / const int64_t*
+        用途: 返回sizes数组指针
+        算法: return isInline() ? &inlineStorage_[0] : &outOfLineStorage_[0]
+    
+    strides_data() -> int64_t* / const int64_t*
+        用途: 返回strides数组指针
+        算法: return isInline() ? &inlineStorage_[5] : &outOfLineStorage_[size()]
+    
+    sizes_begin/end() -> iterator
+        用途: sizes数组的迭代器
+    
+    strides_begin/end() -> iterator
+        用途: strides数组的迭代器
+    
+    sizes_arrayref() -> IntArrayRef
+        用途: 返回sizes的ArrayRef视图
+    
+    strides_arrayref() -> IntArrayRef
+        用途: 返回strides的ArrayRef视图
+    
+    size_at(idx: size_t) -> int64_t&
+        用途: 访问第idx个size，带边界检查
+    
+    size_at_unchecked(idx: size_t) -> int64_t&
+        用途: 访问第idx个size，无边界检查
+    
+    stride_at(idx: size_t) -> int64_t&
+        用途: 访问第idx个stride，带边界检查
+    
+    stride_at_unchecked(idx: size_t) -> int64_t&
+        用途: 访问第idx个stride，无边界检查
+
+    # 修改接口
+    set_sizes(newSizes: IntArrayRef)
+        用途: 设置sizes数组
+        算法:
+            resize(newSizes.size())
+            copy(newSizes.begin(), newSizes.end(), sizes_begin())
+    
+    set_strides(strides: IntArrayRef)
+        用途: 设置strides数组
+        算法:
+            assert strides.size() == size()
+            copy(strides.begin(), strides.end(), strides_begin())
+    
+    resize(newSize: size_t)
+        用途: 调整维度数量
+        算法:
+            oldSize = size()
+            if newSize == oldSize: return
+            
+            # 快速路径: inline -> inline
+            if newSize <= 5 and isInline():
+                if oldSize < newSize:
+                    bytesToZero = (newSize - oldSize) * 8
+                    memset(&inlineStorage_[oldSize], 0, bytesToZero)
+                    memset(&inlineStorage_[5 + oldSize], 0, bytesToZero)
+                size_ = newSize
+            else:
+                resizeSlowPath(newSize, oldSize)
+    
+    resizeSlowPath(newSize: size_t, oldSize: size_t)
+        用途: resize的慢速路径，处理inline/outline转换
+        算法:
+            # Case 1: outline -> inline
+            if newSize <= 5:
+                assert not isInline()
+                tempStorage = outOfLineStorage_
+                memcpy(&inlineStorage_[0], &tempStorage[0], 5 * 8)
+                memcpy(&inlineStorage_[5], &tempStorage[oldSize], 5 * 8)
+                free(tempStorage)
+            
+            # Case 2: inline -> outline
+            else if isInline():
+                tempStorage = malloc(newSize * 2 * 8)
+                bytesToCopy = oldSize * 8
+                bytesToZero = (newSize > oldSize) ? (newSize - oldSize) * 8 : 0
+                
+                # 拷贝sizes
+                memcpy(&tempStorage[0], &inlineStorage_[0], bytesToCopy)
+                if bytesToZero: memset(&tempStorage[oldSize], 0, bytesToZero)
+                
+                # 拷贝strides
+                memcpy(&tempStorage[newSize], &inlineStorage_[5], bytesToCopy)
+                if bytesToZero: memset(&tempStorage[newSize + oldSize], 0, bytesToZero)
+                
+                outOfLineStorage_ = tempStorage
+            
+            # Case 3: outline -> outline
+            else:
+                isGrowing = oldSize < newSize
+                
+                if isGrowing:
+                    resizeOutOfLineStorage(newSize)
+                
+                # 移动strides到新位置
+                memmove(
+                    outOfLineStorage_ + newSize,
+                    outOfLineStorage_ + oldSize,
+                    min(oldSize, newSize) * 8
+                )
+                
+                if not isGrowing:
+                    resizeOutOfLineStorage(newSize)
+                else:
+                    # 零填充新增部分
+                    bytesToZero = (newSize - oldSize) * 8
+                    memset(&outOfLineStorage_[oldSize], 0, bytesToZero)
+                    memset(&outOfLineStorage_[newSize + oldSize], 0, bytesToZero)
+            
+            size_ = newSize
+
+【私有方法】
+    isInline() -> bool
+        用途: 判断是否使用内联存储
+        算法: return size_ <= 5
+    
+    copyDataInline(rhs: const SizesAndStrides&)
+        用途: 拷贝内联数据
+        算法: memcpy(inlineStorage_, rhs.inlineStorage_, sizeof(inlineStorage_))
+    
+    storageBytes(size: size_t) -> size_t
+        用途: 计算outline存储所需字节数
+        算法: return size * 2 * 8
+    
+    allocateOutOfLineStorage(size: size_t)
+        用途: 分配outline存储
+        算法:
+            outOfLineStorage_ = malloc(storageBytes(size))
+            TORCH_CHECK(outOfLineStorage_, "Could not allocate memory for Tensor SizesAndStrides!")
+    
+    resizeOutOfLineStorage(newSize: size_t)
+        用途: 重新分配outline存储
+        算法:
+            assert not isInline()
+            outOfLineStorage_ = realloc(outOfLineStorage_, storageBytes(newSize))
+            TORCH_CHECK(outOfLineStorage_, "Could not allocate memory for Tensor SizesAndStrides!")
+    
+    copyDataOutline(rhs: const SizesAndStrides&)
+        用途: 拷贝outline数据
+        算法: memcpy(outOfLineStorage_, rhs.outOfLineStorage_, storageBytes(rhs.size_))
+
+【依赖】
+    malloc / free / realloc    # 堆内存管理
+    memcpy / memmove / memset  # 内存操作
+    TORCH_CHECK                # 错误检查
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY  # 调试断言
+
+【备注】
+    - 内联阈值: C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE = 5
+    - 优化目标: 减少小维度Tensor的堆分配
+    - 内存布局: sizes和strides连续存储，便于缓存局部性
+    - resize策略: inline/outline转换时需要重新布局数据

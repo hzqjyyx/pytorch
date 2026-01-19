@@ -1,0 +1,37 @@
+--------------------------------
+默认数据类型管理
+来源: c10/core/DefaultDtype.cpp, c10/core/DefaultDtype.h
+--------------------------------
+
+【状态】
+    default_dtype: TypeMeta                      # 默认浮点类型，初始为 float
+    default_dtype_as_scalartype: ScalarType      # 默认类型的 ScalarType 表示
+    default_complex_dtype: TypeMeta              # 默认复数类型，初始为 complex<float>
+
+【接口】
+    set_default_dtype(dtype: TypeMeta)
+        用途: 设置默认浮点类型，并自动更新对应的复数类型
+        逻辑:
+            default_dtype = dtype
+            default_dtype_as_scalartype = dtype.toScalarType()
+            
+            match default_dtype_as_scalartype:
+                ScalarType::Half:
+                    default_complex_dtype = ScalarType::ComplexHalf
+                ScalarType::Double:
+                    default_complex_dtype = ScalarType::ComplexDouble
+                default:
+                    default_complex_dtype = ScalarType::ComplexFloat
+
+    get_default_dtype() -> TypeMeta
+        用途: 获取当前默认浮点类型
+
+    get_default_dtype_as_scalartype() -> ScalarType
+        用途: 获取当前默认类型的 ScalarType 表示
+
+    get_default_complex_dtype() -> TypeMeta
+        用途: 获取当前默认复数类型
+
+【备注】
+    - 复数类型自动跟随浮点类型: Half→ComplexHalf, Double→ComplexDouble, 其他→ComplexFloat
+    - 初始状态: float + complex<float>

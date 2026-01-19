@@ -1,0 +1,782 @@
+# TensorImpl 伪代码
+
+## 文件来源
+- TensorImpl.cpp
+- TensorImpl.h
+
+---
+
+## 一、核心数据结构
+
+--------------------------------
+TensorImpl (Tensor底层实现)
+来源: TensorImpl.h
+--------------------------------
+
+【状态】
+    storage_: Storage# 底层存储
+    autograd_meta_: unique_ptr<AutogradMetaInterface>  # 自动求导元数据
+    extra_meta_: unique_ptr<ExtraMeta>          # 扩展元数据(符号形状/命名/后端)
+    version_counter_: VariableVersion# 版本计数器
+    pyobj_slot_: PyObjectSlot                   # Python对象槽
+    sizes_and_strides_: SizesAndStrides         # 尺寸和步长(内联5维)
+    storage_offset_: int64                      # 存储偏移量
+    numel_: int64                               # 元素总数
+    data_type_: TypeMeta                        # 数据类型
+    device_opt_: optional<Device>               # 设备信息
+    key_set_: DispatchKeySet                    # 调度键集合# 位域标志
+    is_contiguous_: bool                        # 是否连续
+    is_channels_last_: bool                     # 是否NHWC格式
+    is_channels_last_contiguous_: bool          # 是否NHWC连续
+    is_channels_last_3d_: bool                  # 是否NDHWC格式
+    is_channels_last_3d_contiguous_: bool       # 是否NDHWC连续
+    is_non_overlapping_and_dense_: bool         # 是否非重叠且稠密
+    is_wrapped_number_: bool                    # 是否包装的标量
+    allow_tensor_metadata_change_: bool         # 是否允许元数据修改
+    reserved_: bool                             # 是否预留空间
+    has_symbolic_sizes_strides_: bool           # 是否有符号形状
+    sizes_strides_policy_: uint8                # 尺寸步长策略
+    custom_sizes_strides_: uint8                # 自定义尺寸步长
+    python_custom_sizes_strides_: uint8         # Python自定义尺寸步长
+    device_policy_: bool                        # 设备策略
+    layout_policy_: bool                        # 布局策略
+    storage_access_should_throw_: bool          # 存储访问是否抛异常
+
+【接口 - 构造与析构】
+    TensorImpl(storage: Storage, key_set: DispatchKeySet, data_type: TypeMeta)用途: 从存储构造1维0元素tensor
+
+    TensorImpl(key_set: DispatchKeySet, data_type: TypeMeta, device_opt: optional<Device>)
+        用途: 构造无存储的tensor
+
+    ~TensorImpl()
+        用途: 析构，释放资源
+
+    release_resources()
+        用途: 释放autograd_meta、storage、pyobj
+
+【接口 - 形状查询】
+    sizes() -> IntArrayRef
+        用途: 返回尺寸数组
+        调用: sizes_custom() (如果policy匹配)
+
+    sym_sizes() -> SymIntArrayRef
+        用途: 返回符号尺寸数组
+
+    strides() -> IntArrayRef
+        用途: 返回步长数组
+        调用: strides_custom() (如果policy匹配)
+
+    sym_strides() -> SymIntArrayRef
+        用途: 返回符号步长数组
+
+    dim() -> int64
+        用途: 返回维度数
+        调用: dim_custom() (如果policy匹配)
+
+    numel() -> int64
+        用途: 返回元素总数
+        调用: numel_custom() (如果policy匹配)
+
+    size(d: int64) -> int64
+        用途: 返回第d维尺寸，支持负索引
+
+    stride(d: int64) -> int64
+        用途: 返回第d维步长，支持负索引
+
+    storage_offset() -> int64
+        用途: 返回存储偏移量
+        调用: storage_offset_custom() (如果policy匹配)
+
+【接口 - 连续性查询】
+    is_contiguous(memory_format: MemoryFormat = Contiguous) -> bool
+        用途: 查询是否按指定格式连续
+        调用: is_contiguous_custom() (如果policy匹配)
+
+    is_strides_like(memory_format: MemoryFormat) -> bool
+        用途: 查询步长是否类似指定格式
+        调用: is_strides_like_custom() (如果policy匹配)
+
+    is_non_overlapping_and_dense() -> bool
+        用途: 查询是否非重叠且稠密
+        调用: is_non_overlapping_and_dense_custom() (如果policy匹配)
+
+【接口 - 存储访问】
+    has_storage() -> bool
+        用途: 是否有存储
+
+    storage() -> Storage&
+        用途: 返回存储引用
+        调用: throw_storage_access_error() (如果should_throw)
+
+    unsafe_storage() -> Storage&
+        用途: 不安全地返回存储(不检查)
+
+【接口 - 设备与布局】
+    device() -> Device
+        用途: 返回设备
+        调用: device_custom() (如果policy匹配)
+
+    device_type() -> DeviceType
+        用途: 返回设备类型
+
+    layout() -> Layout
+        用途: 返回布局(Strided/Sparse/SparseCsr/Mkldnn)
+        调用: layout_custom() (如果policy匹配), layout_impl() (稀疏压缩)
+
+    is_sparse() -> bool
+        用途: 是否稀疏COO
+
+    is_sparse_csr() -> bool
+        用途: 是否稀疏CSR
+
+    is_mkldnn() -> bool
+        用途: 是否MKLDNN
+
+【接口 - 数据访问】
+    data<T>() -> T*
+        用途: 返回类型化数据指针
+        调用: data_dtype_initialized_impl()
+
+    mutable_data<T>() -> T*
+        用途: 返回可变类型化数据指针
+
+    data() -> void*
+        用途: 返回void*数据指针
+
+    data_ptr_impl<T>() -> T*
+        用途: 高效数据指针访问(不做类型检查)
+
+    dtype() -> TypeMeta
+        用途: 返回数据类型
+
+    itemsize() -> size_t
+        用途: 返回单元素字节数
+
+【接口 - 元数据修改】
+    set_size(dim: int64, new_size: int64)
+        用途: 修改某维尺寸(不更新步长)
+
+    set_stride(dim: int64, new_stride: int64)
+        用途: 修改某维步长
+
+    set_storage_offset(storage_offset: int64)
+        用途: 修改存储偏移
+
+    set_sizes_contiguous(new_size: IntArrayRef)
+        用途: 设置尺寸并计算连续步长
+
+    set_sizes_and_strides(sizes: IntArrayRef, strides: IntArrayRef, storage_offset: optional<int64>)
+        用途: 同时设置尺寸、步长、偏移
+
+    set_sizes_and_strides(sizes: SymIntArrayRef, strides: SymIntArrayRef, storage_offset: optional<SymInt>)
+        用途: 符号形状版本
+
+    generic_set_sizes_contiguous(sizes: SymIntArrayRef)
+        用途: 符号形状连续设置
+
+    empty_tensor_restride(memory_format: MemoryFormat)
+        用途: 按内存格式重新计算步长
+
+【接口 - Autograd】
+    requires_grad() -> bool
+        用途: 是否需要梯度
+
+    set_requires_grad(requires_grad: bool)
+        用途: 设置是否需要梯度
+
+    grad() -> Tensor&
+        用途: 返回梯度
+
+    mutable_grad() -> Tensor&
+        用途: 返回可变梯度
+
+    _fw_grad(level: uint64, self: TensorBase&) -> Tensor&
+        用途: 返回前向梯度
+
+    _set_fw_grad(new_grad: TensorBase&, self: TensorBase&, level: uint64, is_inplace_op: bool)
+        用途: 设置前向梯度
+
+    autograd_meta() -> AutogradMetaInterface*
+        用途: 返回autograd元数据指针
+
+    set_autograd_meta(autograd_meta: unique_ptr<AutogradMetaInterface>)
+        用途: 设置autograd元数据
+
+【接口 - 版本控制】
+    version_counter() -> VariableVersion&
+        用途: 返回版本计数器
+
+    bump_version()
+        用途: 增加版本号
+
+    set_version_counter(version_counter: VariableVersion)
+        用途: 设置版本计数器
+
+    unique_version() -> bool
+        用途: 版本计数器是否唯一
+
+【接口 - 浅拷贝】
+    shallow_copy_and_detach(version_counter: VariableVersion, allow_tensor_metadata_change: bool) -> intrusive_ptr<TensorImpl>用途: 浅拷贝并分离autograd历史
+
+    shallow_copy_from(impl: intrusive_ptr<TensorImpl>)
+        用途: 从另一个TensorImpl浅拷贝元数据
+
+【接口 - Python交互】
+    pyobj_slot() -> PyObjectSlot*
+        用途: 返回Python对象槽
+
+    is_python_dispatch() -> bool
+        用途: 是否Python调度
+
+    set_python_dispatch(k: bool)
+        用途: 设置Python调度
+
+【接口 - 特殊标志】
+    is_conj() -> bool
+        用途: 是否共轭
+
+    _set_conj(value: bool)
+        用途: 设置共轭标志
+
+    is_neg() -> bool
+        用途: 是否取负
+
+    _set_neg(value: bool)
+        用途: 设置取负标志
+
+    _is_zerotensor() -> bool
+        用途: 是否零张量
+
+    is_wrapped_number() -> bool
+        用途: 是否包装的标量
+
+    set_wrapped_number(value: bool)
+        用途: 设置包装标量标志
+
+【接口 - Caffe2遗留API】
+    Resize(dim_source: Ts...)
+        用途: 调整尺寸(可能释放存储)
+
+    Reshape(dims: vector<int64>)
+        用途: 重塑形状(不改变元素数)
+
+    Extend(num: int64, growthPct: float)
+        用途: 扩展第0维(保留数据)
+
+    ReserveSpace(outer_dim: int64)
+        用途: 预留空间(不拷贝数据)
+
+    FreeMemory()
+        用途: 释放存储但保留尺寸类型
+
+    ShareData(src: TensorImpl&)
+        用途: 共享另一个tensor的存储
+
+    ShareExternalPointer(data_ptr: DataPtr, data_type: TypeMeta, size_bytes: size_t)
+        用途: 共享外部指针
+
+    raw_mutable_data(meta: TypeMeta) -> void*
+        用途: 返回原始可变数据指针(可能重新分配)
+
+    mutable_data<T>() -> T*
+        用途: 返回类型化可变数据(可能重新分配)
+
+    storage_initialized() -> bool
+        用途: 存储是否已初始化
+
+    dtype_initialized() -> bool
+        用途: 数据类型是否已初始化
+
+【依赖】
+    c10::InferenceMode::is_enabled()# 推理模式检查
+    c10::impl::TorchDispatchModeTLS# Torch调度模式TLS
+    c10::multiply_integers()# 整数乘法
+    c10::safe_multiplies_u64()                 # 安全乘法(溢出检查)
+    impl::GetAutogradMetaFactory()             # Autograd元数据工厂
+    getAutocastRelatedKeySetFromBackend()      # Autocast相关键集
+    getAutogradRelatedKeySetFromBackend()      # Autograd相关键集
+
+【备注】
+    - TensorImpl是Tensor的底层实现，包含存储指针和元数据
+    - 支持符号形状(SymInt)用于动态形状追踪
+    - 支持自定义sizes/strides/device/layout的虚函数重载
+    - 内联存储5维以内的sizes和strides，超过5维动态分配
+    - 版本计数器用于autograd检测inplace修改
+    - 推理模式下的tensor没有版本计数器和autograd键
+
+---
+
+## 二、构造函数实现
+
+--------------------------------
+TensorImpl构造函数
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    TensorImpl(storage: Storage, key_set: DispatchKeySet, data_type: TypeMeta)
+
+【算法】
+    # 调用私有构造函数，从storage获取device
+    TensorImpl(move(storage), key_set, data_type, storage.device())
+
+【签名】
+    TensorImpl(type: ImplType, storage: Storage, key_set: DispatchKeySet, data_type: TypeMeta)
+
+【算法】
+    storage_ = move(storage)
+    numel_ = 0
+    data_type_ = data_type
+    device_opt_ = storage_.device()
+    key_set_ = key_set - python_ks  # 移除Python键
+    init_bitfields()
+    if not is_inference():
+        version_counter_ = VariableVersion(0)
+
+【签名】
+    TensorImpl(key_set: DispatchKeySet, data_type: TypeMeta, device_opt: optional<Device>)
+
+【算法】
+    # 调用私有构造函数，传入空storage
+    TensorImpl({}, key_set, data_type, device_opt)
+
+【签名】
+    TensorImpl(storage: Storage, key_set: DispatchKeySet, data_type: TypeMeta, device_opt: optional<Device>)
+
+【算法】
+    storage_ = move(storage)
+    numel_ = 0
+    data_type_ = data_type
+    device_opt_ = device_opt
+    init_bitfields()if not key_set.empty():
+        assert data_type == Undefined or device_opt.has_value()
+        C10_LOG_API_USAGE_ONCE("tensor.create")
+
+    inference_mode = InferenceMode::is_enabled()
+    k = key_set.highestBackendKey()
+    key_set = key_set | getAutocastRelatedKeySetFromBackend(k)
+    key_set = key_set - python_ks  # 移除Python键
+
+    if inference_mode:
+        key_set_ = key_set - autograd_dispatch_keyset_with_ADInplaceOrView
+    else:
+        key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k)
+
+    if not is_inference():
+        version_counter_ = VariableVersion(0)
+
+【备注】
+    - Python键在构造时移除，后续由Tensor._make_subclass设置
+    - 推理模式下移除Autograd和ADInplaceOrView键
+    - 非推理模式下添加Autograd相关键
+
+---
+
+## 三、形状与步长操作
+
+--------------------------------
+set_sizes_and_strides (符号版本)
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    set_sizes_and_strides(sizes: SymIntArrayRef, strides: SymIntArrayRef, storage_offset: optional<SymInt>)
+
+【算法】
+    int_sizes = asIntArrayRefSlowOpt(sizes)
+    int_strides = asIntArrayRefSlowOpt(strides)
+
+    if int_sizes and int_strides and 
+       (not storage_offset or not storage_offset.is_heap_allocated()) and
+       not has_symbolic_sizes_strides_:
+        # 快速路径：全是具体整数
+        set_sizes_and_strides(*int_sizes, *int_strides)
+        if storage_offset:
+            set_storage_offset(storage_offset.as_int_unchecked())
+        return
+
+    # 慢速路径：有符号整数
+    assert allow_tensor_metadata_change()
+    has_symbolic_sizes_strides_ = true
+    refresh_sizes_strides_policy()
+
+    if not extra_meta_:
+        extra_meta_ = make_unique<ExtraMeta>()
+        extra_meta_.symbolic_shape_meta_ = make_unique<SymbolicShapeMeta>()
+        extra_meta_.symbolic_shape_meta_.strides_valid_ = not is_sparse()
+        if not storage_offset:
+            extra_meta_.symbolic_shape_meta_.storage_offset_ = storage_offset_
+
+    sym_shape_meta = symbolic_shape_meta()
+    clone_symvec(sizes, sym_shape_meta.sizes_)
+    clone_symvec(strides, sym_shape_meta.strides_)
+    if storage_offset:
+        sym_shape_meta.storage_offset_ = storage_offset.clone()
+
+    refresh_numel()
+    refresh_contiguous()
+
+【备注】
+    - 优先使用具体整数的快速路径
+    - 符号整数需要分配ExtraMeta存储
+
+--------------------------------
+generic_set_sizes_contiguous (符号版本)
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    generic_set_sizes_contiguous(sizes: SymIntArrayRef)
+
+【算法】
+    int_sizes = asIntArrayRefSlowOpt(sizes)
+    if int_sizes:
+        set_sizes_contiguous(*int_sizes)
+        return
+
+    assert allow_tensor_metadata_change()
+    has_symbolic_sizes_strides_ = true
+    refresh_sizes_strides_policy()
+
+    extra_meta = get_extra_meta()
+    if extra_meta.symbolic_shape_meta_ == nullptr:
+        extra_meta_.symbolic_shape_meta_ = make_unique<SymbolicShapeMeta>()
+        extra_meta_.symbolic_shape_meta_.strides_valid_ = not is_sparse()
+
+    clone_symvec(sizes, symbolic_shape_meta().sizes_)
+    refresh_numel()
+    empty_tensor_restride_symint(Contiguous)
+
+--------------------------------
+empty_tensor_restride_symint
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    empty_tensor_restride_symint(memory_format: MemoryFormat)
+
+【算法】
+    assert has_symbolic_sizes_strides_
+    sym_shape_meta = symbolic_shape_meta()
+
+    match memory_format:
+        Contiguous:
+            dim_ = sym_shape_meta.dim()
+            sym_shape_meta.strides_.resize(dim_)
+            if dim_ > 0:
+                last_idx = dim_ - 1
+                sym_shape_meta.strides_[last_idx] = SymInt(1)
+                for i in range(last_idx - 1, -1, -1):
+                    sym_shape_meta.strides_[i] = sym_shape_meta.strides_[i+1] * 
+                                sym_shape_meta.sizes_[i+1].max(1)
+
+        ChannelsLast:
+            assert dim() == 4
+            clone_symvec(get_channels_last_strides_2d(sym_sizes()), sym_shape_meta.strides_)
+
+        ChannelsLast3d:
+            assert dim() == 5
+            clone_symvec(get_channels_last_strides_3d(sym_sizes()), sym_shape_meta.strides_)
+
+    refresh_contiguous()
+
+    # 硬编码已知的连续性假设(用于unbacked符号整数)
+    match memory_format:
+        Contiguous:
+            sym_shape_meta.assume_contiguous()
+            sym_shape_meta.assume_non_overlapping_and_dense()
+        ChannelsLast:
+            sym_shape_meta.assume_channels_last_contiguous()
+            sym_shape_meta.assume_channels_last()sym_shape_meta.assume_non_overlapping_and_dense()
+        ChannelsLast3d:
+            sym_shape_meta.assume_channels_last_3d_contiguous()
+            sym_shape_meta.assume_channels_last_3d()
+            sym_shape_meta.assume_non_overlapping_and_dense()
+
+【备注】
+    - 符号形状的步长计算使用SymInt::max(1)处理0维
+    - assume_*方法用于为unbacked符号整数添加约束
+
+---
+
+## 四、连续性计算
+
+--------------------------------
+compute_contiguous
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    compute_contiguous(type_id: identity<bool>) -> bool
+
+【算法】
+    if is_sparse():
+        return false
+    return _compute_contiguous<int64>(sizes_and_strides_.sizes_arrayref(),
+                                       sizes_and_strides_.strides_arrayref(),
+                                       numel_)
+
+【备注】
+    - _compute_contiguous: 检查步长是否满足连续条件
+
+--------------------------------
+compute_channels_last_contiguous_2d
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    compute_channels_last_contiguous_2d(type_id: identity<bool>) -> bool
+
+【算法】
+    if is_sparse():
+        return false
+    return _compute_channels_last_contiguous_2d<int64>(sizes_and_strides_.sizes_arrayref(),sizes_and_strides_.strides_arrayref())
+
+--------------------------------
+compute_channels_last_contiguous_3d
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    compute_channels_last_contiguous_3d(type_id: identity<bool>) -> bool
+
+【算法】
+    if is_sparse():
+        return false
+    return _compute_channels_last_contiguous_3d<int64>(sizes_and_strides_.sizes_arrayref(),
+                                                        sizes_and_strides_.strides_arrayref())
+
+--------------------------------
+compute_strides_like_channels_last_2d
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    compute_strides_like_channels_last_2d(type_id: identity<bool>) -> bool
+
+【算法】
+    if is_sparse():
+        return false
+    return is_channels_last_strides_2d<int64>(sizes_and_strides_.sizes_arrayref(),
+                                               sizes_and_strides_.strides_arrayref())
+
+--------------------------------
+compute_strides_like_channels_last_3d
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    compute_strides_like_channels_last_3d(type_id: identity<bool>) -> bool
+
+【算法】
+    if is_sparse():
+        return false
+    return is_channels_last_strides_3d<int64>(sizes_and_strides_.sizes_arrayref(),
+                                               sizes_and_strides_.strides_arrayref())
+
+--------------------------------
+compute_non_overlapping_and_dense
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    compute_non_overlapping_and_dense(type_id: identity<bool>) -> bool
+
+【算法】
+    if is_sparse():
+        return false
+    return _compute_non_overlapping_and_dense<int64>(sizes_and_strides_.sizes_arrayref(),
+                                                      sizes_and_strides_.strides_arrayref())
+
+---
+
+## 五、自定义虚函数
+
+--------------------------------
+sizes_custom / strides_custom / numel_custom / dim_custom
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    sizes_custom() -> IntArrayRef
+
+【算法】
+    if matches_python_custom(CustomSizes) or has_symbolic_sizes_strides_:
+        return pyobj_slot_.load_pyobj_interpreter().sizes(this)
+    return sizes_default()
+
+【签名】
+    sym_sizes_custom() -> SymIntArrayRef
+
+【算法】
+    if matches_python_custom(CustomSizes):
+        return pyobj_slot_.load_pyobj_interpreter().sym_sizes(this)
+    return sym_sizes_default()
+
+【签名】
+    strides_custom() -> IntArrayRef
+
+【算法】
+    if matches_python_custom(CustomStrides) or has_symbolic_sizes_strides_:
+        return pyobj_slot_.load_pyobj_interpreter().strides(this)
+    return strides_default()
+
+【签名】
+    sym_strides_custom() -> SymIntArrayRef
+
+【算法】
+    if matches_python_custom(CustomStrides):
+        return pyobj_slot_.load_pyobj_interpreter().sym_strides(this)
+    return sym_strides_default()
+
+【签名】
+    numel_custom() -> int64
+
+【算法】
+    if matches_python_custom(CustomSizes):
+        return pyobj_slot_.load_pyobj_interpreter().numel(this)
+    return numel_default()
+
+【签名】
+    sym_numel_custom() -> SymInt
+
+【算法】
+    if matches_python_custom(CustomSizes):
+        return pyobj_slot_.load_pyobj_interpreter().sym_numel(this)
+    return sym_numel_default()
+
+【签名】
+    dim_custom() -> int64
+
+【算法】
+    if matches_python_custom(CustomSizes):
+        return pyobj_slot_.load_pyobj_interpreter().dim(this)
+    return dim_default()
+
+【签名】
+    storage_offset_custom() -> int64
+
+【算法】
+    if matches_python_custom(CustomSizes):
+        return pyobj_slot_.load_pyobj_interpreter().sym_storage_offset(this).guard_int(__FILE__, __LINE__)
+    return storage_offset_default()
+
+【签名】
+    sym_storage_offset_custom() -> SymInt
+
+【算法】
+    if matches_python_custom(CustomSizes):
+        return pyobj_slot_.load_pyobj_interpreter().sym_storage_offset(this)
+    return sym_storage_offset_default()
+
+【备注】
+    - Python自定义时调用PyInterpreter的对应方法
+    - 符号形状时也走Python路径
+
+--------------------------------
+device_custom / layout_custom
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    device_custom() -> Device
+
+【算法】
+    if python_custom_device_:
+        return pyobj_slot_.load_pyobj_interpreter().device(this)
+    return device_default()
+
+【签名】
+    layout_custom() -> Layout
+
+【算法】
+    if python_custom_layout_:
+        return pyobj_slot_.load_pyobj_interpreter().layout(this)
+    assert false  # 非Python自定义的layout需要子类重写layout_impl
+
+--------------------------------
+is_contiguous_custom / is_strides_like_custom / is_non_overlapping_and_dense_custom
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    is_contiguous_custom(memory_format: MemoryFormat) -> bool
+
+【算法】
+    if matches_python_custom(CustomStrides):
+        return pyobj_slot_.load_pyobj_interpreter().is_contiguous(this, memory_format)
+    return is_contiguous_default(memory_format)
+
+【签名】
+    is_strides_like_custom(memory_format: MemoryFormat) -> bool
+
+【算法】
+    if matches_python_custom(CustomStrides):
+        return pyobj_slot_.load_pyobj_interpreter().is_strides_like(this, memory_format)
+    return is_strides_like_default(memory_format)
+
+【签名】
+    is_non_overlapping_and_dense_custom() -> bool
+
+【算法】
+    if matches_python_custom(CustomStrides):
+        return pyobj_slot_.load_pyobj_interpreter().is_non_overlapping_and_dense(this)
+    return is_non_overlapping_and_dense_default()
+
+---
+
+## 六、浅拷贝与元数据拷贝
+
+--------------------------------
+shallow_copy_and_detach_core
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    shallow_copy_and_detach_core(version_counter: VariableVersion, allow_tensor_metadata_change: bool) -> intrusive_ptr<TensorImpl>
+
+【算法】
+    mode_stack_len = TorchDispatchModeTLS::stack_len()
+
+    # 尝试Python自定义detach
+    if mode_stack_len > 0 and not tls_is_dispatch_key_excluded(Python):
+        cur_mode = TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1)
+        r = cur_mode.pyinterpreter().detach(this)else if key_set_.has(Python) and not tls_is_dispatch_key_excluded(Python):
+        r = pyobj_slot_.load_pyobj_interpreter().detach(this)
+
+    if r:
+        if not r.is_inference():
+            r.set_version_counter(forward(version_counter))
+        r.set_allow_tensor_metadata_change(allow_tensor_metadata_change)
+        return r
+
+    # 默认实现：创建新TensorImpl并拷贝元数据
+    impl = make_intrusive<TensorImpl>(key_set_, data_type_, device_opt_)
+    copy_tensor_metadata(this, impl.get(), forward(version_counter), allow_tensor_metadata_change)
+    return impl
+
+【备注】
+    - 优先调用Python自定义的detach
+    - 默认实现不拷贝PyObject
+
+--------------------------------
+copy_tensor_metadata
+来源: TensorImpl.cpp
+--------------------------------
+
+【签名】
+    copy_tensor_metadata(src_impl: TensorImpl*, dest_impl: TensorImpl*, version_counter: VariableVersion, allow_tensor_metadata_change: bool)
+
+【算法】
+    copy_tensor_metadata_except_version_counter(src_impl, dest_impl, allow_tensor_metadata_change)
+    if not dest_impl.is_inference():
+        dest_impl.set_version_counter(version_counter)
+
+【签名】
+    copy_tensor_metadata_except_version_counter(src_impl: TensorImpl*, dest_impl: TensorImpl*, allow_tensor_metadata_change: bool)
+
+【算法】
+    copy_generic_tensor_metadata(src_impl, dest_impl)
+    dest_impl.storage_ = src_impl.storage_
+    # 保留dest的Python键，拷贝src的非Python键
+    dest_impl.key_set_ = (src_impl.key_set_ - python_ks) | (

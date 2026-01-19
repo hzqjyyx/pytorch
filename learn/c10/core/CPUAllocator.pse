@@ -1,0 +1,339 @@
+# c10/core/CPUAllocator 伪代码
+
+## 文件：CPUAllocator.h + CPUAllocator.cpp
+
+---
+
+## 一、内存分配器实现
+
+### 1. DefaultCPUAllocator（桌面端CPU分配器）
+
+```
+--------------------------------
+DefaultCPUAllocator
+来源: c10/core/CPUAllocator.cpp:18-47
+--------------------------------
+
+【接口】
+    allocate(nbytes: size_t) -> DataPtr
+        用途: 分配 nbytes 字节的 CPU 内存
+        调用: c10::alloc_cpu(), profiledCPUMemoryReporter()
+        
+        算法:
+            data = c10::alloc_cpu(nbytes)
+            profiledCPUMemoryReporter().New(data, nbytes)
+            return DataPtr(data, data, &ReportAndDelete, Device(CPU))
+        
+        异常: 捕获 c10::Error，调用 OutOfMemory(nbytes) 后重新抛出
+
+    ReportAndDelete(ptr: void*) -> void
+        用途: 释放内存并报告给 profiler
+        调用: profiledCPUMemoryReporter().Delete(), free_cpu()
+        
+        算法:
+            if ptr == nullptr: return
+            profiledCPUMemoryReporter().Delete(ptr)
+            free_cpu(ptr)
+
+    raw_deleter() -> DeleterFnPtr
+        用途: 返回删除器函数指针
+        返回: &ReportAndDelete
+
+    copy_data(dest: void*, src: void*, count: size_t)
+        用途: 拷贝数据
+        调用: default_copy_data()
+```
+
+---
+
+### 2. DefaultMobileCPUAllocator（移动端CPU分配器）
+
+```
+--------------------------------
+DefaultMobileCPUAllocator<PreGuardBytes, PostGuardBytes>
+来源: c10/core/CPUAllocator.cpp:75-155
+--------------------------------
+
+【模板参数】
+    PreGuardBytes: uint32_t     # 前置保护字节数（默认 gAlignment）
+    PostGuardBytes: uint32_t    # 后置保护字节数（默认 16）
+
+【设计目的】
+    为 QNNPACK/XNNPACK 提供越界访问安全保护
+    - QNNPACK/XNNPACK 的 SIMD kernel 可能越界读写
+    - 通过前后保护字节避免访问非法内存页
+
+【接口】
+    allocate(nbytes: size_t) -> DataPtr
+        用途: 分配带保护字节的内存
+        调用: GetThreadLocalCachingAllocator(), GetThreadLocalProfilingAllocator(),
+              c10::alloc_cpu(), GetThreadLocalAllocationPlanner()
+        
+        算法:
+            if nbytes == 0:
+                return DataPtr(nullptr, nullptr, &deleter, Device(CPU))
+            
+            alloc_size = PreGuardBytes + nbytes + PostGuardBytes
+            
+            # 优先级：caching > profiling > 默认
+            if caching_allocator != nullptr:
+                data = caching_allocator->allocate(alloc_size)
+            else if profiling_allocator != nullptr:
+                data = profiling_allocator->allocate(alloc_size)
+            else:
+                data = c10::alloc_cpu(alloc_size)
+                if allocation_planner != nullptr:
+                    allocation_planner->record_allocation(alloc_size, data)
+            
+            profiledCPUMemoryReporter().New(data, alloc_size)
+            
+            # 返回偏移后的指针（跳过前置保护字节）
+            return DataPtr(
+                data + PreGuardBytes,  # 用户可见指针
+                data,                  # 实际分配的起始地址
+                &deleter,
+                Device(CPU)
+            )
+
+    deleter(pointer: void*) -> void
+        用途: 释放内存，支持多种分配器
+        调用: GetThreadLocalCachingAllocator(), GetThreadLocalProfilingAllocator(),
+              c10::free_cpu(), CPUCachingAllocator::record_free()
+        
+        算法:
+            if pointer == nullptr: return
+            
+            if caching_allocator != nullptr:
+                caching_allocator->free(pointer)
+            else if profiling_allocator != nullptr:
+                profiling_allocator->free(pointer)
+            else:
+                c10::free_cpu(pointer)
+                CPUCachingAllocator::record_free(pointer)
+                if allocation_planner != nullptr:
+                    allocation_planner->record_free(pointer)
+
+    is_simple_data_ptr(data_ptr: DataPtr) -> bool
+        用途: 检查 DataPtr 是否为简单指针（用户指针 == 实际指针 + PreGuardBytes）
+        
+        算法:
+            return data_ptr.get() == data_ptr.get_context() + PreGuardBytes
+
+    raw_deleter() -> DeleterFnPtr
+        返回: &deleter
+
+    copy_data(dest: void*, src: void*, count: size_t)
+        调用: default_copy_data()
+```
+
+---
+
+## 二、全局分配器管理
+
+```
+--------------------------------
+全局分配器接口
+来源: c10/core/CPUAllocator.cpp:159-200
+--------------------------------
+
+【全局实例】
+    g_cpu_alloc: DefaultCPUAllocator                          # 桌面端默认分配器
+    g_mobile_cpu_allocator: DefaultMobileCPUAllocator<gAlignment, 16>  # 移动端分配器
+
+【函数】
+    GetCPUAllocator() -> Allocator*
+        用途: 获取当前注册的 CPU 分配器
+        调用: GetAllocator(DeviceType::CPU)
+
+    SetCPUAllocator(alloc: Allocator*, priority: uint8_t = 0)
+        用途: 设置 CPU 分配器（按优先级）
+        调用: SetAllocator(DeviceType::CPU, alloc, priority)
+
+    GetDefaultCPUAllocator() -> Allocator*
+        用途: 获取默认 CPU 分配器
+        返回:
+            #ifdef C10_MOBILE:
+                &g_mobile_cpu_allocator
+            #else:
+                &g_cpu_alloc
+
+    GetDefaultMobileCPUAllocator() -> Allocator*
+        用途: 获取移动端分配器（即使在非移动端构建也可用）
+        返回: &g_mobile_cpu_allocator
+
+【平台特定】
+    C10_MOBILE:
+        - 默认注册 g_mobile_cpu_allocator
+        - GetDefaultCPUAllocator() 返回移动端分配器
+    
+    非 C10_MOBILE:
+        - 默认注册 g_cpu_alloc
+        - GetDefaultCPUAllocator() 返回桌面端分配器
+```
+
+---
+
+## 三、CPU Caching Allocator（实验性）
+
+```
+--------------------------------
+CPU Caching Allocator 管理
+来源: c10/core/CPUAllocator.cpp:292-309
+--------------------------------
+
+【状态】
+    cpu_caching_alloc: Allocator* = nullptr           # 当前 caching 分配器
+    cpu_caching_alloc_priority: uint8_t = 0           # 优先级
+
+【函数】
+    SetCPUCachingAllocator(alloc: Allocator*, priority: uint8_t = 0)
+        用途: 设置 CPU caching 分配器（仅当优先级 >= 当前优先级）
+        
+        算法:
+            if priority >= cpu_caching_alloc_priority:
+                cpu_caching_alloc = alloc
+                cpu_caching_alloc_priority = priority
+
+    GetCPUCachingAllocator() -> Allocator*
+        用途: 获取 CPU caching 分配器，若未设置则返回默认分配器
+        
+        算法:
+            if cpu_caching_alloc == nullptr:
+                VLOG(1) << "未注册 caching allocator，使用默认分配器"
+                return GetAllocator(DeviceType::CPU)
+            return cpu_caching_alloc
+
+【备注】
+    - 实验性功能，主要用于 StaticRuntime
+    - 未来可能移除
+```
+
+---
+
+## 四、内存使用报告器
+
+```
+--------------------------------
+ProfiledCPUMemoryReporter
+来源: c10/core/CPUAllocator.h:24-36, CPUAllocator.cpp:203-290
+--------------------------------
+
+【状态】
+    mutex_: std::mutex                                # 保护并发访问
+    size_table_: unordered_map<void*, size_t>         # 指针 -> 分配大小
+    allocated_: size_t = 0                            # 当前总分配量
+    log_cnt_: size_t = 0                              # 日志计数器
+
+【接口】
+    New(ptr: void*, nbytes: size_t)
+        用途: 记录新分配的内存
+        调用: memoryProfilingEnabled(), reportMemoryUsageToProfiler()
+        
+        算法:
+            if nbytes == 0: return
+            
+            profile_memory = memoryProfilingEnabled()
+            
+            if FLAGS_caffe2_report_cpu_memory_usage or profile_memory:
+                lock(mutex_)
+                size_table_[ptr] = nbytes
+                allocated_ += nbytes
+                allocated = allocated_
+            
+            if FLAGS_caffe2_report_cpu_memory_usage:
+                LOG(INFO) << "C10 alloc " << nbytes << " bytes, total " << allocated
+            
+            if profile_memory:
+                reportMemoryUsageToProfiler(ptr, nbytes, allocated, 0, Device(CPU))
+
+    Delete(ptr: void*)
+        用途: 记录释放的内存
+        调用: memoryProfilingEnabled(), reportMemoryUsageToProfiler()
+        
+        算法:
+            profile_memory = memoryProfilingEnabled()
+            
+            if FLAGS_caffe2_report_cpu_memory_usage or profile_memory:
+                lock(mutex_)
+                it = size_table_.find(ptr)
+                if it != size_table_.end():
+                    nbytes = it->second
+                    allocated_ -= nbytes
+                    allocated = allocated_
+                    size_table_.erase(it)
+                else:
+                    # 每1000次警告一次
+                    if log_cnt_++ % 1000 == 0:
+                        LOG(WARNING) << "未知大小的内存块，可能在 profiling 启动前分配"
+            
+            if nbytes == 0: return
+            
+            if FLAGS_caffe2_report_cpu_memory_usage:
+                LOG(INFO) << "C10 deleted " << nbytes << " bytes, total " << allocated
+            
+            if profile_memory:
+                reportMemoryUsageToProfiler(ptr, -nbytes, allocated, 0, Device(CPU))
+
+    OutOfMemory(nbytes: size_t)
+        用途: 报告 OOM 事件
+        调用: memoryProfilingEnabled(), reportOutOfMemoryToProfiler()
+        
+        算法:
+            profile_memory = memoryProfilingEnabled()
+            
+            if FLAGS_caffe2_report_cpu_memory_usage or profile_memory:
+                lock(mutex_)
+                allocated = allocated_
+            
+            if nbytes == 0: return
+            
+            if FLAGS_caffe2_report_cpu_memory_usage:
+                LOG(INFO) << "C10 OOM. Trying to allocate " << nbytes 
+                          << " bytes, total " << allocated
+            
+            if profile_memory:
+                reportOutOfMemoryToProfiler(nbytes, allocated, 0, Device(CPU))
+
+【全局访问】
+    profiledCPUMemoryReporter() -> ProfiledCPUMemoryReporter&
+        用途: 获取全局单例
+        实现: 静态局部变量，懒初始化
+```
+
+---
+
+## 五、工具函数
+
+```
+--------------------------------
+工具函数
+来源: c10/core/CPUAllocator.cpp:157
+--------------------------------
+
+【函数】
+    NoDelete(ptr: void*)
+        用途: 空删除器，用于不需要释放的内存
+        实现: 空函数体
+```
+
+---
+
+## 六、依赖关系
+
+```
+【外部依赖】
+    c10::alloc_cpu()                          # 底层 CPU 内存分配
+    c10::free_cpu()                           # 底层 CPU 内存释放
+    GetThreadLocalCachingAllocator()          # 线程局部 caching 分配器
+    GetThreadLocalProfilingAllocator()        # 线程局部 profiling 分配器
+    GetThreadLocalAllocationPlanner()         # 线程局部分配规划器
+    CPUCachingAllocator::record_free()        # 记录释放事件
+    memoryProfilingEnabled()                  # 检查是否启用内存 profiling
+    reportMemoryUsageToProfiler()             # 向 profiler 报告内存使用
+    reportOutOfMemoryToProfiler()             # 向 profiler 报告 OOM
+    default_copy_data()                       # 默认数据拷贝实现
+
+【配置标志】
+    FLAGS_caffe2_report_cpu_memory_usage      # 是否打印详细内存使用日志
+    C10_MOBILE                                # 是否为移动端构建
+```

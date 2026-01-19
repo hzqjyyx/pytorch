@@ -1,0 +1,4 @@
+- **枚举定义**：定义了 `LinalgBackend` 枚举类型，包含三个后端选项：`Default`、`Cusolver`、`Magma`
+- **字符串转换**：`LinalgBackendToString()` 函数将枚举值转换为对应的字符串表示
+- **流输出操作符**：重载了 `operator<<`，允许直接将 `LinalgBackend` 枚举值输出到流中
+- **用途**：为线性代数操作提供后端选择和调试输出支持

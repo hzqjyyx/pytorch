@@ -1,0 +1,270 @@
+--------------------------------
+SymNodeImpl (符号节点基类)
+来源: c10/core/SymNodeImpl.h, c10/core/SymNodeImpl.cpp
+--------------------------------
+
+【类型定义】
+    SymNode = intrusive_ptr<SymNodeImpl>
+
+【接口】
+    dyn_cast<T>() -> intrusive_ptr<T>用途: 动态类型转换，将当前节点转换为子类型 T
+
+    is_int() -> bool
+        用途: 判断节点是否表示整数类型
+        默认: 抛出 NYI 异常
+
+    is_bool() -> bool
+        用途: 判断节点是否表示布尔类型
+        默认: 抛出 NYI 异常
+
+    is_float() -> bool
+        用途: 判断节点是否表示浮点类型
+        默认: 抛出 NYI 异常
+
+    is_nested_int() -> bool
+        用途: 判断节点是否表示嵌套整数
+        默认: 返回 false
+
+    # 算术运算
+    add(other: SymNode) -> SymNode
+        用途: 加法运算
+        默认: 抛出 NYI 异常
+
+    sub(other: SymNode) -> SymNode
+        用途: 减法运算
+        默认: 抛出 NYI 异常
+
+    mul(other: SymNode) -> SymNode
+        用途: 乘法运算
+        默认: 抛出 NYI 异常
+
+    truediv(other: SymNode) -> SymNode
+        用途: 真除法（遗留接口）
+        默认: 抛出 NYI 异常
+
+    float_truediv(other: SymNode) -> SymNode
+        用途: 浮点真除法
+        默认: 调用 truediv(other)
+
+    int_truediv(other: SymNode) -> SymNode
+        用途: 整数真除法
+        默认: 调用 truediv(other)
+
+    pow(other: SymNode) -> SymNode
+        用途: 幂运算（遗留接口）
+        默认: 抛出 NYI 异常
+
+    float_pow(other: SymNode) -> SymNode
+        用途: 浮点幂运算
+        默认: 调用 pow(other)
+
+    pow_by_natural(other: SymNode) -> SymNode
+        用途: 自然数幂运算
+        默认: 调用 pow(other)
+
+    floordiv(other: SymNode) -> SymNode
+        用途: 向下取整除法（遗留接口）
+        默认: 抛出 NYI 异常
+
+    int_floordiv(other: SymNode) -> SymNode
+        用途: 整数向下取整除法
+        默认: 调用 floordiv(other)
+
+    mod(other: SymNode) -> SymNode
+        用途: 取模运算
+        默认: 抛出 NYI 异常
+
+    # 比较运算
+    eq(other: SymNode) -> SymNode
+        用途: 等于比较
+        默认: 抛出 NYI 异常
+
+    ne(other: SymNode) -> SymNode
+        用途: 不等于比较
+        默认: 抛出 NYI 异常
+
+    gt(other: SymNode) -> SymNode
+        用途: 大于比较
+        默认: 抛出 NYI 异常
+
+    lt(other: SymNode) -> SymNode
+        用途: 小于比较
+        默认: 抛出 NYI 异常
+
+    le(other: SymNode) -> SymNode
+        用途: 小于等于比较
+        默认: 抛出 NYI 异常
+
+    ge(other: SymNode) -> SymNode
+        用途: 大于等于比较
+        默认: 抛出 NYI 异常
+
+    # 数学函数
+    ceil() -> SymNode
+        用途: 向上取整
+        默认: 抛出 NYI 异常
+
+    floor() -> SymNode
+        用途: 向下取整
+        默认: 抛出 NYI 异常
+
+    neg() -> SymNode
+        用途: 取负
+        默认: 抛出 NYI 异常
+
+    sym_min(other: SymNode) -> SymNode
+        用途: 最小值
+        默认: 抛出 NYI 异常
+
+    sym_max(other: SymNode) -> SymNode
+        用途: 最大值
+        默认: 抛出 NYI 异常
+
+    # 逻辑运算
+    sym_or(other: SymNode) -> SymNode
+        用途: 逻辑或
+        默认: 抛出 NYI 异常
+
+    sym_and(other: SymNode) -> SymNode
+        用途: 逻辑与
+        默认: 抛出 NYI 异常
+
+    sym_not() -> SymNode
+        用途: 逻辑非
+        默认: 抛出 NYI 异常
+
+    sym_ite(then_val: SymNode, else_val: SymNode) -> SymNode
+        用途: 条件选择 (if-then-else)
+        默认: 抛出 NYI 异常
+
+    # 内存布局查询（self 参数被忽略，仅使用 sizes 和 strides）
+    is_contiguous(sizes: ArrayRef<SymNode>, strides: ArrayRef<SymNode>) -> SymNode
+        用途: 判断是否连续存储
+        默认: 抛出 NYI 异常
+
+    is_channels_last_contiguous_2d(sizes: ArrayRef<SymNode>, strides: ArrayRef<SymNode>) -> SymNode
+        用途: 判断是否 2D channels-last 连续
+        默认: 抛出 NYI 异常
+
+    is_channels_last_contiguous_3d(sizes: ArrayRef<SymNode>, strides: ArrayRef<SymNode>) -> SymNode
+        用途: 判断是否 3D channels-last 连续
+        默认: 抛出 NYI 异常
+
+    is_channels_last_strides_2d(sizes: ArrayRef<SymNode>, strides: ArrayRef<SymNode>) -> SymNode
+        用途: 判断是否 2D channels-last 步幅
+        默认: 抛出 NYI 异常
+
+    is_channels_last_strides_3d(sizes: ArrayRef<SymNode>, strides: ArrayRef<SymNode>) -> SymNode
+        用途: 判断是否 3D channels-last 步幅
+        默认: 抛出 NYI 异常
+
+    is_non_overlapping_and_dense(sizes: ArrayRef<SymNode>, strides: ArrayRef<SymNode>) -> SymNode
+        用途: 判断是否非重叠且稠密
+        默认: 抛出 NYI 异常
+
+    # 类型转换与包装
+    clone() -> SymNode
+        用途: 克隆节点
+        默认: 抛出 NYI 异常
+
+    sym_float() -> SymNode
+        用途: 转换为符号浮点数
+        默认: 抛出 NYI 异常
+
+    wrap_int(num: int64) -> SymNode
+        用途: 包装整数为符号节点
+        默认: 抛出 NYI 异常
+
+    wrap_float(num: double) -> SymNode
+        用途: 包装浮点数为符号节点
+        默认: 抛出 NYI 异常
+
+    wrap_bool(num: bool) -> SymNode
+        用途: 包装布尔值为符号节点
+        默认: 抛出 NYI 异常
+
+    # 具体化（guard）
+    guard_int(file: const char*, line: int64) -> int64
+        用途: 将符号整数具体化为运行时整数
+        默认: 抛出 NYI 异常
+
+    guard_bool(file: const char*, line: int64) -> bool
+        用途: 将符号布尔值具体化为运行时布尔值
+        默认: 抛出 NYI 异常
+
+    guard_float(file: const char*, line: int64) -> double
+        用途: 将符号浮点数具体化为运行时浮点数
+        默认: 抛出 NYI 异常
+
+    guard_size_oblivious(file: const char*, line: int64) -> bool
+        用途: 大小无关的布尔具体化（用于未支持的符号布尔）
+        默认: 调用 guard_bool(file, line)
+
+    expect_true(file: const char*, line: int64) -> bool
+        用途: 期望为真的布尔具体化
+        默认: 调用 guard_bool(file, line)
+
+    expect_size(file: const char*, line: int64) -> bool
+        用途: 期望为有效大小（>= 0）的整数具体化
+        默认: 调用 ge(wrap_int(0))->guard_bool(file, line)
+
+    # 值提取
+    int_() -> int64
+        用途: 提取整数值（不触发 guard）
+        默认: 抛出 NYI 异常
+
+    bool_() -> bool
+        用途: 提取布尔值（不触发 guard）
+        默认: 抛出 NYI 异常
+
+    has_hint() -> bool
+        用途: 判断是否有提示值
+        默认: 抛出 NYI 异常
+
+    # 字符串表示
+    str() -> string
+        用途: 返回节点的字符串表示
+        默认: 抛出 NYI 异常
+
+    _graph_repr() -> string
+        用途: 返回图表示的字符串
+        默认: 调用 str()
+
+    # 常量查询
+    nested_int() -> optional<int64>
+        用途: 如果是嵌套整数，返回其值
+        默认: 返回 nullopt
+
+    nested_int_coeff() -> optional<int64>
+        用途: 如果是嵌套整数，返回其系数
+        默认: 返回 nullopt
+
+    constant_int() -> optional<int64>
+        用途: 如果是常量整数，返回其值
+        默认: 返回 nullopt
+
+    constant_bool() -> optional<bool>
+        用途: 如果是常量布尔值，返回其值
+        默认: 返回 nullopt
+
+    maybe_as_int() -> optional<int64>
+        用途: 尝试将节点转换为整数
+        默认: 返回 nullopt
+
+    is_constant() -> bool
+        用途: 判断是否为常量
+        默认: 返回 false
+
+    is_symbolic() -> bool
+        用途: 判断是否为符号值
+        默认: 返回 true
+
+    operator<<(os: ostream&) -> ostream&
+        用途: 输出流操作符
+        实现: os << str()
+
+【备注】
+    - 这是一个抽象基类，所有方法默认抛出 NYI（Not Yet Implemented）异常
+    - 子类需要覆盖相关方法以提供具体实现
+    - 继承自 intrusive_ptr_target，支持引用计数
+    - 需要同步修改的文件：torch/csrc/jit/python/init.cpp, torch/csrc/utils/python_symnode.h, c10/core/ConstantSymNodeImpl.h

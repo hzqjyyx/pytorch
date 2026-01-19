@@ -1,0 +1,12 @@
+- **文件用途**：定义了 SDP（Scaled Dot-Product）注意力机制的后端枚举类型
+- **命名空间**：`at` 命名空间（PyTorch ATen 库）
+- **核心内容**：
+  - `num_sdp_backends` 常量：定义了 5 个可用的 SDP 后端
+  - `SDPBackend` 枚举类：包含 5 种后端实现
+    - `error = -1`：错误状态
+    - `math = 0`：标准数学实现
+    - `flash_attention = 1`：Flash Attention 优化实现
+    - `efficient_attention = 2`：高效注意力实现
+    - `cudnn_attention = 3`：cuDNN 库实现
+    - `overrideable = 4`：可覆盖的后端（允许用户自定义）
+- **作用**：为 PyTorch 的注意力计算提供多种后端选择机制，支持不同硬件和性能优化策略

@@ -1,0 +1,95 @@
+--------------------------------
+StreamGuard (流与设备RAII守卫)
+来源: c10/core/StreamGuard.h
+--------------------------------
+
+【状态】
+    guard_: InlineStreamGuard<VirtualGuardImpl>    # 内部实际守卫实现
+
+【接口】
+    StreamGuard(stream: Stream)
+        用途: 构造时切换到stream对应的设备，并设置该设备的当前流为stream
+        调用: InlineStreamGuard<VirtualGuardImpl>(stream)
+
+    reset_stream(stream: Stream)
+        用途: 先恢复原始流和设备，再切换到新stream对应的设备和流
+        调用: guard_.reset_stream(stream)
+
+    original_stream() -> Stream
+        用途: 返回构造时的原始流
+
+    current_stream() -> Stream
+        用途: 返回最近一次设置的流
+
+    current_device() -> Device
+        用途: 返回最近一次设置的设备
+
+    original_device() -> Device
+        用途: 返回最近一次reset_stream()时的设备，或构造时的设备
+
+【约束】
+    - 禁止默认构造
+    - 禁止拷贝和移动（无未初始化状态，析构时必定恢复）
+
+【备注】
+    - 不推荐在算子定义中使用，应由调用方管理流
+    - 析构时自动恢复原始流和设备
+    - 不保留多设备的流状态，多设备场景需用MultiStreamGuard
+
+
+--------------------------------
+OptionalStreamGuard (可选流守卫)
+来源: c10/core/StreamGuard.h
+--------------------------------
+
+【状态】
+    guard_: InlineOptionalStreamGuard<VirtualGuardImpl>    # 可选的内部守卫
+
+【接口】
+    OptionalStreamGuard()
+        用途: 创建未初始化的守卫
+
+    OptionalStreamGuard(stream: Stream)
+        用途: 构造时切换到stream对应的设备和流
+
+    OptionalStreamGuard(stream_opt: Optional[Stream])
+        用途: 若stream_opt非空则切换，否则保持未初始化
+
+    reset_stream(stream: Stream)
+        用途: 恢复原始状态后切换到新stream，若未初始化则初始化
+
+    original_stream() -> Optional[Stream]
+        用途: 返回最近一次初始化时的流，未初始化返回nullopt
+
+    current_stream() -> Optional[Stream]
+        用途: 返回最近一次设置的流，未初始化返回nullopt
+
+    reset()
+        用途: 恢复原始流和设备，重置为未初始化状态
+
+【约束】
+    - 禁止拷贝和移动
+
+【备注】
+    - 支持未初始化状态，适用于条件性流管理场景
+
+
+--------------------------------
+MultiStreamGuard (多流守卫)
+来源: c10/core/StreamGuard.h
+--------------------------------
+
+【状态】
+    guard_: InlineMultiStreamGuard<VirtualGuardImpl>    # 多流内部守卫
+
+【接口】
+    MultiStreamGuard(streams: ArrayRef[Stream])
+        用途: 同时设置多个设备的当前流
+        调用: InlineMultiStreamGuard<VirtualGuardImpl>(streams)
+
+【约束】
+    - 禁止拷贝和移动
+
+【备注】
+    - 析构时恢复所有设备的原始流
+    - 用于需要跨多设备设置流的场景

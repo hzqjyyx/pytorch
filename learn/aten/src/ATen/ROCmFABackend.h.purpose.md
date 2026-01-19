@@ -1,0 +1,4 @@
+- **枚举定义**：定义了 `ROCmFABackend` 枚举类型，包含三个值：`Default`、`AOTriton`、`Ck`，用于表示不同的 ROCm Flash Attention 后端实现
+- **字符串转换**：`ROCmFABackendToString()` 函数将枚举值转换为对应的字符串表示
+- **流输出操作符**：重载了 `<<` 操作符，允许直接将枚举值输出到 `std::ostream`
+- **错误处理**：在转换未知枚举值时使用 `TORCH_CHECK` 抛出异常

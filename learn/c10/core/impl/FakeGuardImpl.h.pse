@@ -1,0 +1,74 @@
+--------------------------------
+FakeGuardImpl (测试用设备守卫实现)
+来源: c10/core/impl/FakeGuardImpl.h
+--------------------------------
+
+【常量】
+    kFakeGuardImplMaxDevices = 8    # 固定支持8个设备
+
+【状态】
+    current_device_: DeviceIndex                # 当前设备索引 (thread_local)
+    current_streams_: array<StreamId, 8>                      # 每个设备的当前流ID (thread_local)
+
+【接口】
+    type() -> DeviceType用途: 返回设备类型 T (编译期常量)
+
+    exchangeDevice(d: Device) -> Device
+        用途: 切换到设备 d，返回旧设备
+        约束: d.type() == T, 0 <= d.index() < 8
+
+    getDevice() -> Device
+        用途: 获取当前设备
+
+    setDevice(d: Device)
+        用途: 设置当前设备
+        约束: d.type() == T, 0 <= d.index() < 8
+
+    uncheckedSetDevice(d: Device)
+        用途: 无检查地设置当前设备 (noexcept)
+
+    getStream(d: Device) -> Stream
+        用途: 获取设备 d 的当前流
+
+    exchangeStream(s: Stream) -> Stream
+        用途: 切换流，返回旧流
+
+    deviceCount() -> DeviceIndex
+        用途: 返回设备数量 (固定为8)
+
+    record(event: void**, stream: Stream, device_index: DeviceIndex, flag: EventFlag)
+        用途: 记录事件 (空实现)
+
+    block(event: void*, stream: Stream)
+        用途: 阻塞流直到事件完成 (空实现)
+
+    queryEvent(event: void*) -> bool
+        用途: 查询事件是否完成 (总是返回 true)
+
+    destroyEvent(event: void*, device_index: DeviceIndex)
+        用途: 销毁事件 (空实现)
+
+【测试辅助接口】
+    getDeviceIndex() -> DeviceIndex
+        用途: 静态方法，获取当前设备索引
+
+    setDeviceIndex(i: DeviceIndex)
+        用途: 静态方法，设置当前设备索引
+        约束: 0 <= i < 8
+
+    getCurrentStreamIdFor(i: DeviceIndex) -> StreamId
+        用途: 静态方法，获取设备 i 的当前流ID
+
+    resetStreams()
+        用途: 静态方法，重置所有流ID为0
+
+【依赖】
+    AT_ASSERT                # 断言检查
+    DeviceGuardImplInterface            # 继承的接口
+    Device, Stream, DeviceIndex         # 核心类型
+
+【备注】
+    - 模板参数 T: DeviceType，编译期指定设备类型
+    - 所有状态都是 thread_local，每个线程独立
+    - 用于单元测试，不涉及真实硬件操作
+    - 事件相关函数均为空实现或返回固定值

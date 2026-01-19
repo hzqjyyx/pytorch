@@ -1,0 +1,53 @@
+--------------------------------
+AutogradState (自动微分状态管理)
+来源: c10/core/AutogradState.h, c10/core/AutogradState.cpp
+--------------------------------
+
+【状态】
+    grad_mode_: bool : 1              # 梯度计算模式开关
+    inference_mode_: bool : 1         # 推理模式开关
+    fw_grad_mode_: bool : 1           # 前向梯度模式开关
+    multithreading_enabled_: bool : 1 # 多线程启用状态
+    view_replay_enabled_: bool : 1    # 视图重放启用状态
+
+【接口】
+    get_tls_state() -> AutogradState&
+        用途: 获取当前线程的自动微分状态（线程局部存储）
+
+    set_tls_state(state: AutogradState)
+        用途: 设置当前线程的自动微分状态
+
+    set_grad_mode(enabled: bool)
+        用途: 设置梯度计算模式
+
+    get_grad_mode() -> bool
+        用途: 查询梯度计算模式
+
+    set_fw_grad_mode(enabled: bool)
+        用途: 设置前向梯度模式
+
+    get_fw_grad_mode() -> bool
+        用途: 查询前向梯度模式
+
+    set_inference_mode(enabled: bool)
+        用途: 设置推理模式
+
+    get_inference_mode() -> bool
+        用途: 查询推理模式
+
+    set_multithreading_enabled(enabled: bool)
+        用途: 设置多线程启用状态
+
+    get_multithreading_enabled() -> bool
+        用途: 查询多线程启用状态
+
+    set_view_replay_enabled(enabled: bool)
+        用途: 设置视图重放启用状态
+
+    get_view_replay_enabled() -> bool
+        用途: 查询视图重放启用状态
+
+【备注】
+    - 使用 thread_local 存储，每个线程独立维护状态
+    - 默认初始化: grad_mode=true, inference_mode=false, fw_grad_mode=true, multithreading_enabled=true, view_replay_enabled=false
+    - 所有布尔字段使用位域（:1）优化内存布局

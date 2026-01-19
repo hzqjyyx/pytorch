@@ -1,0 +1,97 @@
+--------------------------------
+DeviceType (设备类型管理)
+来源: c10/core/DeviceType.h, c10/core/DeviceType.cpp
+--------------------------------
+
+【类型定义】
+    enum DeviceType: int8_t {
+        CPU = 0, CUDA = 1, MKLDNN = 2, OPENGL = 3, OPENCL = 4,
+        IDEEP = 5, HIP = 6, FPGA = 7, MAIA = 8, XLA = 9,Vulkan = 10, Metal = 11, XPU = 12, MPS = 13, Meta = 14,
+        HPU = 15, VE = 16, Lazy = 17, IPU = 18, MTIA = 19,
+        PrivateUse1 = 20,
+        COMPILE_TIME_MAX_DEVICE_TYPES = 21
+    }约束:
+    - COMPILE_TIME_MAX_DEVICE_TYPES <= 21 (用于栈数组分配)
+    - 后端设备类型 (C10_FORALL_BACKEND_DEVICE_TYPES):CPU, CUDA, HIP, XLA, MPS, IPU, XPU, HPU, VE, Lazy, Meta, MTIA, PrivateUse1
+
+【状态】
+    privateuse1_backend_name: string# PrivateUse1 自定义后端名称
+    privateuse1_backend_name_set: atomic<bool>    # 名称是否已注册
+    privateuse1_lock: mutex                       # 注册时的互斥锁
+
+【接口】
+    DeviceTypeName(d: DeviceType, lower_case: bool = false) -> string
+        用途: 返回设备类型的字符串名称
+        算法:
+            match d:
+                CPU -> "cpu" | "CPU"
+                CUDA -> "cuda" | "CUDA"
+                HIP -> "hip" | "HIP"
+                XLA -> "xla" | "XLA"
+                MPS -> "mps" | "MPS"
+                Meta -> "meta" | "META"
+                PrivateUse1 -> get_privateuse1_backend(lower_case)
+                ... (其他设备类型)
+                _ -> error("Unknown device")
+
+    isValidDeviceType(d: DeviceType) -> bool
+        用途: 检查设备类型是否有效
+        算法:
+            return d in {CPU, CUDA, OPENGL, OPENCL, MKLDNN, IDEEP, HIP, VE,
+                        FPGA, MAIA, XLA, Lazy, MPS, Vulkan, Metal, XPU,
+                        Meta, HPU, IPU, MTIA, PrivateUse1}
+
+    get_privateuse1_backend(lower_case: bool = true) -> string
+        用途: 获取 PrivateUse1 的自定义后端名称
+        算法:
+            # 原子读取，memory_order_acquire
+            if privateuse1_backend_name_set.load():
+                backend_name = privateuse1_backend_name
+            else:
+                backend_name = "privateuseone"
+            
+            # 转换大小写
+            return lower_case ? to_lower(backend_name) : to_upper(backend_name)
+
+    register_privateuse1_backend(backend_name: string)
+        参数: backend_name=自定义后端名称
+        用途: 注册 PrivateUse1 的后端名称（全局唯一）
+        算法:
+            lock(privateuse1_lock):
+                # 检查是否已注册
+                assert not privateuse1_backend_name_set.load() or 
+                       privateuse1_backend_name == backend_name,
+                       "Backend already registered"
+                
+                # 禁止使用内置设备名称
+                reserved = {"cpu", "cuda", "hip", "mps", "xpu", "mtia"}
+                assert backend_name not in reserved,
+                       "Cannot use in-tree device name"
+                
+                # 设置名称并标记已注册
+                privateuse1_backend_name = backend_name
+                privateuse1_backend_name_set.store(true, memory_order_relaxed)
+
+    is_privateuse1_backend_registered() -> bool
+        用途: 检查 PrivateUse1 后端是否已注册
+        算法:
+            return privateuse1_backend_name_set.load(memory_order_acquire)
+
+    operator<<(stream: ostream, type: DeviceType) -> ostream
+        用途: 流输出运算符重载
+        算法:
+            stream << DeviceTypeName(type, lower_case=true)
+            return stream
+
+【依赖】
+    TORCH_CHECK    # 错误检查
+    std::atomic / std::mutex       # 线程安全
+    std::transform / ::tolower     # 字符串转换
+
+【备注】
+    - PrivateUse1 支持运行时注册自定义后端名称
+    - 使用 atomic + mutex 双重保护:
+      * mutex: 写入时保证原子性检查+设置
+      * atomic: 读取时避免锁开销
+    - 内存序: acquire-release 语义保证可见性
+    - hash<DeviceType>: 使用底层 int 值计算哈希

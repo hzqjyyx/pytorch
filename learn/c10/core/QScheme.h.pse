@@ -1,0 +1,37 @@
+--------------------------------
+QScheme (量化方案枚举)
+来源: c10/core/QScheme.h
+--------------------------------
+
+【枚举定义】
+    QScheme: uint8
+        PER_TENSOR_AFFINE = 0           # 按张量仿射量化
+        PER_CHANNEL_AFFINE = 1          # 按通道仿射量化
+        PER_TENSOR_SYMMETRIC = 2        # 按张量对称量化
+        PER_CHANNEL_SYMMETRIC = 3       # 按通道对称量化
+        PER_CHANNEL_AFFINE_FLOAT_QPARAMS = 4  # 按通道仿射量化(浮点参数)
+        COMPILE_TIME_NUM_QSCHEMES = 5   # 编译期方案总数
+
+【常量别名】
+    kPerTensorAffine = QScheme::PER_TENSOR_AFFINE
+    kPerChannelAffine = QScheme::PER_CHANNEL_AFFINE
+    kPerTensorSymmetric = QScheme::PER_TENSOR_SYMMETRIC
+    kPerChannelSymmetric = QScheme::PER_CHANNEL_SYMMETRIC
+    kPerChannelAffineFloatQParams = QScheme::PER_CHANNEL_AFFINE_FLOAT_QPARAMS
+    COMPILE_TIME_NUM_QSCHEMES = 5
+
+【函数】
+    toString(qscheme: QScheme) -> string
+        用途: 将量化方案枚举转换为字符串表示
+        
+        match qscheme:
+            PER_TENSOR_AFFINE: "per_tensor_affine"
+            PER_CHANNEL_AFFINE: "per_channel_affine"
+            PER_TENSOR_SYMMETRIC: "per_tensor_symmetric"
+            PER_CHANNEL_SYMMETRIC: "per_channel_symmetric"
+            PER_CHANNEL_AFFINE_FLOAT_QPARAMS: "per_channel_affine_float_qparams"
+            default: TORCH_CHECK(false, "Unrecognized qscheme")
+
+【备注】
+    - 与 torch/nn/_qscheme.py 保持同步
+    - 与 ATen/quantized/Quantizer.h 中的 Quantizer 类一一对应

@@ -1,0 +1,29 @@
+--------------------------------
+ScalarType ↔ TypeMeta 转换工具
+来源: c10/core/ScalarTypeToTypeMeta.h
+--------------------------------
+
+【函数】
+    scalarTypeToTypeMeta(scalar_type: ScalarType) -> TypeMeta
+        用途: 将 ScalarType 枚举转换为 TypeMeta 句柄
+        调用: caffe2::TypeMeta::fromScalarType()
+
+    typeMetaToScalarType(dtype: TypeMeta) -> ScalarType
+        用途: 将 TypeMeta 句柄转换为 ScalarType 枚举
+        调用: TypeMeta::toScalarType()
+
+    optTypeMetaToScalarType(type_meta: Optional[TypeMeta]) -> Optional[ScalarType]
+        用途: typeMetaToScalarType 的 Optional 版本
+        调用: TypeMeta::toScalarType()
+
+    operator==(t: ScalarType, m: TypeMeta) -> bool
+    operator==(m: TypeMeta, t: ScalarType) -> bool
+        用途: ScalarType 与 TypeMeta 的相等性比较
+        调用: TypeMeta::isScalarType()
+
+    operator!=(t: ScalarType, m: TypeMeta) -> bool
+    operator!=(m: TypeMeta, t: ScalarType) -> bool
+        用途: ScalarType 与 TypeMeta 的不等性比较
+
+【依赖】
+    caffe2::TypeMeta    # 类型元数据系统

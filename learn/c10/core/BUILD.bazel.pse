@@ -1,0 +1,90 @@
+--------------------------------
+Bazel 构建配置 (c10/core 模块)
+来源: c10/core/build.bzl
+--------------------------------
+
+【模块】
+    define_targets(rules: BazelRules)用途: 定义 c10/core 模块的所有构建目标
+
+【构建目标】CPUAllocator (cc_library)
+        源文件: CPUAllocator.cpp
+        头文件: CPUAllocator.h
+        依赖:
+            - :alignment              # 内存对齐工具
+            - :base                   # 核心基础库
+            - //c10/mobile:CPUCachingAllocator    # 移动端缓存分配器
+            - //c10/mobile:CPUProfilingAllocator  # 移动端性能分析分配器
+            - //c10/util:base         # 通用工具
+        特性:
+            - linkstatic = True       # 静态链接
+            - alwayslink = True       # 防止链接器剥离 (包含 flag 定义)
+            - visibility = public     # 公开可见
+
+    ScalarType (cc_library)
+        头文件: ScalarType.h
+        依赖:
+            - //c10/util:base
+        特性:
+            - 仅头文件库
+            - linkstatic = True
+            - visibility = public
+
+    alignment (cc_library)
+        头文件: alignment.h
+        依赖: 无
+        特性:
+            - 仅头文件库
+            - linkstatic = True
+            - visibility = public
+
+    alloc_cpu (cc_library)
+        源文件: impl/alloc_cpu.cpp
+        头文件: impl/alloc_cpu.h
+        依赖:
+            - :alignment
+            - //c10/macros            # 宏定义
+            - //c10/util:base
+        特性:
+            - linkstatic = True
+            - alwayslink = True       # 防止链接器剥离 (包含 flags 定义)
+            - visibility = public
+
+    base (cc_library)
+        源文件: *.cpp, impl/*.cpp (排除 CPUAllocator.cpp, impl/alloc_cpu.cpp)
+        头文件: *.h, impl/*.h (排除 CPUAllocator.h, impl/alloc_cpu.h)
+        依赖:
+            - :ScalarType
+            - //third_party/cpuinfo   # CPU 信息检测
+            - //c10/macros
+            - //c10/util:TypeCast     # 类型转换
+            - //c10/util:base
+            - //c10/util:typeid       # 类型 ID
+        特性:
+            - linkstatic = True
+            - alwayslink = True       # 防止链接器剥离 (包含 flags 和注册逻辑)
+            - visibility = public
+
+    base_headers (cc_library)
+        源文件: 无
+        头文件: *.h, impl/*.h (排除 CPUAllocator.h, impl/alloc_cpu.h)
+        依赖: 无
+        特性:
+            - 仅头文件库
+            - visibility = public
+
+    headers (filegroup)
+        文件: *.h, impl/*.h (排除 alignment.h)
+        特性:
+            - 文件组 (非编译目标)
+            - visibility = public
+
+【构建配置】
+    所有目标:
+        - local_defines = ["C10_BUILD_MAIN_LIB"]    # 定义主库构建宏
+
+【依赖关系图】
+    CPUAllocator → alignment, base, c10/mobile/*, c10/util:base
+    ScalarType → c10/util:base
+    alignment → (无依赖)
+    alloc_cpu → alignment, c10/macros, c10/util:base
+    base → ScalarType, cpuinfo, c10/macros, c10/util:*

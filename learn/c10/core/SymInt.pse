@@ -1,0 +1,265 @@
+--------------------------------
+SymInt (符号整数类型)
+来源: c10/core/SymInt.h, c10/core/SymInt.cpp
+--------------------------------
+
+【概述】
+    SymInt 是一个值类型，表示 int64_t 或符号整数（SymNode）的联合体。
+    用于在算子 kernel 中进行形状计算时表示符号尺寸，允许在不固化具体尺寸的情况下追踪程序。
+
+【内部表示】
+    data_: int64_t    # 打包表示，单字长度
+
+    编码方案（假设补码表示）：
+    - 0b0...  : 正整数
+    - 0b11... : 小负整数
+    - 0b10... : 堆分配指针（[-2^63, -2^62-1] 不可表示为直接整数）
+
+    常量：
+    - MASK = 0xE000000000000000  # 高3位掩码
+    - IS_SYM = 0xA000000000000000  # 符号标记
+    - MAX_UNREPRESENTABLE_INT = -4611686018427387905  # 最大不可表示整数
+
+【构造与析构】
+    SymInt(d: int64_t)
+        用途: 从整数构造
+        逻辑: 
+            data_ = d
+            if is_heap_allocated():
+                promote_to_negative()  # 大负数需要堆分配SymInt(n: SymNode)
+        用途: 从符号节点构造
+        逻辑:
+            assert n->is_int()
+            ptr = reinterpret_cast<uint64_t>(n.release())
+            data_ = (ptr & ~MASK) | IS_SYM
+
+    SymInt(UNCHECKED, d: int64_t)
+        用途: 无检查构造（已知非负或 -1）
+        逻辑: data_ = d
+
+    SymInt(const SymInt& s)
+        用途: 拷贝构造
+        逻辑:
+            if s.is_heap_allocated():
+                *this = SymInt(s.toSymNode())
+            else:
+                data_ = s.data_
+
+    SymInt(SymInt&& s)
+        用途: 移动构造
+        逻辑:
+            data_ = s.data_
+            s.data_ = 0
+
+    ~SymInt()
+        用途: 析构
+        逻辑: release_()
+
+【状态查询】
+    is_heap_allocated() -> bool
+        用途: 判断是否堆分配
+        逻辑:
+            #ifdef C10_MOBILE: return false
+            #else: return !check_range(data_)
+
+    is_symbolic() -> bool
+        用途: 判断是否真正的符号值（非堆上常量）
+        逻辑: is_heap_allocated() && !toSymNodeImplUnowned()->constant_int().has_value()
+
+    has_hint() -> bool
+        用途: 判断是否有具体值提示
+        逻辑:
+            if !is_heap_allocated(): return true
+            return toSymNodeImplUnowned()->has_hint()
+
+    maybe_as_int() -> Optional[int64_t]
+        用途: 尝试获取整数值
+        逻辑:
+            if !is_heap_allocated(): return data_
+            node = toSymNodeImplUnowned()
+            if c = node->constant_int(): return c
+            return node->maybe_as_int()
+
+【类型转换】
+    toSymNodeImplUnowned() -> SymNodeImpl*
+        用途: 获取底层符号节点指针（不增加引用计数）
+        逻辑:
+            assert is_heap_allocated()
+            unextended = data_ & ~MASK
+            extended = sign_extend(unextended, 62)  # 符号扩展到64位
+            return reinterpret_cast<SymNodeImpl*>(extended)
+
+    toSymNode() -> SymNode
+        用途: 获取符号节点（增加引用计数）
+        逻辑:
+            assert is_heap_allocated()
+            return SymNode::reclaim_copy(toSymNodeImplUnowned())wrap_node(base: SymNode) -> SymNode
+        用途: 包装为符号节点
+        逻辑:
+            if ma = maybe_as_int(): return base->wrap_int(*ma)
+            else: return toSymNode()
+
+    operator SymFloat() -> SymFloat
+        用途: 转换为符号浮点数
+        逻辑:
+            if ma = maybe_as_int(): return SymFloat(double(*ma))
+            else: return SymFloat(toSymNodeImplUnowned()->sym_float())
+
+【算术运算】
+    operator+(sci: SymInt) -> SymInt
+    operator-(sci: SymInt) -> SymInt
+    operator*(sci: SymInt) -> SymInt
+    operator/(sci: SymInt) -> SymInt
+    operator%(sci: SymInt) -> SymInt
+        用途: 二元算术运算
+        逻辑: DEFINE_BINARY 宏展开
+            if ma = this->maybe_as_int():
+                if mb = sci.maybe_as_int():
+                    return SymInt(op(*ma, *mb))  # 两个都是整数，直接计算
+                else:
+                    b = sci.toSymNode()
+                    return SymInt(b->wrap_int(*ma)->method(b))  # 左整数右符号
+            else:
+                if mb = sci.maybe_as_int():
+                    a = toSymNodeImplUnowned()
+                    return SymInt(a->method(a->wrap_int(*mb)))  # 左符号右整数
+                else:
+                    return SymInt(toSymNodeImplUnowned()->method(sci.toSymNode()))  # 两个都是符号
+
+    operator-(s: SymInt) -> SymInt
+        用途: 一元负号
+        逻辑:
+            if ma = s.maybe_as_int():
+                val = *ma
+                #if C10_HAS_BUILTIN_OVERFLOW():
+                    if __builtin_sub_overflow(0, val, &out):
+                        return SymInt(val)  # 溢出时返回原值
+                    return SymInt(out)
+                #else:
+                    return SymInt(val != MIN_INT64 ? -val : MIN_INT64)
+            else:
+                return SymInt(s.toSymNodeImplUnowned()->neg())
+
+    operator*=(sci: SymInt)operator+=(sci: SymInt)
+    operator/=(sci: SymInt)用途: 复合赋值运算
+        逻辑: *this = *this op sci
+
+【比较运算】
+    sym_eq(sci: SymInt) -> SymBool
+    sym_ne(sci: SymInt) -> SymBool
+    sym_lt(sci: SymInt) -> SymBool
+    sym_le(sci: SymInt) -> SymBool
+    sym_gt(sci: SymInt) -> SymBool
+    sym_ge(sci: SymInt) -> SymBool
+        用途: 符号比较（返回 SymBool）
+        逻辑: 同算术运算的 DEFINE_BINARY 模式
+
+    operator==(o: SymInt) -> booloperator!=(o: SymInt) -> bool
+    operator<(o: SymInt) -> bool
+    operator<=(o: SymInt) -> bool
+    operator>(o: SymInt) -> bool
+    operator>=(o: SymInt) -> bool
+        用途: 具体比较（插入 guard）
+        逻辑: sym_op(o).guard_bool(__FILE__, __LINE__)
+
+    is_same(other: SymInt) -> bool
+        用途: 判断是否同一对象
+        逻辑:
+            if is_heap_allocated() != other.is_heap_allocated(): return false
+            if !is_heap_allocated() && this != other: return false
+            if is_heap_allocated() && toSymNodeImplUnowned() != other.toSymNodeImplUnowned(): return false
+            return true
+
+【其他运算】
+    min(sci: SymInt) -> SymInt
+    max(sci: SymInt) -> SymInt
+        用途: 最小/最大值
+        逻辑: DEFINE_BINARY(std::min/std::max, sym_min/sym_max, SymInt)
+
+    clone() -> SymInt
+        用途: 深拷贝
+        逻辑:
+            if ma = maybe_as_int(): return SymInt(*ma)
+            else: return SymInt(toSymNodeImplUnowned()->clone())
+
+【Guard 操作】
+    expect_int() -> int64_t
+        用途: 要求非符号，否则报错
+        逻辑:
+            if r = maybe_as_int(): return *rTORCH_CHECK(false, "expected int but got ", *this)
+
+    guard_int(file: const char*, line: int64_t) -> int64_t
+        用途: 插入 guard，返回具体值
+        逻辑:
+            if ma = maybe_as_int(): return *ma
+            else: return toSymNodeImplUnowned()->guard_int(file, line)
+
+    expect_size(file: const char*, line: int64_t) -> bool
+        用途: 插入 size-like guard（>= 0）
+        逻辑:
+            if ma = maybe_as_int(): return *ma >= 0
+            else: return toSymNodeImplUnowned()->expect_size(file, line)
+
+【内存管理】
+    release_()
+        用途: 释放堆分配的符号节点
+        逻辑:
+            if is_heap_allocated():
+                SymNode::reclaim(toSymNodeImplUnowned())
+
+    release() && -> SymNodeImpl*
+        用途: 转移所有权
+        逻辑:
+            assert is_heap_allocated()
+            r = toSymNodeImplUnowned()
+            data_ = 0
+            return r
+
+    promote_to_negative()
+        用途: 将大负数提升为堆分配
+        逻辑:
+            s = SymInt(SymNode(make_intrusive<ConstantSymNodeImpl<int64_t>>(data_)))
+            data_ = s.data_
+            s.data_ = 0  # 不释放
+
+【静态工具】
+    check_range(i: int64_t) -> bool
+        用途: 判断整数是否可直接表示
+        逻辑: i > MAX_UNREPRESENTABLE_INT
+
+    min_representable_int() -> int64_t
+        用途: 最小可表示整数
+        逻辑: MAX_UNREPRESENTABLE_INT + 1
+
+【输出】
+    operator<<(os: ostream, s: SymInt) -> ostream
+        用途: 流输出
+        逻辑:
+            if s.is_heap_allocated():
+                os << s.toSymNodeImplUnowned()->str()
+            else:
+                os << s.as_int_unchecked()
+
+【混合运算】
+    # 与标量类型的运算（int64_t, int32_t, uint64_t, uint32_t, double, float, size_t）
+    # 通过 DEFINE_SYMINT_OP 宏定义，逻辑为：
+    #   scalar_t op SymInt -> 转换为 RetTy(scalar_t) op Convert<RetTy>(SymInt)
+    #   SymInt op scalar_t -> 转换为 Convert<RetTy>(SymInt) op RetTy(scalar_t)
+    # 其中 Convert<SymInt> 是恒等转换，Convert<SymFloat> 是类型转换
+
+【辅助模板】
+    multiply_integers(container: Container[SymInt]) -> SymInt
+    multiply_integers(begin: Iter, end: Iter) -> SymInt
+        用途: 累乘 SymInt 容器
+        逻辑: accumulate(begin, end, SymInt(1), operator*)
+
+【依赖】
+    SymNode / SymNodeImpl    # 符号节点基础设施
+    ConstantSymNodeImpl      # 常量符号节点
+    SymFloat / SymBool       # 相关符号类型
+    c10::intrusive_ptr       # 引用计数指针
+    TORCH_CHECK / TORCH_INTERNAL_ASSERT    # 错误检查
+
+【平台特定】
+    C10_MOBILE: is_heap_allocated() 始终返回 false
+    __APPLE__: 额外定义 size_t 的混合运算

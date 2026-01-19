@@ -1,0 +1,78 @@
+--------------------------------
+InferenceMode (推理模式管理)
+来源: c10/core/InferenceMode.h, c10/core/InferenceMode.cpp
+--------------------------------
+
+【状态】
+    prev_mode: AutogradState              # 保存的前一个自动微分状态
+    prev_keyset: LocalDispatchKeySet      # 保存的前一个调度键集合
+
+【接口】
+    InferenceMode(enabled: bool = true)
+        用途: 构造推理模式守卫，设置TLS状态
+        调用: AutogradState::get_tls_state(), AutogradState::set_tls_state(),
+              c10::impl::tls_local_dispatch_key_set(),
+              c10::impl::_force_tls_local_dispatch_key_set()
+        
+        逻辑:
+            # 保存当前状态
+            prev_mode = AutogradState::get_tls_state()
+            prev_keyset = c10::impl::tls_local_dispatch_key_set()
+            
+            # 设置新的自动微分状态
+            # 启用推理模式 = 禁用梯度模式
+            AutogradState::set_tls_state(AutogradState(
+                grad_mode = !enabled,
+                inference_mode = enabled,
+                fw_grad_mode = !enabled,
+                multithreading_enabled = !enabled
+            ))
+            
+            # 更新调度键集合
+            if enabled:
+                included = prev_keyset.included_.remove(DispatchKey::ADInplaceOrView)
+                excluded = prev_keyset.excluded_ | c10::autograd_dispatch_keyset
+            else:
+                included = prev_keyset.included_.add(DispatchKey::ADInplaceOrView)
+                excluded = prev_keyset.excluded_ - c10::autograd_dispatch_keyset
+            
+            cur_keyset.set_included(included)
+            cur_keyset.set_excluded(excluded)
+            c10::impl::_force_tls_local_dispatch_key_set(cur_keyset)
+
+    ~InferenceMode()
+        用途: 析构时恢复之前的TLS状态
+        调用: AutogradState::set_tls_state(),
+              c10::impl::_force_tls_local_dispatch_key_set()
+        
+        逻辑:
+            AutogradState::set_tls_state(prev_mode)
+            c10::impl::_force_tls_local_dispatch_key_set(prev_keyset)
+
+    is_enabled() -> bool
+        用途: 查询当前是否处于推理模式
+        调用: AutogradState::get_tls_state()
+        
+        逻辑:
+            return AutogradState::get_tls_state().get_inference_mode()
+
+【依赖】
+    AutogradState                                    # 自动微分状态管理
+    c10::impl::tls_local_dispatch_key_set           # TLS调度键集合访问
+    c10::impl::_force_tls_local_dispatch_key_set    # TLS调度键集合设置
+    c10::autograd_dispatch_keyset                   # 自动微分相关的调度键集合
+    DispatchKey::ADInplaceOrView                    # 原地/视图操作的调度键
+
+【备注】
+    - RAII守卫，线程局部生效
+    - 不可拷贝、不可移动
+    - 推理模式下的TLS状态约束:
+      * ADInplaceOrView 不在 included 集合中
+      * Autograd 在 excluded 集合中
+      * GradMode 被禁用
+    - 正常模式下的TLS状态约束:
+      * ADInplaceOrView 在 included 集合中
+      * Autograd 不在 excluded 集合中
+      * GradMode 默认启用
+    - 设置推理模式会同步设置梯度模式，但反之不成立
+    - 性能优化: is_enabled() 使用独立的TLS标志，避免检查完整的DispatchKeySet

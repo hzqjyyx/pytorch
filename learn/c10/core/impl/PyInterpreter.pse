@@ -1,0 +1,272 @@
+--------------------------------
+NoopPyInterpreterVTable (空操作解释器虚表)
+来源: c10/core/impl/PyInterpreter.cpp
+--------------------------------
+
+【用途】
+    当 Python 解释器已卸载时，替换原有 vtable 的安全降级实现。
+    所有操作要么是空操作（incref/decref/trace_*），要么触发断言（其他方法）。
+
+【接口】
+    name() -> string
+        用途: 返回 "<unloaded interpreter>"
+
+    incref(pyobj: PyObject*)
+        用途: 空操作，不增加引用计数
+
+    decref(pyobj: PyObject*, has_pyobj_slot: bool)
+        用途: 空操作，不减少引用计数
+
+    detach(self: TensorImpl*) -> intrusive_ptr<TensorImpl>
+        用途: 触发 PANIC，禁止在解释器卸载后调用
+
+    dispatch(op: OperatorHandle, stack: Stack*)
+        用途: 触发 PANIC
+
+    reportErrorCallback(callback: PyObject*, key: DispatchKey)
+        用途: 触发 PANIC
+
+    python_op_registration_trampoline(op: OperatorHandle, key: DispatchKey, keyset: DispatchKeySet, stack: Stack*, with_keyset: bool, with_op: bool)
+        用途: 触发 PANIC
+
+    throw_abstract_impl_not_imported_error(opname: string, pymodule: const char*, context: const char*)
+        用途: 触发 PANIC
+
+    python_dispatcher(op: OperatorHandle, keyset: DispatchKeySet, stack: Stack*)
+        用途: 触发 PANIC
+
+    is_contiguous(self: TensorImpl*, format: MemoryFormat) -> bool
+        用途: 触发 PANIC
+
+    is_strides_like(self: TensorImpl*, format: MemoryFormat) -> bool
+        用途: 触发 PANIC
+
+    is_non_overlapping_and_dense(self: TensorImpl*) -> bool
+        用途: 触发 PANIC
+
+    device(self: TensorImpl*) -> Device
+        用途: 触发 PANIC
+
+    dim(self: TensorImpl*) -> int64
+        用途: 触发 PANIC
+
+    strides(self: TensorImpl*) -> IntArrayRef
+        用途: 触发 PANIC
+
+    sizes(self: TensorImpl*) -> IntArrayRef
+        用途: 触发 PANIC
+
+    sym_sizes(self: TensorImpl*) -> SymIntArrayRef
+        用途: 触发 PANIC
+
+    layout(self: TensorImpl*) -> Layout
+        用途: 触发 PANIC
+
+    numel(self: TensorImpl*) -> int64
+        用途: 触发 PANIC
+
+    sym_numel(self: TensorImpl*) -> SymInt
+        用途: 触发 PANIC
+
+    sym_strides(self: TensorImpl*) -> SymIntArrayRef
+        用途: 触发 PANIC
+
+    sym_storage_offset(self: TensorImpl*) -> SymInt
+        用途: 触发 PANIC
+
+    trace_gpu_event_creation(device_type: DeviceType, event: uintptr_t)
+        用途: 空操作，吞掉事件
+
+    trace_gpu_event_deletion(device_type: DeviceType, event: uintptr_t)
+        用途: 空操作
+
+    trace_gpu_event_record(device_type: DeviceType, event: uintptr_t, stream: uintptr_t)
+        用途: 空操作
+
+    trace_gpu_event_wait(device_type: DeviceType, event: uintptr_t, stream: uintptr_t)
+        用途: 空操作
+
+    trace_gpu_memory_allocation(device_type: DeviceType, ptr: uintptr_t)
+        用途: 空操作
+
+    trace_gpu_memory_deallocation(device_type: DeviceType, ptr: uintptr_t)
+        用途: 空操作
+
+    trace_gpu_stream_creation(device_type: DeviceType, stream: uintptr_t)
+        用途: 空操作
+
+    trace_gpu_device_synchronization(device_type: DeviceType)
+        用途: 空操作
+
+    trace_gpu_stream_synchronization(device_type: DeviceType, stream: uintptr_t)
+        用途: 空操作
+
+    trace_gpu_event_synchronization(device_type: DeviceType, event: uintptr_t)
+        用途: 空操作
+
+    reset_backward_hooks(self: TensorImpl*)
+        用途: 触发 PANIC
+
+【依赖】
+    TORCH_INTERNAL_ASSERT    # 用于 PANIC 宏
+
+【备注】
+    - PANIC 宏: 断言失败并输出错误信息 "attempted to call <method> on a Tensor with nontrivial PyObject after corresponding interpreter died"
+    - noop_vtable: 全局静态实例，在 disarm() 中使用
+
+--------------------------------
+PyInterpreter (解释器标签)
+来源: c10/core/impl/PyInterpreter.h, c10/core/impl/PyInterpreter.cpp
+--------------------------------
+
+【状态】
+    vtable_: const PyInterpreterVTable*    # 指向虚表的指针
+
+【接口】
+    PyInterpreter(vtable: const PyInterpreterVTable*)
+        用途: 构造函数，绑定虚表
+
+    operator*() -> const PyInterpreterVTable&
+        用途: 解引用，获取虚表引用
+
+    operator->() -> const PyInterpreterVTable*
+        用途: 成员访问，获取虚表指针
+
+    disarm()
+        用途: 将 vtable_ 替换为 noop_vtable，使所有方法变为空操作或断言
+        调用: noop_vtable (全局静态 NoopPyInterpreterVTable 实例)
+
+【备注】
+    - 线程安全性: disarm() 的 vtable_ 写入不是原子操作，假设在 dlclose 时张量析构已静止
+    - 生命周期: PyInterpreter 对象总是泄漏（不释放），确保即使共享库卸载后指针仍有效
+
+--------------------------------
+PyInterpreterVTable (解释器虚表接口)
+来源: c10/core/impl/PyInterpreter.h
+--------------------------------
+
+【用途】
+    定义 Python 解释器与 C++ 交互的虚函数接口。
+    每个 Python 解释器实例对应一个 vtable 实现。
+
+【接口】
+    name() -> string
+        用途: 返回解释器名称
+
+    incref(pyobj: PyObject*)
+        用途: 对 PyObject 执行 Py_INCREF
+
+    decref(pyobj: PyObject*, has_pyobj_slot: bool)
+        参数: has_pyobj_slot=TensorImpl 是否有 pyobj_slot
+        用途: 对 PyObject 执行 Py_DECREF，调用时不假设持有 GIL
+
+    detach(self: TensorImpl*) -> intrusive_ptr<TensorImpl>
+        用途: 通过 __torch_dispatch__ 实现 detach，同时复制 PyObject
+
+    dispatch(op: OperatorHandle, stack: Stack*)
+        用途: 调用 Python boxed fallback dispatch，回到 Python 层
+
+    reportErrorCallback(callback: PyObject*, key: DispatchKey)
+        用途: 报告错误回调
+
+    python_op_registration_trampoline(op: OperatorHandle, key: DispatchKey, keyset: DispatchKeySet, stack: Stack*, with_keyset: bool, with_op: bool)
+        用途: 在 multipy/torchdeploy 场景中，查找并调用 Python 注册的算子
+
+    throw_abstract_impl_not_imported_error(opname: string, pymodule: const char*, context: const char*)
+        用途: 抛出抽象实现未导入错误
+
+    python_dispatcher(op: OperatorHandle, keyset: DispatchKeySet, stack: Stack*)
+        用途: 调用 Python dispatcher 处理算子
+
+    is_contiguous(self: TensorImpl*, format: MemoryFormat) -> bool
+        用途: 查询张量是否连续
+
+    is_strides_like(self: TensorImpl*, format: MemoryFormat) -> bool
+        用途: 查询张量是否符合特定步幅模式
+
+    is_non_overlapping_and_dense(self: TensorImpl*) -> bool
+        用途: 查询张量是否非重叠且稠密
+
+    device(self: TensorImpl*) -> Device
+        用途: 获取张量设备
+
+    dim(self: TensorImpl*) -> int64
+        用途: 获取张量维度数
+
+    strides(self: TensorImpl*) -> IntArrayRef
+        用途: 获取张量步幅
+
+    sizes(self: TensorImpl*) -> IntArrayRef
+        用途: 获取张量尺寸
+
+    sym_sizes(self: TensorImpl*) -> SymIntArrayRef
+        用途: 获取符号尺寸
+
+    layout(self: TensorImpl*) -> Layout
+        用途: 获取张量布局
+
+    numel(self: TensorImpl*) -> int64
+        用途: 获取张量元素总数
+
+    sym_numel(self: TensorImpl*) -> SymInt
+        用途: 获取符号元素总数
+
+    sym_strides(self: TensorImpl*) -> SymIntArrayRef
+        用途: 获取符号步幅
+
+    sym_storage_offset(self: TensorImpl*) -> SymInt
+        用途: 获取符号存储偏移
+
+    trace_gpu_event_creation(device_type: DeviceType, event: uintptr_t)
+        用途: 追踪 GPU 事件创建
+
+    trace_gpu_event_deletion(device_type: DeviceType, event: uintptr_t)
+        用途: 追踪 GPU 事件删除
+
+    trace_gpu_event_record(device_type: DeviceType, event: uintptr_t, stream: uintptr_t)
+        用途: 追踪 GPU 事件记录
+
+    trace_gpu_event_wait(device_type: DeviceType, event: uintptr_t, stream: uintptr_t)
+        用途: 追踪 GPU 事件等待
+
+    trace_gpu_memory_allocation(device_type: DeviceType, ptr: uintptr_t)
+        用途: 追踪 GPU 内存分配
+
+    trace_gpu_memory_deallocation(device_type: DeviceType, ptr: uintptr_t)
+        用途: 追踪 GPU 内存释放
+
+    trace_gpu_stream_creation(device_type: DeviceType, stream: uintptr_t)
+        用途: 追踪 GPU 流创建
+
+    trace_gpu_device_synchronization(device_type: DeviceType)
+        用途: 追踪 GPU 设备同步
+
+    trace_gpu_stream_synchronization(device_type: DeviceType, stream: uintptr_t)
+        用途: 追踪 GPU 流同步
+
+    trace_gpu_event_synchronization(device_type: DeviceType, event: uintptr_t)
+        用途: 追踪 GPU 事件同步
+
+    reset_backward_hooks(self: TensorImpl*)
+        用途: 重置反向传播钩子
+
+--------------------------------
+PyInterpreterStatus (解释器标签状态枚举)
+来源: c10/core/impl/PyInterpreter.h
+--------------------------------
+
+【枚举值】
+    DEFINITELY_UNINITIALIZED
+        含义: 张量刚分配，未逃逸到其他线程，确定未被标记
+
+    MAYBE_UNINITIALIZED
+        含义: 查询时看起来未初始化，但可能被其他线程竞争标记，需要 CAS 确认
+
+    TAGGED_BY_US
+        含义: 已被当前持有 GIL 的解释器标记，拥有独占写权限
+
+    TAGGED_BY_OTHER
+        含义: 已被其他解释器标记，当前解释器无法使用此 TensorImpl
+
+【用途】
+    描述 TensorImpl 的解释器标签状态，相对于当前持有 GIL 的线程

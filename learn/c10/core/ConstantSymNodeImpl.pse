@@ -1,0 +1,110 @@
+--------------------------------
+ConstantSymNodeImpl (常量符号节点)
+来源: c10/core/ConstantSymNodeImpl.h, c10/core/ConstantSymNodeImpl.cpp
+--------------------------------
+
+【类型参数】
+    T: int64_t | bool    # 支持整数或布尔常量
+
+【状态】
+    value_: variant<int64_t, bool>    # 存储常量值
+
+【接口】
+    ConstantSymNodeImpl(val: T)
+        用途: 构造常量符号节点
+
+    is_int() -> bool
+        用途: 判断是否为整数类型
+
+    is_bool() -> bool
+        用途: 判断是否为布尔类型
+
+    is_float() -> bool
+        用途: 判断是否为浮点类型（始终返回 false）
+
+    guard_int(file: str, line: int64) -> int64
+        用途: 获取整数值，非整数时抛出异常
+
+    guard_bool(file: str, line: int64) -> bool
+        用途: 获取布尔值，非布尔时抛出异常
+
+    guard_float(file: str, line: int64) -> double
+        用途: 获取浮点值（始终抛出异常）
+
+    int_() -> int64
+        用途: 获取整数值，非整数时抛出异常
+
+    bool_() -> bool
+        用途: 获取布尔值，非布尔时抛出异常
+
+    has_hint() -> bool
+        用途: 是否有具体值提示（始终返回 true）
+
+    eq(other: SymNode) -> SymNode
+        用途: 等于比较，委托给 other.eq(this)
+        调用: other->eq()
+
+    ne(other: SymNode) -> SymNode
+        用途: 不等于比较，委托给 other.ne(this)
+        调用: other->ne()
+
+    ge(other: SymNode) -> SymNode
+        用途: 大于等于比较，委托给 other.le(this)
+        调用: other->le()
+
+    le(other: SymNode) -> SymNode
+        用途: 小于等于比较，委托给 other.ge(this)
+        调用: other->ge()
+
+    lt(other: SymNode) -> SymNode
+        用途: 小于比较，委托给 other.gt(this)
+        调用: other->gt()
+
+    gt(other: SymNode) -> SymNode
+        用途: 大于比较，委托给 other.lt(this)
+        调用: other->lt()
+
+    mul(other: SymNode) -> SymNode
+        用途: 乘法运算，委托给 other.mul(this)
+        调用: other->mul()
+
+    str() -> string
+        用途: 转换为字符串表示
+        算法:
+            if is_int():
+                return to_string(value_)
+            else:
+                return value_ ? "true" : "false"
+
+    constant_int() -> Optional<int64>
+        用途: 获取常量整数值
+        算法:
+            if is_int():
+                return value_
+            else:
+                return nullopt
+
+    constant_bool() -> Optional<bool>
+        用途: 获取常量布尔值
+        算法:
+            if is_bool():
+                return value_
+            else:
+                return nullopt
+
+    is_constant() -> bool
+        用途: 是否为常量（始终返回 true）
+
+    is_symbolic() -> bool
+        用途: 是否为符号值（始终返回 false）
+
+【依赖】
+    TORCH_INTERNAL_ASSERT    # 内部断言检查
+    TORCH_CHECK              # 用户输入检查
+    c10::intrusive_ptr       # 引用计数指针
+
+【备注】
+    - 二元操作采用反向委托模式：当左操作数是常量、右操作数是嵌套整数时，
+      将操作委托给右操作数，并交换操作数顺序（如 ge 委托给 le）
+    - 这种设计支持 plain int 提升为 ConstantSymNodeImpl 后与 nested int 的混合运算
+    - 模板实例化：ConstantSymNodeImpl<bool> 和 ConstantSymNodeImpl<int64_t>

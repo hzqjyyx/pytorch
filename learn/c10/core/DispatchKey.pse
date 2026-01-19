@@ -1,0 +1,197 @@
+--------------------------------
+DispatchKey 系统
+来源: c10/core/DispatchKey.cpp, c10/core/DispatchKey.h
+--------------------------------
+
+【概述】
+DispatchKey 是 PyTorch 调度系统的核心枚举类型，用于标识算子分发的"层级"或"功能"。
+每个 DispatchKey 对应 DispatchKeySet 中的一个 bit 位。
+
+【类型定义】
+
+BackendComponent (uint8_t):
+    表示后端类型的 bit 位标识
+    
+    枚举值:
+        InvalidBit = 0
+        CPUBit, CUDABit, HIPBit, XLABit, MPSBit, IPUBit, XPUBit, HPUBit, VEBit, LazyBit, MTIABit
+        PrivateUse1Bit, PrivateUse2Bit, PrivateUse3Bit
+        MetaBit
+        EndOfBackendKeys = MetaBit
+
+DispatchKey (uint16_t):
+    表示调度层级的枚举类型
+    
+    分类:
+    (1) 非定制化后端: FPGA, MAIA, Vulkan, Metal
+    (2) 非定制化功能: Functionalize, Python, Fake, Named, Conjugate, Negative, ZeroTensor, ADInplaceOrView, Tracer, ...
+    (3) 可按后端定制的功能: Dense, Quantized, Sparse, SparseCsr, NestedTensor, AutogradFunctionality
+    (4) 按后端实例化的功能键: CPU, CUDA, SparseCPU, SparseCUDA, AutogradCPU, AutogradCUDA, ...
+    (5) 别名键: Autograd, CompositeImplicitAutograd, CompositeExplicitAutograd, ...
+
+    关键边界:
+        Undefined = 0
+        EndOfFunctionalityKeys: 功能键结束标记
+        StartOfDenseBackends, EndOfDenseBackends: Dense 后端范围
+        StartOfQuantizedBackends, EndOfQuantizedBackends: Quantized 后端范围
+        StartOfSparseBackends, EndOfSparseBackends: Sparse 后端范围
+        StartOfSparseCsrBackends, EndOfSparseCsrBackends: SparseCsr 后端范围
+        StartOfNestedTensorBackends, EndOfNestedTensorBackends: NestedTensor 后端范围
+        StartOfAutogradFunctionalityBackends, EndOfAutogradFunctionalityBackends: Autograd 后端范围
+        EndOfRuntimeBackendKeys: 运行时后端键结束标记
+        StartOfAliasKeys, EndOfAliasKeys: 别名键范围
+
+【常量】
+    num_functionality_keys = static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys)
+    num_backends = static_cast<uint8_t>(BackendComponent::EndOfBackendKeys)
+    num_runtime_entries = num_functionality_keys + (numPerBackendFunctionalityKeys() * (num_backends - 1))
+    full_backend_mask = (1 << num_backends) - 1
+
+【接口】
+
+toString(t: BackendComponent) -> const char*
+    用途: 将 BackendComponent 转换为字符串
+    算法:
+        switch t:
+            case CPUBit: return "CPUBit"
+            case CUDABit: return "CUDABit"
+            case HIPBit: return "HIPBit"
+            ...
+            case MTIABit: return "MTIA"
+            case PrivateUse1Bit: return "PrivateUse1Bit"
+            ...
+            default: return "UNKNOWN_BACKEND_BIT"
+
+toString(t: DispatchKey) -> const char*
+    用途: 将 DispatchKey 转换为字符串
+    算法:
+        # 处理固定的功能键
+        if t in [Undefined, Dense, FPGA, MAIA, Vulkan, Metal, Lazy, MPS, HPU, MTIA, ...]:
+            return 对应字符串
+        
+        # 处理别名键
+        if t in [Autograd, CompositeImplicitAutograd, ...]:
+            return 对应字符串
+        
+        # 处理按后端实例化的键
+        bc = toBackendComponent(t)
+        fk = toFunctionalityKey(t)
+        
+        # 根据功能键和后端组件拼接名称
+        # 例如: Dense + CUDABit -> "CUDA"
+        #       Sparse + CUDABit -> "SparseCUDA"
+        #       AutogradFunctionality + CUDABit -> "AutogradCUDA"
+        return prefix + backend_name
+
+toBackendComponent(k: DispatchKey) -> BackendComponent
+    用途: 从 DispatchKey 提取后端组件
+    算法:
+        if k in [StartOfDenseBackends, EndOfDenseBackends]:
+            return static_cast<BackendComponent>(k - StartOfDenseBackends)
+        else if k in [StartOfQuantizedBackends, EndOfQuantizedBackends]:
+            return static_cast<BackendComponent>(k - StartOfQuantizedBackends)
+        else if k in [StartOfSparseBackends, EndOfSparseBackends]:
+            return static_cast<BackendComponent>(k - StartOfSparseBackends)
+        else if k in [StartOfSparseCsrBackends, EndOfSparseCsrBackends]:
+            return static_cast<BackendComponent>(k - StartOfSparseCsrBackends)
+        else if k in [StartOfNestedTensorBackends, EndOfNestedTensorBackends]:
+            return static_cast<BackendComponent>(k - StartOfNestedTensorBackends)
+        else if k in [StartOfAutogradFunctionalityBackends, EndOfAutogradFunctionalityBackends]:
+            return static_cast<BackendComponent>(k - StartOfAutogradFunctionalityBackends)
+        else:
+            return BackendComponent::InvalidBit
+
+toBackendComponent(device_type: DeviceType) -> BackendComponent
+    用途: 从 DeviceType 转换为 BackendComponent
+    算法:
+        # 通过宏 C10_FORALL_BACKEND_DEVICE_TYPES 展开
+        # 例如: DeviceType::CPU -> toBackendComponent(DispatchKey::CPU)
+        switch device_type:
+            case DeviceType::CPU: return toBackendComponent(DispatchKey::CPU)
+            case DeviceType::CUDA: return toBackendComponent(DispatchKey::CUDA)
+            ...
+            default: return BackendComponent::InvalidBit
+
+toFunctionalityKey(k: DispatchKey) -> DispatchKey
+    用途: 从 DispatchKey 提取功能键
+    算法:
+        if k <= EndOfFunctionalityKeys:
+            return k
+        else if k <= EndOfDenseBackends:
+            return DispatchKey::Dense
+        else if k <= EndOfQuantizedBackends:
+            return DispatchKey::Quantized
+        else if k <= EndOfSparseBackends:
+            return DispatchKey::Sparse
+        else if k <= EndOfSparseCsrBackends:
+            return DispatchKey::SparseCsr
+        else if k <= EndOfNestedTensorBackends:
+            return DispatchKey::NestedTensor
+        else if k <= EndOfAutogradFunctionalityBackends:
+            return DispatchKey::AutogradFunctionality
+        else:
+            return DispatchKey::Undefined
+
+toRuntimePerBackendFunctionalityKey(functionality_k: DispatchKey, backend_k: BackendComponent) -> DispatchKey
+    用途: 将功能键和后端组件组合为运行时键
+    算法:
+        if functionality_k == Dense:
+            return static_cast<DispatchKey>(StartOfDenseBackends + backend_k)
+        else if functionality_k == Sparse:
+            return static_cast<DispatchKey>(StartOfSparseBackends + backend_k)
+        else if functionality_k == SparseCsr:
+            return static_cast<DispatchKey>(StartOfSparseCsrBackends + backend_k)
+        else if functionality_k == Quantized:
+            return static_cast<DispatchKey>(StartOfQuantizedBackends + backend_k)
+        else if functionality_k == NestedTensor:
+            return static_cast<DispatchKey>(StartOfNestedTensorBackends + backend_k)
+        else if functionality_k == AutogradFunctionality:
+            return static_cast<DispatchKey>(StartOfAutogradFunctionalityBackends + backend_k)
+        else:
+            return DispatchKey::Undefined
+
+isAliasDispatchKey(k: DispatchKey) -> bool
+    用途: 判断是否为别名键
+    算法:
+        return k >= StartOfAliasKeys and k <= EndOfAliasKeys
+
+isPerBackendFunctionalityKey(k: DispatchKey) -> bool
+    用途: 判断是否为可按后端定制的功能键
+    算法:
+        return k in [Dense, Quantized, Sparse, SparseCsr, AutogradFunctionality, NestedTensor]
+
+getAutogradKeyFromBackend(k: BackendComponent) -> DispatchKey
+    用途: 从后端组件获取对应的 Autograd 键
+    算法:
+        # 依赖 getAutogradRelatedKeySetFromBackend 返回的 DispatchKeySet
+        # 取其中优先级最高的键（即 Autograd 键）
+        return getAutogradRelatedKeySetFromBackend(k).highestPriorityTypeId()
+
+parseDispatchKey(k: string) -> DispatchKey
+    用途: 从字符串解析 DispatchKey
+    算法:
+        # 静态映射表 key_map: string -> DispatchKey
+        # 包含所有固定键名: "Undefined", "Dense", "CPU", "CUDA", "Autograd", ...
+        
+        it = key_map.find(k)
+        
+        # 处理 PrivateUse1 自定义后端名称
+        if it == key_map.end() and get_privateuse1_backend() != "PrivateUse1":
+            pu1_backend_name = get_privateuse1_backend().to_upper()
+            processed_k = regex_replace(k, pu1_backend_name, "PrivateUse1")
+            it = key_map.find(processed_k)
+        
+        TORCH_CHECK(it != key_map.end(), "could not parse dispatch key: ", k)
+        return it->second
+
+【依赖】
+    C10_FORALL_BACKEND_COMPONENTS: 宏，遍历所有后端组件
+    C10_FORALL_FUNCTIONALITY_KEYS: 宏，遍历所有功能键
+    C10_FORALL_BACKEND_DEVICE_TYPES: 宏，遍历所有后端设备类型
+    c10::get_privateuse1_backend(): 获取 PrivateUse1 自定义后端名称
+
+【备注】
+    - DispatchKeySet 使用 64-bit bitmask 存储，因此 BackendComponent + FunctionalityKeys 总数不能超过 64
+    - 后端数量限制为 <= 16 (见 Note [No More Than 16 Backends])
+    - 按后端实例化的键在枚举中按后端顺序排列，这对 toBackendComponent 和 toRuntimePerBackendFunctionalityKey 的实现至关重要
+    - 别名键不直接参与运行时调度，仅用于注册时的映射

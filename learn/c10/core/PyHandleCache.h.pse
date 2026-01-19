@@ -1,0 +1,42 @@
+--------------------------------
+PyHandleCache (Python对象缓存)
+来源: c10/core/PyHandleCache.h
+--------------------------------
+
+【状态】
+    pyinterpreter_: atomic<PyInterpreter*>    # 缓存所属的解释器标签
+    data_: PyObject*                          # 缓存的Python对象指针
+
+【接口】
+    PyHandleCache()用途: 初始化空缓存，pyinterpreter_ = nullptr
+
+    ptr_or<F>(self_interpreter: PyInterpreter*, slow_accessor: F) -> PyObject*
+        参数: 
+            self_interpreter = 当前解释器
+            slow_accessor = 缓存未命中时的回退函数
+        用途: 尝试从缓存获取Python对象，未命中则调用slow_accessor并尝试写入缓存
+        算法:
+            interpreter = pyinterpreter_.load(memory_order_acquire)
+            
+            if interpreter == self_interpreter:
+                # 缓存命中
+                return data_
+            
+            elif interpreter == nullptr:
+                # 缓存为空，尝试占用
+                r = slow_accessor()
+                expected = nullptr
+                if pyinterpreter_.compare_exchange_strong(expected, self_interpreter, memory_order_acq_rel):
+                    data_ = r
+                assert expected != self_interpreter    # GIL保护下不应发生
+                return r
+            
+            else:
+                # 缓存被其他解释器占用
+                return slow_accessor()
+
+【备注】
+    - 使用场景: C++对象到Python对象的单向缓存，Python对象需有静态生命周期
+    - 线程安全: 依赖GIL保护，使用原子操作标记解释器所有权
+    - 多解释器限制: torchdeploy场景下性能受限，一个解释器填充缓存后其他解释器无法使用
+    - 内存顺序: acquire-release语义确保interpreter标签与data_的可见性同步

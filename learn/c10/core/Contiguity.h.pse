@@ -1,0 +1,130 @@
+--------------------------------
+_compute_contiguous
+来源: c10/core/Contiguity.h
+--------------------------------
+
+【签名】
+    _compute_contiguous(sizes: ArrayRef<T>, strides: ArrayRef<T>, numel: T) -> bool
+
+【算法】
+    # 检查张量是否按行优先（C-contiguous）布局存储
+    
+    if numel == 0:
+        return true
+    
+    expected_stride = 1
+    # 从最后一维向前遍历
+    for d in range(len(sizes) - 1, -1, -1):
+        if sizes[d] != 1:
+            if strides[d] != expected_stride:
+                return false
+            expected_stride *= sizes[d]
+    
+    return true
+
+【备注】
+    - 跳过大小为1的维度（它们不影响连续性）
+    - 从最内层维度开始检查，期望stride依次为 1, size[-1], size[-1]*size[-2], ...
+
+--------------------------------
+_compute_channels_last_contiguous_2d
+来源: c10/core/Contiguity.h
+--------------------------------
+
+【签名】
+    _compute_channels_last_contiguous_2d(sizes: ArrayRef<T>, strides: ArrayRef<T>) -> bool
+
+【算法】
+    # 检查4D张量是否为NHWC（channels-last 2D）布局
+    
+    if len(sizes) == 4:
+        expected_stride = 1
+        # 按 C, W, H, N 顺序检查（对应索引 1, 3, 2, 0）
+        for d in [1, 3, 2, 0]:
+            if sizes[d] != 1:
+                if strides[d] != expected_stride:
+                    return false
+                expected_stride *= sizes[d]
+        return true
+    
+    if len(sizes) == 3:
+        # 3D情况暂未启用
+        return false
+    
+    return false
+
+【备注】
+    - NHWC布局：stride顺序为 C=1, W=C, H=W*C, N=H*W*C
+    - 3D情况（CHW）已实现但未启用，等待完整测试
+
+--------------------------------
+_compute_channels_last_contiguous_3d
+来源: c10/core/Contiguity.h
+--------------------------------
+
+【签名】
+    _compute_channels_last_contiguous_3d(sizes: ArrayRef<T>, strides: ArrayRef<T>) -> bool
+
+【算法】
+    # 检查5D张量是否为NDHWC（channels-last 3D）布局
+    
+    if len(sizes) == 5:
+        expected_stride = 1
+        # 按 C, W, H, D, N 顺序检查（对应索引 1, 4, 3, 2, 0）
+        for d in [1, 4, 3, 2, 0]:
+            if sizes[d] != 1:
+                if strides[d] != expected_stride:
+                    return false
+                expected_stride *= sizes[d]
+        return true
+    
+    if len(sizes) == 4:
+        # 4D情况暂未启用
+        return false
+    
+    return false
+
+【备注】
+    - NDHWC布局：stride顺序为 C=1, W=C, H=W*C, D=H*W*C, N=D*H*W*C
+    - 4D情况（DHWC）已实现但未启用，等待完整测试
+
+--------------------------------
+_compute_non_overlapping_and_dense
+来源: c10/core/Contiguity.h
+--------------------------------
+
+【签名】
+    _compute_non_overlapping_and_dense(sizes: ArrayRef<T>, strides: ArrayRef<T>) -> bool
+
+【算法】
+    # 检查张量是否无重叠且密集存储（任意维度顺序）
+    
+    dim = len(sizes)
+    
+    if dim == 1:
+        return sizes[0] < 2 or strides[0] == 1
+    
+    # Step 1: 创建维度索引排列
+    perm = [0, 1, ..., dim-1]
+    
+    # Step 2: 按stride排序，大小<2的维度排到末尾
+    sort perm by:
+        if sizes[a] < 2: return false  # a排后面
+        if sizes[b] < 2: return true   # b排后面
+        return strides[a] < strides[b]
+    
+    # Step 3: 按stride从小到大检查密集性
+    expected_stride = 1
+    for i in range(dim):d = perm[i]
+        if sizes[d] < 2:
+            return true  # 剩余维度都是平凡维度
+        if strides[d] != expected_stride:
+            return false
+        expected_stride *= sizes[d]
+    
+    return true
+
+【备注】
+    - 允许任意维度顺序（如转置），只要内存是密集的
+    - 例如：shape=[2,3,4], strides=[12,1,3] 是有效的（按1,2,0顺序存储）
+    - 大小为1的维度不影响密集性判断

@@ -1,0 +1,43 @@
+--------------------------------
+CachingDeviceAllocator 统计与工具
+来源: c10/core/CachingDeviceAllocator.h
+--------------------------------
+
+【类型】
+    DeviceStats: 设备内存分配器统计信息结构
+
+【状态】
+    allocation: StatArray# 客户端请求的分配次数
+    segment: StatArray                 # 从设备内存分配的段数量
+    active: StatArray                  # 活跃内存块数量（已分配或被流使用）
+    inactive_split: StatArray          # 非活跃的分割内存块数量（未分配但无法释放）
+    allocated_bytes: StatArray         # 分配器已分配的字节数
+    reserved_bytes: StatArray          # 分配器保留的字节数（空闲+使用）
+    active_bytes: StatArray            # 活跃内存块内的字节数
+    inactive_split_bytes: StatArray    # 非活跃分割内存块内的字节数
+    requested_bytes: StatArray         # 客户端请求的字节数
+    
+    num_alloc_retries: int64           # 需要缓存刷新的设备malloc失败次数
+    num_ooms: int64                    # OOM次数（缓存刷新后仍失败）
+    oversize_allocations: Stat         # 从池中分配的超大块数量
+    oversize_segments: Stat            # 需要malloc的超大块数量
+    num_sync_all_streams: int64        # synchronize_and_free_events()调用次数
+    num_device_alloc: int64            # 设备内存分配调用次数（mapped+malloced）
+    num_device_free: int64             # 设备内存释放调用次数（unmapped+free）
+    max_split_size: int64              # 允许分割的最大块大小
+
+【函数】
+    format_size(size: uint64) -> string用途: 格式化字节大小为人类可读格式
+        算法:
+            if size <= 1024:
+                return f"{size} bytes"
+            elif size <= 1048576:
+                return f"{size/1024:.2f} KiB"
+            elif size <= 1073741824:
+                return f"{size/1048576:.2f} MiB"
+            else:
+                return f"{size/1073741824:.2f} GiB"
+
+【依赖】
+    c10::CachingAllocator::StatArray    # 统计数组类型
+    c10::CachingAllocator::Stat         # 统计类型
