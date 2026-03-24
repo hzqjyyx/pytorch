@@ -18,13 +18,9 @@ PyTorch 不是从零开始按单一风格生长出来的代码库，而是经历
 
 ## 2. 核心分层
 
-对于推理场景，最实用的阅读顺序是：先把 [`c10::Device`](../../c10/core/Device.h#L13-L46)、[`c10::ScalarType`](../../c10/core/ScalarType.h#L28-L160)、[`c10::TensorImpl`](../../c10/core/TensorImpl.h#L65-L190) 这些基础对象看熟，再理解 [`at::Tensor`](../../aten/src/ATen/templates/TensorBody.h#L65-L120) 如何把它们包装成更好用的张量接口，最后再进入 [`at::native`](../../aten/src/ATen/cudnn/Handle.h#L6-L9) 一类实现位置去看具体算子。调用链中如果遇到 [`at::detail`](../../aten/src/ATen/Utils.cpp#L19-L56)、[`at::impl`](../../aten/src/ATen/core/VariableHooksInterface.h#L38-L83)、[`c10::detail`](../../c10/util/Exception.h#L463-L520) 或 [`c10::impl`](../../c10/core/TensorImpl.h#L177-L190)，就把它理解成"主线下方的内部支撑层"。
-
-本节聚焦推理主线（`c10` / `at` / `at::native`），暂不展开 `torch::autograd`、`torch::jit`、`caffe2::` 等模块。
-
 ### `c10`：底层 core runtime
 
-如果阅读目标是推理场景，那么最值得先建立直觉的一层其实不是 `torch`，而是 `c10`。`c10` 可以理解成 PyTorch 的底座，它负责那些“无论你做训练、推理、还是后端适配都必须共享”的基础抽象。最典型的例子是设备 [`c10::Device`](../../c10/core/Device.h#L13-L46)、dtype [`c10::ScalarType`](../../c10/core/ScalarType.h#L28-L160)、以及真正承载张量底层状态的 [`c10::TensorImpl`](../../c10/core/TensorImpl.h#L65-L190)。这些对象之所以不放在 `at` 或 `torch`，不是因为它们“不重要”，恰恰相反，正是因为它们过于基础，必须被更高层无条件复用，所以才需要放在更底的位置。
+如果目标是推理场景，那么最值得先建立直觉的一层其实不是 `torch`，而是 `c10`。`c10` 可以理解成 PyTorch 的底座，它负责那些“无论你做训练、推理、还是后端适配都必须共享”的基础抽象。最典型的例子是设备 [`c10::Device`](../../c10/core/Device.h#L13-L46)、dtype [`c10::ScalarType`](../../c10/core/ScalarType.h#L28-L160)、以及真正承载张量底层状态的 [`c10::TensorImpl`](../../c10/core/TensorImpl.h#L65-L190)。这些对象之所以不放在 `at` 或 `torch`，不是因为它们“不重要”，恰恰相反，正是因为它们过于基础，必须被更高层无条件复用，所以才需要放在更底的位置。
 
 从推理代码阅读的角度看，`c10` 的意义在于它定义了系统的公共语言。一个张量在哪个设备上、用什么 dtype、拥有哪些 dispatch key、底层元数据如何组织，这些问题最终都会落到 `c10` 的类型系统里。你在 `ATen` 里看到的很多高层操作，本质上是在操纵 `c10` 这套基础对象。也正因为如此，当你看到一个名字出现在 `c10` 下时，通常可以先把它理解为“跨模块共享的基础设施”，而不是“某个具体算子自己的工具函数”。
 
@@ -32,25 +28,25 @@ PyTorch 不是从零开始按单一风格生长出来的代码库，而是经历
 
 与 `c10` 相比，`at` 更接近我们平时理解的“张量库接口”。最核心的例子当然是 [`at::Tensor`](../../aten/src/ATen/templates/TensorBody.h#L65-L120)。它是日常写算子、读 kernel、追调用链时最常接触的类型，但它本身并不拥有完整的底层实现，而是建立在 [`TensorBase`](../../aten/src/ATen/core/TensorBase.h#L82-L180) 和 [`c10::TensorImpl`](../../c10/core/TensorImpl.h#L65-L190) 之上。可以把它理解成一层更适合使用者的高层句柄：它暴露了大量张量 API，让上层代码可以自然地写成 `tensor.size()`、`tensor.device()`、`tensor.contiguous()` 这样的形式，但真正的数据布局、引用计数、设备信息和大部分底层状态，依然由 `c10` 持有。
 
-这就是为什么读 PyTorch 代码时，经常会感觉 `at` 和 `c10` 缠得很紧。它们不是平行关系，也不是随便拆出来的两个库，而是一种很明确的上下层关系：`c10` 负责通用基础抽象，`at` 负责把这些抽象组织成张量与算子的工作界面。在推理场景里，大多数你关心的 operator 入口、tensor helper、shape 与 memory format 相关逻辑，都会主要出现在 `at` 这一层，而不是 `torch`。
+这就是为什么读 PyTorch 代码时，经常会感觉 `at` 和 `c10` 缠得很紧。`c10` 负责通用基础抽象，`at` 负责把这些抽象组织成张量与算子的工作界面。
 
 ### `at` 对 `c10` 的再导出
 
-第一次接触源码时，一个非常容易困惑的现象是：有些类型明明定义在 `c10`，却经常以 `at::` 的形式被使用。这不是巧合，也不是历史代码没清理干净，而是明确写在 [`c10/macros/Macros.h`](../../c10/macros/Macros.h#L149-L177) 里的兼容导出策略。文件中存在 `namespace at { using namespace c10; }` 这样的声明，因此大量 `c10` 符号都会在 `at` 下再次可见。
+第一次接触源码时，一个非常容易困惑的现象是：有些类型明明定义在 `c10`，却经常以 `at::` 的形式被使用。这是写在 [`c10/macros/Macros.h`](../../c10/macros/Macros.h#L149-L177) 里的兼容导出策略。文件中存在 `namespace at { using namespace c10; }` 这样的声明，因此大量 `c10` 符号都会在 `at` 下再次可见。
 
-这个设计带来的直接结果是：名字的出现位置并不总能直接说明“它属于哪一层”。例如 [`c10::ScalarType`](../../c10/core/ScalarType.h#L28-L160) 的定义在 `c10`，但类型列表中又能看到 `at::Half` 与 `at::BFloat16` 这样的写法；你在别的文件里也可能同时看到 `c10::DeviceType` 和 `at::kCUDA` 风格的引用。阅读时如果想判断 owner，最可靠的方法不是看它这次被怎样引用，而是回到定义文件确认它到底声明在哪个 namespace 里。对初学者来说，这是一个非常重要的阅读习惯，否则很容易把“兼容导出”误认为“主定义位置”。
+这个设计带来的直接结果是：名字的出现位置并不总能直接说明“它属于哪一层”。例如 [`c10::ScalarType`](../../c10/core/ScalarType.h#L28-L160) 的定义在 `c10`，但类型列表中又能看到 `at::Half` 与 `at::BFloat16` 这样的写法；你在别的文件里也可能同时看到 `c10::DeviceType` 和 `at::kCUDA` 风格的引用。阅读时如果想判断 owner，最可靠的方法不是看它这次被怎样引用，而是回到定义文件确认它到底声明在哪个 namespace 里。
 
 ### `at::native`：具体算子实现层
 
-如果说 `at` 是算子接口层，那么 [`at::native`](../../aten/src/ATen/cudnn/Handle.h#L6-L9) 往往就是具体实现真正落地的地方。很多 CPU、CUDA、XPU 或其他 backend 的 kernel，最终都会写在 `aten/src/ATen/native/...` 这棵目录下面，并以 `at::native` 作为 namespace 暴露。对于推理场景的源码学习来说，这是一个非常关键的观察点，因为你真正想看一个算子“怎么做”的时候，最终大概率都要进入这层。
+如果说 `at` 是算子接口层，那么 [`at::native`](../../aten/src/ATen/cudnn/Handle.h#L6-L9) 往往就是具体实现真正落地的地方。很多 CPU、CUDA、XPU 或其他 backend 的 kernel，最终都会写在 `aten/src/ATen/native/...` 这棵目录下面，并以 `at::native` 作为 namespace 暴露。真正想看一个算子“怎么做”的时候，最终大概率都要进入这层。
 
 这里可以把 `at::native` 理解成“算子实现仓库”，而不是新的顶层抽象。它依然属于 `at` 体系，只是语义更具体，强调的是 native operator implementation。你在阅读 `add`、`matmul`、`layer_norm`、`softmax`、`copy` 这类算子时，最终常常会从公开 API 或 dispatcher 入口一路走到 `at::native`。因此，从学习顺序上说，先理解 `c10` 与 `at` 的关系，再进入 `at::native` 看具体实现，会比一开始就钻进某个 kernel 文件更容易建立整体感。
 
 ### `detail` 与 `impl`：内部支撑层
 
-对于推理场景，另一个必须建立的阅读习惯是：看到 `detail` 或 `impl` 时，先默认它们是内部支撑层。比如 [`at::detail`](../../aten/src/ATen/Utils.cpp#L19-L56) 里可以放张量构造的内部 helper，[`c10::detail`](../../c10/util/Exception.h#L463-L520) 里可以放错误处理和模板辅助逻辑，[`at::impl`](../../aten/src/ATen/core/VariableHooksInterface.h#L38-L83) 则经常承担更靠近框架 glue code 的内部接口。它们的共同点不是功能相同，而是都不打算作为”这层系统最主要的阅读入口”。
+看到 `detail` 或 `impl` 时，先默认它们是内部支撑层。比如 [`at::detail`](../../aten/src/ATen/Utils.cpp#L19-L56) 里可以放张量构造的内部 helper，[`c10::detail`](../../c10/util/Exception.h#L463-L520) 里可以放错误处理和模板辅助逻辑，[`at::impl`](../../aten/src/ATen/core/VariableHooksInterface.h#L38-L83) 则经常承担更靠近框架 glue code 的内部接口。它们的共同点不是功能相同，而是都不打算作为”这层系统最主要的阅读入口”。
 
-这并不意味着 `detail` 和 `impl` 不重要。恰恰相反，很多关键行为就是靠这些内部桥接代码串起来的。真正应该形成的判断是：当你在追某个功能时，如果调用链进入 `detail` 或 `impl`，说明你已经从公共接口下沉到了支撑实现；这时你的阅读重点应该从”这个 API 对外表示什么”切换为”这个内部组件如何服务上层语义”。对初学者来说，这种角色切换非常关键，因为它能帮助你避免把内部 helper 当成主干抽象去死记。
+当你在追某个功能时，如果调用链进入 `detail` 或 `impl`，说明你已经从公共接口下沉到了支撑实现；这时你的阅读重点应该从”这个 API 对外表示什么”切换为”这个内部组件如何服务上层语义”。
 
 ### 主干关系图
 
@@ -126,14 +122,3 @@ flowchart TD
 1. **看完整路径**：`at::detail` 属于 `at` 层的内部支撑，`c10::detail` 属于 `c10` 层的内部支撑
 2. **看文件位置**：`aten/src/ATen/detail/...` 说明是 `at` 层的，`c10/core/impl/...` 说明是 `c10` 层的
 3. **理解角色**：进入 `detail` 或 `impl` 意味着你已经从公共接口下沉到支撑实现，阅读重心应该从”这是什么 API”切换为”这如何服务上层”
-
-### 快速建立直觉的练习
-
-选几个常见类型，用上面的方法确认它们的真正位置：
-
-- `at::Tensor` → 定义在 `aten/src/ATen/templates/TensorBody.h`，owner 是 `at`
-- `c10::TensorImpl` → 定义在 `c10/core/TensorImpl.h`，owner 是 `c10`
-- `at::Half` → 定义在 `c10/util/Half.h`，owner 是 `c10`，但通过 `using` 在 `at` 下可见
-- `c10::Device` → 定义在 `c10/core/Device.h`，owner 是 `c10`，但通过 `using` 在 `at` 下可见
-
-做几次这样的确认，你就会形成”看到名字先想定义位置”的本能反应。
