@@ -103,11 +103,36 @@
 
 ### 张量主线
 
-读这张图时，最重要的一条竖线是 `Tensor -> TensorBase -> TensorImpl`。[`at::Tensor`](../../aten/src/ATen/templates/TensorBody.h) 是用户和大部分 ATen 代码最常接触的张量句柄，[`at::TensorBase`](../../aten/src/ATen/core/TensorBase.h) 是更轻量的中间层，而真正保存张量状态的是 [`c10::TensorImpl`](../../c10/core/TensorImpl.h)。如果你想理解“一个 tensor 到底是什么”，最终一定要落回 `TensorImpl`。它内部既持有形状、步长、dtype、device、storage offset，也持有 version counter、autograd metadata 和 dispatch key set。这就是为什么 `TensorImpl` 是阅读 `c10 + aten` 时最值得先吃透的类。
+读这张图时，最重要的一条竖线是 `Tensor -> TensorBase -> TensorImpl`。[`at::Tensor`](../../aten/src/ATen/templates/TensorBody.h) 是用户和大部分 ATen 代码最常接触的张量句柄，[`at::TensorBase`](../../aten/src/ATen/core/TensorBase.h) 是更轻量的中间层，而真正保存张量状态的是 [`c10::TensorImpl`](../../c10/core/TensorImpl.h)。如果你想理解”一个 tensor 到底是什么”，最终一定要落回 `TensorImpl`。它内部既持有形状、步长、dtype、device、storage offset，也持有 version counter、autograd metadata 和 dispatch key set。这就是为什么 `TensorImpl` 是阅读 `c10 + aten` 时最值得先吃透的类。
+
+`at::Tensor` 本质上是 `c10::TensorImpl` 的智能指针包装：
+
+```cpp
+// aten/src/ATen/core/TensorBody.h
+namespace at {
+  class Tensor {
+    c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
+    // ... 各种操作接口
+  };
+}
+```
+
+`TensorImpl` 的设计分成三个部分：一是所有 tensor 都有的 common prefix（device, dtype, sizes, strides），二是为稠密 tensor 优化的 strided tensor fields（直接内联存储以提高性能），三是供子类扩展的 extensible suffix（比如 SparseTensor 可以在这里加自己的字段）。
 
 ### 内存主线
 
-另一条重要主线是 `Allocator -> DataPtr -> Storage -> TensorImpl`。[`c10::Allocator`](../../c10/core/Allocator.h) 负责真正分配和释放内存，[`c10::DataPtr`](../../c10/core/Allocator.h) 则把原始指针、deleter 和 device 绑在一起，[`c10::Storage`](../../c10/core/Storage.h) 负责把这块内存包装成可以被张量复用、共享和引用计数管理的对象，最后 [`c10::TensorImpl`](../../c10/core/TensorImpl.h) 再引用 `Storage` 并解释这块内存该如何被看成一个多维 tensor。很多初学者会把 `TensorImpl` 和 `Storage` 混在一起看，但它们的职责其实非常清楚：`Storage` 管“这一块内存”，`TensorImpl` 管“如何把它解释成一个 tensor”。
+另一条重要主线是 `Allocator -> DataPtr -> Storage -> TensorImpl`。[`c10::Allocator`](../../c10/core/Allocator.h) 负责真正分配和释放内存，[`c10::DataPtr`](../../c10/core/Allocator.h) 则把原始指针、deleter 和 device 绑在一起，[`c10::Storage`](../../c10/core/Storage.h) 负责把这块内存包装成可以被张量复用、共享和引用计数管理的对象，最后 [`c10::TensorImpl`](../../c10/core/TensorImpl.h) 再引用 `Storage` 并解释这块内存该如何被看成一个多维 tensor。很多初学者会把 `TensorImpl` 和 `Storage` 混在一起看，但它们的职责其实非常清楚：`Storage` 管”这一块内存”，`TensorImpl` 管”如何把它解释成一个 tensor”。
+
+PyTorch 把”tensor 的逻辑视图”和”物理内存”完全分离。这个设计带来一个重要特性：多个 tensor 可以共享同一块 Storage。当你调用 `tensor.view()` 或者 `tensor[::2]` 时，新的 tensor 和原来的 tensor 指向同一个 Storage，只是 offset 和 stride 不同。
+
+```cpp
+// c10::StorageImpl 的核心
+class StorageImpl {
+  DataPtr data_ptr_;     // 实际数据，可以在不同设备上
+  size_t size_bytes_;    // 字节数
+  Allocator* allocator_; // 内存分配器
+};
+```
 
 ### 执行主线
 
@@ -117,6 +142,29 @@
 
 图中右侧的 `DispatchKeySet -> Dispatcher -> native_functions.yaml -> backend kernels` 是算子系统的主线。[`c10::DispatchKeySet`](../../c10/core/DispatchKeySet.h) 描述一个 tensor 在运行时带有哪些标签，比如 CPU、CUDA、Sparse、Autograd、Meta 等；[`c10::Dispatcher`](../../aten/src/ATen/core/dispatch/Dispatcher.h) 根据 operator schema 和这些 key 选择实际 kernel；[`native_functions.yaml`](../../aten/src/ATen/native/native_functions.yaml) 与 `torchgen` 则负责从算子声明生成 API、schema 注册和 dispatch glue；最后才落到 `native` 或后端目录里的真正实现。把这一条链吃透之后，你再去读 `add`、`sum`、`matmul`、`copy_` 这类算子，就不会只看见一堆分散的注册宏和模板代码，而会知道它们分别处在哪一层。
 
+Dispatcher 维护了一张函数指针表，每个 dispatch key 对应一个实现。Dispatch key 可以是 backend 相关（CPU, CUDA, XLA, MPS），功能相关（Autograd, Tracing, Quantization），或模式相关（FuncTorchBatched, Python）。当你调用一个 op 时，dispatcher 根据 tensor 的 dispatch key set，按优先级选择要执行的 kernel。
+
+```cpp
+// aten/src/ATen/native/BinaryOps.cpp
+Tensor add(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  // 实际实现
+}
+
+// 通过 codegen 自动注册到 dispatcher
+TORCH_LIBRARY_IMPL(aten, CPU, m) {
+  m.impl("add.Tensor", TORCH_FN(add));
+}
+```
+
 ### 边界感
 
 最上面的 `torch/csrc` 和 Python `torch` 我在图里只做了定位，没有展开，是因为这份文档的重心仍然是 `c10 + aten`。对学习者来说，建立边界感比一开始把所有上层系统都拖进来更重要。你可以先把这张图记成一句话：`c10` 提供通用运行时抽象，`aten` 用这些抽象组织张量和算子，而更高层的 Python、autograd、frontend 系统则建立在这两层之上。只要这个边界足够清楚，后续无论你进入 autograd engine、custom op、还是 backend 实现，都会更容易判断自己当前处在哪一层。
+
+## 5. 延伸阅读
+
+如果想深入了解 PyTorch 内部架构，推荐以下资源：
+
+- [PyTorch Internals](https://blog.ezyang.com/2019/05/pytorch-internals/) - Edward Yang 的经典文章，详细讲解了 TensorImpl、Storage 和整体架构
+- [Let's talk about the PyTorch dispatcher](https://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/) - 深入讲解 dispatcher 机制，包括 dispatch key、operator registration 等
+- [PyTorch Internals - PyTorch Tensor](https://medium.com/@andreiliphd/pytorch-internals-pytorch-tensor-7068299dc798) - 另一个视角解析 TensorImpl 和 Storage 的关系
+- [PyTorch Internals - Mathematics for Machine Learning](https://ml-notes.akkefa.com/en/latest/torch/pytorch_internals.html) - 用图示方式解释 Tensor、TensorImpl、Storage 的关系
